@@ -19,10 +19,9 @@ export {
   CreateTopicOptions,
   CreateUserOptions,
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
-  DEFAULT_MAX_RECEIVE_COUNT,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   QueueInfo,
-  ReceiveMessageOptions,
+  ReceiveMessageOptions as ReceiveMessageOptions,
   ReceiveMessagesOptions,
   SendMessageOptions,
   SendMessageResult,
@@ -32,8 +31,10 @@ export {
   TopicInfoSubscription,
   TopicProtocol,
   UpdateMessageOptions,
+  queueInfoEqualCreateQueueOptions,
+  topicInfoEqualCreateTopicOptions,
 } from "./Store.js";
-export { RealTime, Time } from "./Time.js";
+export { RealTime, Time, Timeout } from "./Time.js";
 export { Trigger } from "./Trigger.js";
 export { User } from "./User.js";
 export { createId, hashPassword, parseBind, verifyPassword } from "./utils.js";

@@ -5,6 +5,7 @@ export interface Timeout {
 export interface Time {
   getCurrentTime(): Date;
   setTimeout(fn: () => void, ms: number): Timeout;
+  setTimeoutUntil(fn: () => void, untilTime: Date): unknown;
 }
 
 export class RealTime implements Time {
@@ -17,5 +18,9 @@ export class RealTime implements Time {
     return {
       clear: () => clearTimeout(t),
     };
+  }
+
+  public setTimeoutUntil(fn: () => void, untilTime: Date): Timeout {
+    return this.setTimeout(fn, untilTime.getTime() - this.getCurrentTime().getTime());
   }
 }

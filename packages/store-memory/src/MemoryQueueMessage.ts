@@ -2,7 +2,6 @@ import { createId, Message, UpdateMessageOptions } from "@nexq/core";
 
 export interface CreateMemoryQueueMessageOptions {
   id: string;
-  sequenceNumber: number;
   priority: number;
   sentTime: Date;
   attributes: Record<string, string>;

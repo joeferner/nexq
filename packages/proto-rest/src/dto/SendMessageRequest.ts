@@ -2,9 +2,9 @@ export interface SendMessageRequest {
   /**
    * The body of the queue message
    *
-   * @example "message body"
+   * @example "bWVzc2FnZSBib2R5"
    */
-  body: string;
+  bodyBase64: string;
 
   /**
    * delay before the message can be delivered

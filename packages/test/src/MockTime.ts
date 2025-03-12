@@ -1,5 +1,4 @@
-import { Time } from "@nexq/core";
-import { Timeout } from "@nexq/core/build/Time.js";
+import { Time, Timeout } from "@nexq/core";
 
 interface MockTimeout {
   timeoutTime: Date;
@@ -16,8 +15,19 @@ export class MockTime implements Time {
 
   public setTimeout(fn: () => void, ms: number): Timeout {
     const timeoutTime = new Date(this.t.getTime() + ms);
+    return this.setTimeoutUntil(fn, timeoutTime);
+  }
+
+  public setTimeoutUntil(fn: () => void, timeoutTime: Date): Timeout {
+    if (this.getCurrentTime() >= timeoutTime) {
+      fn();
+      return {
+        clear: (): void => {},
+      };
+    }
+
     const timeout: MockTimeout = {
-      timeoutTime: timeoutTime,
+      timeoutTime,
       fn,
     };
     this.timeouts.push(timeout);

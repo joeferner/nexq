@@ -17,8 +17,6 @@ export interface GetQueuesResponseQueue {
   receiveMessageWaitTimeMs?: number;
   visibilityTimeoutMs?: number;
   tags: Record<string, string>;
-  deadLetter?: {
-    queueName: string;
-    maxReceiveCount: number;
-  };
+  deadLetterQueueName?: string;
+  maxReceiveCount?: number;
 }

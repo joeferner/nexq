@@ -1,13 +1,15 @@
 import { CreateUserOptions } from "@nexq/core";
 import typia from "typia";
-import { MemoryCreateConfig } from "@nexq/store-memory";
+import { MemoryStoreCreateConfig } from "@nexq/store-memory";
 import { RestConfig } from "@nexq/proto-rest";
+import { SqlStoreCreateConfig } from "@nexq/store-sql";
 
-export type MemoryStore = { type: "memory" } & MemoryCreateConfig;
+export type MemoryStoreConfig = { type: "memory" } & MemoryStoreCreateConfig;
+export type SqlStoreConfig = { type: "sql" } & SqlStoreCreateConfig;
 
 export interface NexqConfig {
   initialUser?: CreateUserOptions;
-  store: MemoryStore;
+  store: MemoryStoreConfig | SqlStoreConfig;
   rest?: RestConfig;
 }
 

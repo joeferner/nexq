@@ -6,7 +6,6 @@ import {
   TopicInfoQueueSubscription,
   TopicProtocol,
 } from "@nexq/core";
-import * as R from "remeda";
 
 interface QueueSubscription {
   id: string;
@@ -26,6 +25,7 @@ export class MemoryTopic {
   public getInfo(): TopicInfo {
     return {
       name: this.name,
+      tags: structuredClone(this.tags),
       subscriptions: this.queueSubscriptions.map((s) => {
         return {
           protocol: TopicProtocol.Queue,
@@ -34,10 +34,6 @@ export class MemoryTopic {
         } satisfies TopicInfoQueueSubscription;
       }),
     };
-  }
-
-  public equalCreateTopicOptions(options: CreateTopicOptions): boolean {
-    return R.isDeepEqual(this.tags, options.tags);
   }
 
   public subscribeQueue(queueName: string): string {

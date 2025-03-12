@@ -42,7 +42,6 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
@@ -74,7 +73,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // change visibility timeout
-      await store.changeMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
+      await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
       await store.poll();
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
@@ -84,7 +83,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // since no one picked up the message still allow update visibility timeout
-      await store.changeMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
+      await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
       await store.poll();
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
@@ -94,9 +93,9 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       const messageAgain = await store.receiveMessage(QUEUE1_NAME);
-      assert(messageAgain);
-      const messageReceiptHandleAgain = messageAgain.receiptHandle;
-      expect(messageAgain.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(messageAgain).toBeTruthy();
+      const messageReceiptHandleAgain = messageAgain!.receiptHandle;
+      expect(messageAgain!.bodyAsString()).toBe(MESSAGE1_BODY);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // delete message
@@ -586,7 +585,6 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
@@ -709,17 +707,15 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
-      await store.shutdown();
+      await store?.shutdown();
     });
 
     test("initial user", async () => {
       await store.shutdown();
       store = await createStore({ time, initialUser: { username: "user1" } });
-      await store.start();
 
       // verify user
       const users = await store.getUsers();

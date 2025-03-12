@@ -5,7 +5,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { start } from "./nexq.js";
 import { ConfigParseError } from "./error/ConfigParseError.js";
-import * as R from "remeda";
+import * as R from "radash";
 
 async function parseCommandLineAndStart(): Promise<void> {
   const root = findRoot(fileURLToPath(import.meta.url));

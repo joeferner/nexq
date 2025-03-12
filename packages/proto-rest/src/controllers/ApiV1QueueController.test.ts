@@ -14,7 +14,7 @@ describe("ApiV1QueueController", async () => {
 
   beforeEach(async () => {
     time = new MockTime();
-    store = await MemoryStore.create({ time });
+    store = await MemoryStore.create({ time, config: {} });
     controller = new ApiV1QueueController(store);
   });
 
@@ -67,6 +67,25 @@ describe("ApiV1QueueController", async () => {
       await store.createQueue(`${QUEUE_NAME}-dlq`);
       await store.createQueue(QUEUE_NAME, { deadLetterQueueName: `${QUEUE_NAME}-dlq` });
       await expectHttpError(async () => await controller.deleteQueue(`${QUEUE_NAME}-dlq`), 400);
+    });
+  });
+
+  describe("sendMessage", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await controller.sendMessage(QUEUE_NAME, { bodyBase64: btoa("test") });
+      await assertQueueSize(store, QUEUE_NAME, 1, 0, 0);
+      const m = await store.receiveMessage(QUEUE_NAME);
+      expect(m?.bodyAsString()).toBe("test");
+    });
+
+    test("base base64 encoding", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await expectHttpError(async () => await controller.sendMessage(QUEUE_NAME, { bodyBase64: "xyz" }), 400);
+    });
+
+    test("queue not found", async () => {
+      await expectHttpError(async () => await controller.sendMessage("bad-queue-name", { bodyBase64: "" }), 404);
     });
   });
 

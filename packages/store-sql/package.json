@@ -1,5 +1,5 @@
 {
-  "name": "@nexq/store-memory",
+  "name": "@nexq/store-sql",
   "version": "1.0.0",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -14,17 +14,19 @@
   },
   "author": "Joe Ferner <joe@fernsroth.com>",
   "license": "MIT",
-  "description": "NexQ Memory Storage",
+  "description": "NexQ SQL Storage",
   "repository": {
     "url": "https://github.com/joeferner/nexq",
     "type": "git"
   },
   "dependencies": {
     "@nexq/core": "file:../core",
+    "better-sqlite3": "^11.8.1",
     "radash": "^12.1.0"
   },
   "devDependencies": {
     "@nexq/test": "file:../test",
+    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.9",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",

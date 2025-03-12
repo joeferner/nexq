@@ -4,8 +4,11 @@
 - REST publish
 - REST subscribe
 - Prometheus Server
-- create dockerfile - try GoogleContainerTools/distroless: 🥑 Language focused docker images, minus the operating system. for docker image
+- create dockerfile
 - create helm chart
 - support iso durations
 - add temporal-polyfill https://www.npmjs.com/package/temporal-polyfill#spec-compliance
 - add cli tools
+- test when a message gets moved to a dead letter queue with expires at
+- test a queue without a dead letter queue and max receive count
+- test no max receive count
