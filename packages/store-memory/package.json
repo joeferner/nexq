@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@nexq/core": "file:../core",
-    "remeda": "^2.21.1"
+    "radash": "^12.1.0"
   },
   "devDependencies": {
     "@nexq/test": "file:../test",

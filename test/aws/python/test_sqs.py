@@ -133,10 +133,6 @@ def test_sqs_receive_messages(data):
         "SentTimestamp" in message.attributes,
         "SentTimestamp",
     )
-    assert_true(
-        "SequenceNumber" in message.attributes,
-        "SequenceNumber",
-    )
     assert_equals(
         "attribute1Value", message.message_attributes["attribute1"]["StringValue"]
     )

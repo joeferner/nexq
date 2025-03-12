@@ -14,26 +14,21 @@ export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.j
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
 export { createLogger, Logger } from "./logger.js";
 export { Message } from "./Message.js";
-export {
-  CreateQueueOptions,
-  CreateTopicOptions,
-  CreateUserOptions,
-  DEFAULT_MAX_NUMBER_OF_MESSAGES,
-  DEFAULT_MAX_RECEIVE_COUNT,
-  DEFAULT_PASSWORD_HASH_ROUNDS,
-  QueueInfo,
-  ReceiveMessageOptions,
-  ReceiveMessagesOptions,
-  SendMessageOptions,
-  SendMessageResult,
-  Store,
-  TopicInfo,
-  TopicInfoQueueSubscription,
-  TopicInfoSubscription,
-  TopicProtocol,
-  UpdateMessageOptions,
-} from "./Store.js";
-export { RealTime, Time } from "./Time.js";
+export { DEFAULT_MAX_NUMBER_OF_MESSAGES, DEFAULT_PASSWORD_HASH_ROUNDS, Store } from "./Store.js";
+
+export { CreateQueueOptions } from "./dto/CreateQueueOptions.js";
+export { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
+export { CreateUserOptions } from "./dto/CreateUserOptions.js";
+export { QueueInfo, queueInfoEqualCreateQueueOptions } from "./dto/QueueInfo.js";
+export { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
+export { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
+export { SendMessageOptions } from "./dto/SendMessageOptions.js";
+export { SendMessageResult } from "./dto/SendMessageResult.js";
+export { TopicInfo, topicInfoEqualCreateTopicOptions } from "./dto/TopicInfo.js";
+export { TopicInfoSubscription, TopicInfoQueueSubscription, TopicProtocol } from "./dto/TopicInfoSubscription.js";
+export { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";
+
+export { RealTime, Time, Timeout } from "./Time.js";
 export { Trigger } from "./Trigger.js";
 export { User } from "./User.js";
 export { createId, hashPassword, parseBind, verifyPassword } from "./utils.js";

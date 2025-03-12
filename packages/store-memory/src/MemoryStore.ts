@@ -5,20 +5,23 @@ import {
   CreateTopicOptions,
   CreateUserOptions,
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
-  DEFAULT_MAX_RECEIVE_COUNT,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
   Message,
   QueueAlreadyExistsError,
   QueueInfo,
+  queueInfoEqualCreateQueueOptions,
   QueueNotFoundError,
+  ReceiveMessageOptions,
   ReceiveMessagesOptions,
   SendMessageOptions,
   SendMessageResult,
   Store,
   Time,
+  Timeout,
   TopicAlreadyExistsError,
   TopicInfo,
+  topicInfoEqualCreateTopicOptions,
   TopicNotFoundError,
   TopicProtocol,
   UpdateMessageOptions,
@@ -26,25 +29,32 @@ import {
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
 } from "@nexq/core";
-import * as R from "remeda";
+import * as R from "radash";
 import { MemoryQueue } from "./MemoryQueue.js";
 import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
-import { Timeout } from "@nexq/core/build/Time.js";
 
 const logger = createLogger("MemoryStore");
 
-export interface MemoryCreateConfig {
+/**
+ * configure expected in nexq.yaml file
+ */
+export interface MemoryStoreCreateConfig {
   pollInterval?: number;
 }
 
-export interface MemoryCreateOptions extends MemoryCreateConfig {
+/**
+ * configuring expected when creating a MemoryStore
+ */
+export interface MemoryStoreCreateOptions {
   time: Time;
   passwordHashRounds?: number;
   initialUser?: CreateUserOptions;
+  config: MemoryStoreCreateConfig;
 }
 
-export class MemoryStore extends Store {
+export class MemoryStore implements Store {
+  private readonly time: Time;
   private readonly users: MemoryUser[] = [];
   private readonly queues: Record<string, MemoryQueue> = {};
   private readonly topics: Record<string, MemoryTopic> = {};
@@ -52,23 +62,18 @@ export class MemoryStore extends Store {
   private readonly pollInterval: number;
   private pollHandle?: Timeout;
 
-  private constructor(options: MemoryCreateOptions) {
-    super(options.time);
+  private constructor(options: MemoryStoreCreateOptions) {
+    this.time = options.time;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
-    this.pollInterval = options.pollInterval ?? 1000;
+    this.pollInterval = options.config.pollInterval ?? 1000;
   }
 
-  public static async create(options: MemoryCreateOptions): Promise<MemoryStore> {
+  public static async create(options: MemoryStoreCreateOptions): Promise<MemoryStore> {
     const store = new MemoryStore(options);
     if (options.initialUser) {
       await store.createUser(options.initialUser);
     }
     return store;
-  }
-
-  public async start(): Promise<void> {
-    logger.info("started");
-    await this.poll();
   }
 
   public async shutdown(): Promise<void> {
@@ -79,15 +84,10 @@ export class MemoryStore extends Store {
     logger.info("shutdown");
   }
 
-  public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<string> {
-    const requiredOptions: CreateQueueOptions = { ...options };
-    if (requiredOptions.maxReceiveCount === undefined) {
-      requiredOptions.maxReceiveCount = DEFAULT_MAX_RECEIVE_COUNT;
-    }
-
+  public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
     const existingQueue = this.queues[queueName];
     if (existingQueue) {
-      if (!existingQueue.equalCreateQueueOptions(requiredOptions)) {
+      if (!queueInfoEqualCreateQueueOptions(existingQueue.getInfo(), options ?? {})) {
         throw new QueueAlreadyExistsError(queueName);
       }
     }
@@ -98,16 +98,22 @@ export class MemoryStore extends Store {
       }
     }
 
-    const queue = new MemoryQueue({ name: queueName, time: this._time, ...requiredOptions });
+    const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
     this.queues[queueName] = queue;
     logger.info(`created new queue "${queueName}"`);
-
-    return queue.id;
   }
 
   public async sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult> {
     const queue = this.getQueueRequired(queueName);
     return queue.sendMessage(body, options);
+  }
+
+  public async receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<Message | undefined> {
+    const messages = await this.receiveMessages(queueName, { ...options, maxNumberOfMessages: 1 });
+    if (messages.length > 1) {
+      throw new Error(`expected 0 or 1 but found ${messages.length} when receiving messages`);
+    }
+    return messages[0];
   }
 
   public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<Message[]> {
@@ -121,12 +127,12 @@ export class MemoryStore extends Store {
 
   public async poll(): Promise<void> {
     try {
-      const now = this._time.getCurrentTime();
+      const now = this.time.getCurrentTime();
       this.removeExpiredQueues(now);
       this.pollQueues(now);
     } finally {
       if (!this.pollHandle && this.pollInterval > 0) {
-        this.pollHandle = this._time.setTimeout(() => {
+        this.pollHandle = this.time.setTimeout(() => {
           this.pollHandle = undefined;
           void this.poll();
         }, this.pollInterval);
@@ -153,6 +159,7 @@ export class MemoryStore extends Store {
           deadLetterQueue.sendMessage(expiredMessage.body, {
             priority: expiredMessage.priority,
             attributes: expiredMessage.attributes,
+            lastNakReason: expiredMessage.lastNakReason,
           });
         }
       } else {
@@ -165,14 +172,14 @@ export class MemoryStore extends Store {
     }
   }
 
-  public async changeMessageVisibilityByReceiptHandle(
+  public async updateMessageVisibilityByReceiptHandle(
     queueName: string,
     receiptHandle: string,
     timeMs: number
   ): Promise<void> {
-    const takenUntil = new Date(this._time.getCurrentTime().getTime() + timeMs);
+    const expiresAt = new Date(this.time.getCurrentTime().getTime() + timeMs);
     const queue = this.getQueueRequired(queueName);
-    queue.updateMessageVisibilityByReceiptHandle(receiptHandle, takenUntil);
+    queue.updateMessageVisibilityByReceiptHandle(receiptHandle, expiresAt);
   }
 
   public async deleteMessageByReceiptHandle(queueName: string, receiptHandle: string): Promise<void> {
@@ -186,13 +193,9 @@ export class MemoryStore extends Store {
   }
 
   public async getQueueInfos(): Promise<QueueInfo[]> {
-    return R.sort(
+    return R.alphabetical(
       Object.values(this.queues).map((q) => q.getInfo()),
-      (a, b) => {
-        const aName = a.name.toLocaleLowerCase();
-        const bName = b.name.toLocaleLowerCase();
-        return aName.localeCompare(bName);
-      }
+      (q) => q.name.toLocaleLowerCase()
     );
   }
 
@@ -222,9 +225,9 @@ export class MemoryStore extends Store {
     queue.updateMessage(messageId, receiptHandle, updateMessageOptions);
   }
 
-  public async nakMessage(queueName: string, messageId: string, receiptHandle: string): Promise<void> {
+  public async nakMessage(queueName: string, messageId: string, receiptHandle: string, reason?: string): Promise<void> {
     const queue = this.getQueueRequired(queueName);
-    queue.nakMessage(messageId, receiptHandle);
+    queue.nakMessage(messageId, receiptHandle, reason);
   }
 
   public async deleteMessage(queueName: string, messageId: string, receiptHandle?: string): Promise<void> {
@@ -256,8 +259,8 @@ export class MemoryStore extends Store {
     }
 
     if (options.accessKeyId) {
-      const existingUserWithAccessKey = this.users.find((u) => u.accessKeyId === options.accessKeyId);
-      if (existingUserWithAccessKey) {
+      const existingUserWithAccessKeyId = this.users.find((u) => u.accessKeyId === options.accessKeyId);
+      if (existingUserWithAccessKeyId) {
         throw new UserAccessKeyIdAlreadyExistsError(options.accessKeyId);
       }
     }
@@ -285,21 +288,22 @@ export class MemoryStore extends Store {
 
     const existingTopic = this.topics[topicName];
     if (existingTopic) {
-      if (!existingTopic.equalCreateTopicOptions(requiredOptions)) {
+      if (!topicInfoEqualCreateTopicOptions(existingTopic.getInfo(), requiredOptions)) {
         throw new TopicAlreadyExistsError(topicName);
       }
     }
     this.topics[topicName] = new MemoryTopic(topicName, options ?? {});
   }
 
+  public async getTopicInfo(topicName: string): Promise<TopicInfo> {
+    const topic = this.getTopicRequired(topicName);
+    return topic.getInfo();
+  }
+
   public async getTopicInfos(): Promise<TopicInfo[]> {
-    return R.sort(
+    return R.alphabetical(
       Object.values(this.topics).map((q) => q.getInfo()),
-      (a, b) => {
-        const aName = a.name.toLocaleLowerCase();
-        const bName = b.name.toLocaleLowerCase();
-        return aName.localeCompare(bName);
-      }
+      (t) => t.name.toLocaleLowerCase()
     );
   }
 
@@ -329,10 +333,7 @@ export class MemoryStore extends Store {
     for (const queue of queues) {
       queue.sendMessage(body, options);
     }
-    return {
-      id,
-      sequenceNumber: 0,
-    };
+    return { id };
   }
 
   public async deleteTopic(topicName: string): Promise<void> {

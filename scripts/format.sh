@@ -8,7 +8,7 @@ cd "${SCRIPT_DIR}/.."
 source ./scripts/_utils.sh
 
 cd "${SCRIPT_DIR}/../packages"
-for d in core test store-memory proto-rest app; do
+for d in core test store-memory store-sql proto-rest app; do
   pushd "${d}" > /dev/null
   banner "formatting ${d}..."
   if [ ! -d node_modules ]; then

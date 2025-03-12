@@ -2,12 +2,13 @@ import { createId, Message, UpdateMessageOptions } from "@nexq/core";
 
 export interface CreateMemoryQueueMessageOptions {
   id: string;
-  sequenceNumber: number;
   priority: number;
   sentTime: Date;
   attributes: Record<string, string>;
   body: Buffer;
   delayUntil: Date | undefined;
+  lastNakReason?: string;
+  retainUntil: Date | undefined;
 }
 
 export class MemoryQueueMessage {
@@ -18,7 +19,11 @@ export class MemoryQueueMessage {
   /**
    * used with visibility timeout to determine how long the message is taken by the caller
    */
-  public takenUntil?: Date;
+  public expiresAt?: Date;
+  /**
+   * used with message retention time to determine when the message should be deleted
+   */
+  public retainUntil?: Date;
   private _receiveCount = 0;
   private _receiptHandle?: string;
   private _firstReceiveTime?: Date;
@@ -27,6 +32,7 @@ export class MemoryQueueMessage {
    * Time the message was originally sent
    */
   public readonly sentTime: Date;
+  public lastNakReason: string | undefined;
 
   public constructor(options: CreateMemoryQueueMessageOptions) {
     this.id = options.id;
@@ -35,6 +41,8 @@ export class MemoryQueueMessage {
     this.sentTime = options.sentTime;
     this.priority = options.priority;
     this._delayUntil = options.delayUntil;
+    this.lastNakReason = options.lastNakReason;
+    this.retainUntil = options.retainUntil;
   }
 
   public get receiptHandle(): string | undefined {
@@ -45,8 +53,8 @@ export class MemoryQueueMessage {
     return this._receiveCount;
   }
 
-  public markReceived(newTakenUntil: Date, now: Date): Message {
-    this.takenUntil = newTakenUntil;
+  public markReceived(newExpiresTime: Date, now: Date): Message {
+    this.expiresAt = newExpiresTime;
     this._receiptHandle = createId();
     if (this._firstReceiveTime === undefined) {
       this._firstReceiveTime = now;
@@ -58,13 +66,14 @@ export class MemoryQueueMessage {
       body: this.body,
       sentTime: this.sentTime,
       priority: this.priority,
+      lastNakReason: this.lastNakReason,
       attributes: this.attributes,
     });
   }
 
   public isAvailable(now: Date): boolean {
-    if (this.takenUntil !== undefined) {
-      if (this.takenUntil >= now) {
+    if (this.expiresAt !== undefined) {
+      if (this.expiresAt >= now) {
         return false;
       }
     }
@@ -101,11 +110,12 @@ export class MemoryQueueMessage {
       this.attributes = updateMessageOptions.attributes;
     }
     if (updateMessageOptions.visibilityTimeoutMs != undefined) {
-      this.takenUntil = new Date(now.getTime() + updateMessageOptions.visibilityTimeoutMs);
+      this.expiresAt = new Date(now.getTime() + updateMessageOptions.visibilityTimeoutMs);
     }
   }
 
-  public nak(now: Date): void {
-    this.takenUntil = new Date(now.getTime() - 1);
+  public nak(now: Date, reason?: string): void {
+    this.expiresAt = new Date(now.getTime() - 1);
+    this.lastNakReason = reason;
   }
 }

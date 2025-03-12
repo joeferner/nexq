@@ -1,3 +1,4 @@
+see [NexQ](README.md)
 
 # Swagger UI / OpenAPI UI
 
@@ -23,8 +24,8 @@ By default you can find the Swagger UI at http://localhost:7887/swagger-ui/
 - :white_check_mark: delete message
 - :white_check_mark: change message visibility
 - :white_check_mark: re-prioritize message
-- :white_check_mark: create topic
-- :white_check_mark: delete topic
-- :white_check_mark: list topics
-- :white_check_mark: publish
-- :white_check_mark: subscribe
+- :scroll: create topic
+- :scroll: delete topic
+- :scroll: list topics
+- :scroll: publish
+- :scroll: subscribe

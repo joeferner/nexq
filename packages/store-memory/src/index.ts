@@ -1,1 +1,1 @@
-export { MemoryCreateConfig, MemoryStore } from "./MemoryStore.js";
+export { MemoryStoreCreateConfig, MemoryStore } from "./MemoryStore.js";

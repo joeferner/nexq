@@ -2,7 +2,6 @@ import {
   createId,
   createLogger,
   CreateQueueOptions,
-  DEFAULT_MAX_RECEIVE_COUNT,
   InvalidUpdateError,
   Message,
   MessageExceededMaxMessageSizeError,
@@ -16,7 +15,7 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
-import * as R from "remeda";
+import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
 
@@ -24,7 +23,6 @@ const logger = createLogger("MemoryQueue");
 
 export class MemoryQueue {
   public readonly name: string;
-  public readonly id: string;
   public readonly created: Date;
   public readonly lastModified: Date;
   private readonly time: Time;
@@ -35,16 +33,14 @@ export class MemoryQueue {
   private readonly messageRetentionPeriodMs: number | undefined;
   private readonly expiresMs: number | undefined;
   private readonly messages: MemoryQueueMessage[] = [];
-  private readonly maxReceiveCount: number;
+  private readonly maxReceiveCount?: number;
   private readonly maxMessageSize?: number;
   private readonly tags: Record<string, string>;
   private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
   private expiresAt: Date | undefined;
-  private nextSequenceNumber = 1;
 
   public constructor(options: { name: string; time: Time } & CreateQueueOptions) {
     const now = options.time.getCurrentTime();
-    this.id = createId();
     this.name = options.name;
     this.time = options.time;
     this.created = now;
@@ -54,50 +50,21 @@ export class MemoryQueue {
     this.visibilityTimeoutMs = options.visibilityTimeoutMs;
     this.receiveMessageWaitTimeMs = options.receiveMessageWaitTimeMs;
     this.messageRetentionPeriodMs = options.messageRetentionPeriodMs;
-    this.maxReceiveCount = options.maxReceiveCount ?? DEFAULT_MAX_RECEIVE_COUNT;
+    this.maxReceiveCount = options.maxReceiveCount;
     this.maxMessageSize = options.maxMessageSize;
-    this.tags = options.tags ? R.clone(options.tags) : {};
+    this.tags = options.tags ? structuredClone(options.tags) : {};
     if (options.expiresMs !== undefined) {
       this.expiresMs = options.expiresMs;
       this.expiresAt = new Date(options.time.getCurrentTime().getTime() + options.expiresMs);
     }
   }
 
-  public equalCreateQueueOptions(options: CreateQueueOptions): boolean {
-    if (this.deadLetterQueueName !== options.deadLetterQueueName) {
-      return false;
-    }
-    if (this.delayMs !== options.delayMs) {
-      return false;
-    }
-    if (this.messageRetentionPeriodMs !== options.messageRetentionPeriodMs) {
-      return false;
-    }
-    if (this.visibilityTimeoutMs !== options.visibilityTimeoutMs) {
-      return false;
-    }
-    if (this.receiveMessageWaitTimeMs !== options.receiveMessageWaitTimeMs) {
-      return false;
-    }
-    if (this.expiresMs !== options.expiresMs) {
-      return false;
-    }
-    if (this.maxReceiveCount !== options.maxReceiveCount) {
-      return false;
-    }
-    if (this.maxMessageSize !== options.maxMessageSize) {
-      return false;
-    }
-    if (!R.isDeepEqual(this.tags, options.tags)) {
-      return false;
-    }
-    return true;
-  }
-
-  public sendMessage(body: string | Buffer, options?: SendMessageOptions): SendMessageResult {
+  public sendMessage(
+    body: string | Buffer,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): SendMessageResult {
     const now = this.time.getCurrentTime();
     const id = createId();
-    const sequenceNumber = this.getNextSequenceNumber();
     const delay = options?.delayMs ?? this.delayMs;
     const delayUntil = delay === undefined ? undefined : new Date(now.getTime() + delay);
     if (this.maxMessageSize && body.length > this.maxMessageSize) {
@@ -106,16 +73,20 @@ export class MemoryQueue {
     this.messages.push(
       new MemoryQueueMessage({
         id,
-        sequenceNumber,
         priority: options?.priority ?? 0,
         sentTime: now,
         attributes: options?.attributes ?? {},
         body: R.isString(body) ? Buffer.from(body) : body,
         delayUntil,
+        retainUntil:
+          this.messageRetentionPeriodMs === undefined
+            ? undefined
+            : new Date(now.getTime() + this.messageRetentionPeriodMs),
+        lastNakReason: options?.lastNakReason,
       })
     );
     this.trigger({ type: "new-queue-message", queueName: this.name } satisfies NewQueueMessageEvent);
-    return { id, sequenceNumber };
+    return { id };
   }
 
   private trigger(message: NewQueueMessageEvent): void {
@@ -124,10 +95,6 @@ export class MemoryQueue {
     for (const trigger of triggers) {
       trigger.trigger(message);
     }
-  }
-
-  private getNextSequenceNumber(): number {
-    return this.nextSequenceNumber++;
   }
 
   public async receiveMessages(options?: ReceiveMessagesOptions & { maxNumberOfMessages: number }): Promise<Message[]> {
@@ -148,8 +115,8 @@ export class MemoryQueue {
           continue;
         }
 
-        const newTakenUntil = new Date(now.getTime() + visibilityTimeoutMs);
-        messages.push(message.markReceived(newTakenUntil, now));
+        const newExpiresAt = new Date(now.getTime() + visibilityTimeoutMs);
+        messages.push(message.markReceived(newExpiresAt, now));
         if (messages.length === options?.maxNumberOfMessages) {
           return messages;
         }
@@ -206,13 +173,9 @@ export class MemoryQueue {
       messageRetentionPeriodMs: this.messageRetentionPeriodMs,
       receiveMessageWaitTimeMs: this.receiveMessageWaitTimeMs,
       visibilityTimeoutMs: this.visibilityTimeoutMs,
-      tags: R.clone(this.tags),
-      deadLetter: this.deadLetterQueueName
-        ? {
-            queueName: this.deadLetterQueueName,
-            maxReceiveCount: this.maxReceiveCount,
-          }
-        : undefined,
+      tags: structuredClone(this.tags),
+      deadLetterQueueName: this.deadLetterQueueName,
+      maxReceiveCount: this.maxReceiveCount,
     };
   }
 
@@ -228,16 +191,20 @@ export class MemoryQueue {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const message = this.messages[i];
 
-      if (this.messageRetentionPeriodMs !== undefined) {
-        const eol = new Date(message.sentTime.getTime() + this.messageRetentionPeriodMs);
-        if (now > eol) {
+      if (message.retainUntil) {
+        if (now > message.retainUntil) {
           logger.debug(`deleting message ${message.id}, exceeded message retention period`);
           this.messages.splice(i, 1);
           continue;
         }
       }
 
-      if (message.takenUntil && now > message.takenUntil && message.receiveCount >= this.maxReceiveCount) {
+      if (
+        message.expiresAt &&
+        this.maxReceiveCount &&
+        now > message.expiresAt &&
+        message.receiveCount >= this.maxReceiveCount
+      ) {
         expiredMessages.push(message);
         this.messages.splice(i, 1);
         continue;
@@ -246,12 +213,12 @@ export class MemoryQueue {
     return expiredMessages;
   }
 
-  public updateMessageVisibilityByReceiptHandle(receiptHandle: string, takenUntil: Date): void {
+  public updateMessageVisibilityByReceiptHandle(receiptHandle: string, expiresAt: Date): void {
     const message = this.messages.find((m) => m.receiptHandle === receiptHandle);
     if (!message) {
       throw new ReceiptHandleIsInvalidError(this.name, receiptHandle);
     }
-    message.takenUntil = takenUntil;
+    message.expiresAt = expiresAt;
   }
 
   public deleteMessageByReceiptHandle(receiptHandle: string): MemoryQueueMessage[] {
@@ -290,7 +257,7 @@ export class MemoryQueue {
     message.update(now, updateMessageOptions);
   }
 
-  public nakMessage(messageId: string, receiptHandle: string): void {
+  public nakMessage(messageId: string, receiptHandle: string, reason?: string): void {
     const now = this.time.getCurrentTime();
     const message = this.messages.find((m) => m.id === messageId);
     if (!message) {
@@ -299,7 +266,7 @@ export class MemoryQueue {
     if (message.receiptHandle !== receiptHandle) {
       throw new ReceiptHandleIsInvalidError(this.name, receiptHandle);
     }
-    message.nak(now);
+    message.nak(now, reason);
   }
 
   public deleteMessage(id: string, receiptHandle?: string): void {

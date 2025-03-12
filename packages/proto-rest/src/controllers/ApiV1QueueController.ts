@@ -11,15 +11,16 @@ import {
 import createError from "http-errors";
 import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse } from "tsoa";
 import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
-import { CreateQueueResponse } from "../dto/CreateQueueResponse.js";
 import { GetQueuesResponse, GetQueuesResponseQueue } from "../dto/GetQueuesResponse.js";
+import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
+import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
 import { DurationParseError, parseOptionalBytesSize, parseOptionalDurationIntoMs } from "../utils.js";
-import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
-import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
+import { SendMessageResponse } from "../dto/SendMessageResponse.js";
 
 const logger = createLogger("Rest:ApiV1QueueController");
+const BASE64_REGEX = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
 
 export interface User {
   userId: number;
@@ -38,13 +39,13 @@ export class ApiV1QueueController extends Controller {
    * @param request the options for the new queue
    */
   @Post("")
-  @SuccessResponse("200", "Queue Created")
+  @SuccessResponse("204", "Queue Created")
   @Response<void>(400, "bad request")
   @Response<void>(409, "queue already exists with different parameters")
   @Response<void>(404, "dead letter queue not found")
-  public async createQueue(@Body() request: CreateQueueRequest): Promise<CreateQueueResponse> {
+  public async createQueue(@Body() request: CreateQueueRequest): Promise<void> {
     try {
-      const id = await this.store.createQueue(request.name, {
+      await this.store.createQueue(request.name, {
         delayMs: parseOptionalDurationIntoMs(request.delay),
         expiresMs: parseOptionalDurationIntoMs(request.expires),
         maxMessageSize: parseOptionalBytesSize(request.maximumMessageSize),
@@ -54,7 +55,6 @@ export class ApiV1QueueController extends Controller {
         deadLetterQueueName: request.deadLetter?.queueName,
         maxReceiveCount: request.deadLetter?.maxReceiveCount,
       });
-      return { id };
     } catch (err) {
       if (err instanceof DurationParseError) {
         throw createError.BadRequest(err.message);
@@ -95,12 +95,8 @@ export class ApiV1QueueController extends Controller {
             receiveMessageWaitTimeMs: q.receiveMessageWaitTimeMs,
             visibilityTimeoutMs: q.visibilityTimeoutMs,
             tags: q.tags,
-            deadLetter: q.deadLetter
-              ? {
-                  queueName: q.deadLetter.queueName,
-                  maxReceiveCount: q.deadLetter.maxReceiveCount,
-                }
-              : undefined,
+            deadLetterQueueName: q.deadLetterQueueName,
+            maxReceiveCount: q.maxReceiveCount,
           } satisfies GetQueuesResponseQueue;
         }),
       };
@@ -144,14 +140,20 @@ export class ApiV1QueueController extends Controller {
    */
   @Post("{queueName}/message")
   @SuccessResponse("200", "Message sent")
+  @Response<void>(400, "invalid base64")
   @Response<void>(404, "queue not found")
-  public async sendMessage(@Path() queueName: string, @Body() request: SendMessageRequest): Promise<void> {
+  public async sendMessage(
+    @Path() queueName: string,
+    @Body() request: SendMessageRequest
+  ): Promise<SendMessageResponse> {
     try {
-      await this.store.sendMessage(queueName, request.body, {
+      const body = this.bufferFromBase64(request.bodyBase64);
+      const m = await this.store.sendMessage(queueName, body, {
         attributes: request.attributes,
         delayMs: parseOptionalDurationIntoMs(request.delay),
         priority: request.priority,
       });
+      return { id: m.id };
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
         throw createError.NotFound("queue not found");
@@ -159,6 +161,13 @@ export class ApiV1QueueController extends Controller {
       logger.error(`failed to send message`, err);
       throw err;
     }
+  }
+
+  private bufferFromBase64(base64Str: string): Buffer {
+    if (!BASE64_REGEX.test(base64Str)) {
+      throw new createError.BadRequest("invalid base64");
+    }
+    return Buffer.from(base64Str, "base64");
   }
 
   /**
@@ -245,6 +254,7 @@ export class ApiV1QueueController extends Controller {
    * @param queueName the name of the queue to send to
    * @param messageId the id of the message to delete
    * @param receiptHandle optional receipt handle
+   * @param reason optional reason for nak'ing the message
    * @example queueName "queue1"
    * @example messageId     "1effd43f-efc0-64a0-abb1-a262ad6a08d6"
    * @example receiptHandle "f9c729c6-cb6d-4d1a-b3eb-9d0254eb2e27"
@@ -256,10 +266,11 @@ export class ApiV1QueueController extends Controller {
   public async nakMessage(
     @Path() queueName: string,
     @Path() messageId: string,
-    @Query() receiptHandle: string
+    @Query() receiptHandle: string,
+    @Query() reason?: string
   ): Promise<void> {
     try {
-      await this.store.nakMessage(queueName, messageId, receiptHandle);
+      await this.store.nakMessage(queueName, messageId, receiptHandle, reason);
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
         throw createError.NotFound("queue not found");

@@ -116,7 +116,6 @@ describe('sqs', () => {
         expect(message.Attributes?.ApproximateFirstReceiveTimestamp).toBeTruthy();
         expect(message.Attributes?.ApproximateReceiveCount).toBe('1');
         expect(message.Attributes?.SentTimestamp).toBeTruthy();
-        expect(message.Attributes?.SequenceNumber).toBeTruthy();
         expect(message.MessageAttributes?.['attribute1']?.StringValue).toBe('attribute1Value');
 
         await sqsClient.send(new ChangeMessageVisibilityCommand({

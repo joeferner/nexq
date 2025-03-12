@@ -6,6 +6,7 @@ export interface CreateMessageOptions {
   body: Buffer;
   sentTime: Date;
   priority: number;
+  lastNakReason: string | undefined;
   attributes: Record<string, string>;
 }
 
@@ -15,6 +16,7 @@ export class Message {
   public readonly body: Buffer;
   public readonly priority: number;
   public readonly attributes: Record<string, string>;
+  public readonly lastNakReason: string | undefined;
 
   /**
    * Time the message was originally sent
@@ -27,6 +29,7 @@ export class Message {
     this.body = options.body;
     this.sentTime = options.sentTime;
     this.priority = options.priority;
+    this.lastNakReason = options.lastNakReason;
     this.attributes = options.attributes;
   }
 

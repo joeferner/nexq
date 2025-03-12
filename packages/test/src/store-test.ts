@@ -1,4 +1,12 @@
-import { CreateQueueOptions, CreateUserOptions, Store, Time, TopicProtocol, verifyPassword } from "@nexq/core";
+import {
+  CreateQueueOptions,
+  CreateUserOptions,
+  QueueInfo,
+  Store,
+  Time,
+  TopicProtocol,
+  verifyPassword,
+} from "@nexq/core";
 import { afterEach, assert, beforeEach, describe, expect, test } from "vitest";
 import { MockTime } from "./MockTime.js";
 
@@ -42,7 +50,6 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
@@ -74,7 +81,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // change visibility timeout
-      await store.changeMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
+      await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
       await store.poll();
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
@@ -84,7 +91,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // since no one picked up the message still allow update visibility timeout
-      await store.changeMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
+      await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
       await store.poll();
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
@@ -94,9 +101,9 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       const messageAgain = await store.receiveMessage(QUEUE1_NAME);
-      assert(messageAgain);
-      const messageReceiptHandleAgain = messageAgain.receiptHandle;
-      expect(messageAgain.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(messageAgain).toBeTruthy();
+      const messageReceiptHandleAgain = messageAgain!.receiptHandle;
+      expect(messageAgain!.bodyAsString()).toBe(MESSAGE1_BODY);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // delete message
@@ -280,7 +287,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(messageTry2).toBeTruthy();
     });
 
-    test("mex message size", async () => {
+    test("max message size", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME, { maxMessageSize: 10 });
 
@@ -295,12 +302,65 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
     });
 
-    test("message retention period, no dead letter queue", async () => {
+    test("max receive count, no dead letter", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 1 });
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.poll();
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+
+      // receive once
+      await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1000 });
+      await time.advance(1001);
+      await store.poll();
+
+      // message should now be removed
+      await assertQueueEmpty(store, QUEUE1_NAME);
+    });
+
+    test("no max receive count", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.poll();
+
+      for (let i = 0; i < 10; i++) {
+        await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+        await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 10 });
+        await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
+        await time.advance(11);
+        await store.poll();
+      }
+    });
+
+    test("message retention period, max receive count", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { messageRetentionPeriodMs: 5000, maxReceiveCount: 1 });
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.poll();
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+
+      // let the message expire
+      await time.advance(6000);
+      await store.poll();
+
+      // message should now be removed
+      await assertQueueEmpty(store, QUEUE1_NAME);
+    });
+
+    test("message retention period, no max receive count", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME, { messageRetentionPeriodMs: 5000 });
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.poll();
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // let the message expire
@@ -388,6 +448,48 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
+    test("nak message dead letter queue", async () => {
+      // create the queue
+      await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
+      await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 1, deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME });
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+
+      // validate nak message
+      const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
+      await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle, "test message");
+      await store.poll();
+      await assertQueueEmpty(store, QUEUE1_NAME);
+
+      // validate nak reason
+      const deadLetterMessage1 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
+      expect(deadLetterMessage1!.lastNakReason).toBe("test message");
+    });
+
+    test("dead letter queue with messageRetentionPeriodMs", async () => {
+      // create the queue
+      await store.createQueue(DEAD_LETTER_QUEUE1_NAME, { messageRetentionPeriodMs: 1000 });
+      await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 1, deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME });
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+
+      // validate nak message
+      const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
+      await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle);
+      await store.poll();
+      await assertQueueEmpty(store, QUEUE1_NAME);
+
+      // validate message on dead letter
+      await assertQueueSize(store, DEAD_LETTER_QUEUE1_NAME, 1, 0, 0);
+
+      // validate message is deleted after message retention period
+      await time.advance(1001);
+      await store.poll();
+      await assertQueueEmpty(store, QUEUE1_NAME);
+    });
+
     test("delete message by id", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);
@@ -397,7 +499,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // validate bad message id
       await expect(async () => store.deleteMessage(QUEUE1_NAME, "bad-message-id")).rejects.toThrowError(
-        /is invalid for/
+        'message id "bad-message-id" is invalid for queue "queue1"'
       );
 
       // update message
@@ -416,7 +518,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate bad receipt handle
       await expect(async () =>
         store.deleteMessage(QUEUE1_NAME, message1.id, "bad-receipt-handle")
-      ).rejects.toThrowError(/receipt handle .* is invalid/);
+      ).rejects.toThrowError(`receipt handle "bad-receipt-handle" is invalid for queue "${QUEUE1_NAME}"`);
 
       // update message
       await store.deleteMessage(QUEUE1_NAME, message1.id, recvMessage1?.receiptHandle);
@@ -448,7 +550,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, DEAD_LETTER_QUEUE1_NAME, 1, 0, 0);
       const deadLetterMessage = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
       expect(deadLetterMessage?.priority).toBe(5);
-      expect(deadLetterMessage?.attributes).toBe(attributes);
+      expect(deadLetterMessage?.attributes).toEqual(attributes);
     });
 
     test("create queue missing dead letter queue", async () => {
@@ -477,6 +579,28 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // create the queue
       await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
       await store.createQueue(QUEUE1_NAME, createOptions);
+      const info = await store.getQueueInfo(QUEUE1_NAME);
+      expect(info).toEqual({
+        name: QUEUE1_NAME,
+        numberOfMessages: 0,
+        numberOfMessagesDelayed: 0,
+        numberOfMessagesNotVisible: 0,
+        created: time.getCurrentTime(),
+        lastModified: time.getCurrentTime(),
+        delayMs: 1,
+        expiresMs: 5,
+        expiresAt: new Date(time.getCurrentTime().getTime() + 5),
+        maxMessageSize: 7,
+        messageRetentionPeriodMs: 2,
+        receiveMessageWaitTimeMs: 4,
+        visibilityTimeoutMs: 3,
+        tags: {
+          tag1: "tag1Value",
+          tag2: "tag2Value",
+        },
+        deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
+        maxReceiveCount: 6,
+      } satisfies QueueInfo);
 
       // create queue again with same parameters
       await store.createQueue(QUEUE1_NAME, createOptions);
@@ -526,7 +650,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // verify cannot delete dead letter queue associated with queue
       await expect(async () => await store.deleteQueue(DEAD_LETTER_QUEUE1_NAME)).rejects.toThrowError(
-        /cannot delete dead letter queue/
+        `cannot delete dead letter queue "${DEAD_LETTER_QUEUE1_NAME}", associated with queue "${QUEUE1_NAME}"`
       );
     });
 
@@ -534,12 +658,28 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // create the queue
       await store.createQueue(QUEUE1_NAME);
       await store.createQueue(QUEUE2_NAME);
+      await store.sendMessage(QUEUE2_NAME, "test1");
+      await store.sendMessage(QUEUE2_NAME, "test2");
+      await store.sendMessage(QUEUE2_NAME, "test3");
+      await store.sendMessage(QUEUE2_NAME, "test4");
+      await store.sendMessage(QUEUE2_NAME, "test5");
+      await store.sendMessage(QUEUE2_NAME, "test-delayed", { delayMs: 100 });
+      await store.receiveMessage(QUEUE2_NAME); // test1
+      await store.receiveMessage(QUEUE2_NAME); // test2
 
       // get queue infos
       const queueInfos = await store.getQueueInfos();
       expect(queueInfos.length).toBe(2);
+
       expect(queueInfos[0].name).toBe(QUEUE1_NAME);
+      expect(queueInfos[0].numberOfMessages).toBe(0);
+      expect(queueInfos[0].numberOfMessagesNotVisible).toBe(0);
+      expect(queueInfos[0].numberOfMessagesDelayed).toBe(0);
+
       expect(queueInfos[1].name).toBe(QUEUE2_NAME);
+      expect(queueInfos[1].numberOfMessages).toBe(3); // test3, test4, test5
+      expect(queueInfos[1].numberOfMessagesNotVisible).toBe(2); // test1, test2
+      expect(queueInfos[1].numberOfMessagesDelayed).toBe(1); // test-delayed
     });
 
     test("purge queue", async () => {
@@ -586,7 +726,6 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
@@ -709,17 +848,15 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     beforeEach(async () => {
       time = new MockTime();
       store = await createStore({ time });
-      await store.start();
     });
 
     afterEach(async () => {
-      await store.shutdown();
+      await store?.shutdown();
     });
 
     test("initial user", async () => {
       await store.shutdown();
       store = await createStore({ time, initialUser: { username: "user1" } });
-      await store.start();
 
       // verify user
       const users = await store.getUsers();
