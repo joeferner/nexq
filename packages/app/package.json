@@ -1,0 +1,41 @@
+{
+  "name": "@nexq/store-memory",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write",
+    "prepare": "ts-patch install",
+    "start": "node build/main.js"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "@nexq/core": "file:../core",
+    "@nexq/proto-rest": "file:../proto-rest",
+    "@nexq/store-memory": "file:../store-memory",
+    "cmd-ts": "^0.13.0",
+    "find-root": "^1.1.0",
+    "remeda": "^2.21.1",
+    "typia": "^8.0.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/find-root": "^1.1.4",
+    "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "ts-patch": "^3.3.0",
+    "typescript": "~5.8.2",
+    "typescript-eslint": "^8.26.0"
+  }
+}

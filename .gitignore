@@ -1,0 +1,5 @@
+build/
+target/
+node_modules/
+certs/
+__pycache__/

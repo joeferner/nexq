@@ -1,0 +1,21 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": [
+    "--add-host=nexq.local:127.0.0.1",
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "streetsidesoftware.code-spell-checker",
+        "ms-python.python",
+        "ms-python.black-formatter",
+        "bierner.markdown-emoji",
+        "qwtel.sqlite-viewer",
+        "smulyono.reveal"
+      ]
+    }
+  }
+}

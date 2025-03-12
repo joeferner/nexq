@@ -1,0 +1,31 @@
+{
+  "name": "@nexq/test",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ test package",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "@nexq/core": "file:../core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.7"
+  }
+}

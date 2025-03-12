@@ -1,0 +1,35 @@
+{
+  "name": "@nexq/store-memory",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ Memory Storage",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "@nexq/core": "file:../core",
+    "remeda": "^2.21.1"
+  },
+  "devDependencies": {
+    "@nexq/test": "file:../test",
+    "@types/node": "^22.13.9",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.7"
+  }
+}

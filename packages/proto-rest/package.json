@@ -1,0 +1,46 @@
+{
+  "name": "@nexq/proto-rest",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "npm run generate:routes && tsc",
+    "build:watch": "npm run generate:routes && tsc --watch",
+    "generate:routes": "tsoa spec-and-routes",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ REST Protocol",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "@nexq/core": "file:../core",
+    "express": "^4.21.2",
+    "express-basic-auth": "^1.2.1",
+    "find-root": "^1.1.0",
+    "http-errors": "^2.0.0",
+    "swagger-ui-express": "^5.0.1",
+    "tsoa": "^6.6.0"
+  },
+  "devDependencies": {
+    "@nexq/store-memory": "file:../store-memory",
+    "@nexq/test": "file:../test",
+    "@types/express": "^5.0.0",
+    "@types/find-root": "^1.1.4",
+    "@types/http-errors": "^2.0.4",
+    "@types/node": "^22.13.9",
+    "@types/swagger-ui-express": "^4.1.8",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.8"
+  }
+}
