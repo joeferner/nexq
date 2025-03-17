@@ -1,3 +1,5 @@
+/* eslint no-console: "off" */
+
 import { command, run, string, option } from "cmd-ts";
 import findRoot from "find-root";
 import { fileURLToPath } from "node:url";
