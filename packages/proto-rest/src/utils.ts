@@ -1,5 +1,6 @@
 import { HttpError } from "http-errors";
 import createError from "http-errors";
+import { Temporal } from "temporal-polyfill";
 
 const BASE64_REGEX = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
 
@@ -16,6 +17,14 @@ export function parseOptionalDurationIntoMs(str: string | undefined): number | u
   if (str === undefined) {
     return undefined;
   }
+
+  try {
+    const duration = Temporal.Duration.from(str);
+    return duration.total({ unit: "millisecond" });
+  } catch (_err) {
+    // not a ISO duration
+  }
+
   str = str.replace(/,/g, "").trim();
 
   let multiplier: number | undefined = undefined;

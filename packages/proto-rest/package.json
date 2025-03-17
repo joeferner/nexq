@@ -27,6 +27,7 @@
     "find-root": "^1.1.0",
     "http-errors": "^2.0.0",
     "swagger-ui-express": "^5.0.1",
+    "temporal-polyfill": "^0.2.5",
     "tsoa": "^6.6.0"
   },
   "devDependencies": {

@@ -13,6 +13,12 @@ describe("parseOptionalDurationIntoMs", () => {
     expect(parseOptionalDurationIntoMs("4,000s")).toBe(4000 * 1000);
   });
 
+  test("good ISO duration", () => {
+    expect(parseOptionalDurationIntoMs("PT5S")).toBe(5 * 1000);
+    expect(parseOptionalDurationIntoMs("PT0.056S")).toBe(56);
+    expect(parseOptionalDurationIntoMs("P2D")).toBe(2 * 24 * 60 * 60 * 1000);
+  });
+
   test("bad", () => {
     expect(() => parseOptionalDurationIntoMs("2z")).toThrowError(/could not parse.*/);
     expect(() => parseOptionalDurationIntoMs("")).toThrowError(/could not parse.*/);
