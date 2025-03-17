@@ -504,8 +504,6 @@ export abstract class Sql<TDatabase> {
       whereParams.push(options.receiptHandle);
     }
 
-    console.log(sql);
-    console.log([...setParams, ...whereParams]);
     return this.runRawSql(db, sql, [...setParams, ...whereParams]);
   }
 }

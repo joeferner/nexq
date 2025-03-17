@@ -1,4 +1,4 @@
-import { RealTime, Store, Time } from "@nexq/core";
+import { Logger, RealTime, Store, Time } from "@nexq/core";
 import { Rest } from "@nexq/proto-rest";
 import { MemoryStore } from "@nexq/store-memory";
 import { SqlStore } from "@nexq/store-sql";
@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
+import { DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
 
 export interface StartOptions {
   configFilename: string;
@@ -13,6 +14,7 @@ export interface StartOptions {
 
 export async function start(options: StartOptions): Promise<void> {
   const config = await loadConfig(options.configFilename);
+  Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);
   const time = new RealTime();
   const store = await createStore(config, time);
 

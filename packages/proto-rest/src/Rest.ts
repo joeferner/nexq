@@ -14,12 +14,12 @@ import https, { ServerOptions as HttpsServerOptions } from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as swaggerUI from "swagger-ui-express";
+import { Swagger } from "tsoa";
 import { applyAuthToExpress, applyAuthToSwaggerJson } from "./auth-utils.js";
 import { RestConfig } from "./config.js";
 import { iocContainer } from "./ioc.js";
 import { RegisterRoutes } from "./routes/routes.js";
 import { isHttpError } from "./utils.js";
-import { Swagger } from "tsoa";
 
 const logger = createLogger("Rest");
 
@@ -53,7 +53,19 @@ export class Rest {
       logger.debug(`request ${req.method}: ${req.path}`);
       next();
     });
-    this.app.use(["/openapi", "/docs", "/swagger"], swaggerUI.serve, swaggerUI.setup(swaggerJson));
+    this.app.use("/swagger.json", (_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.send(swaggerJson);
+    });
+    this.app.use(
+      ["/openapi", "/docs", "/swagger"],
+      swaggerUI.serve,
+      swaggerUI.setup(null, {
+        swaggerOptions: {
+          url: "/swagger.json",
+        },
+      })
+    );
 
     for (const auth of config.auth ?? []) {
       applyAuthToExpress(this.app, auth, store);

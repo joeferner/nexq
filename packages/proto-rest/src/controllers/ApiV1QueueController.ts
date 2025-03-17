@@ -9,24 +9,31 @@ import {
   Store,
 } from "@nexq/core";
 import createError from "http-errors";
-import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse } from "tsoa";
+import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse, Tags } from "tsoa";
 import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
-import { GetQueuesResponse, GetQueuesResponseQueue } from "../dto/GetQueuesResponse.js";
+import { GetQueueResponse, queueInfoToGetQueueResponse } from "../dto/GetQueueResponse.js";
+import { GetQueuesResponse } from "../dto/GetQueuesResponse.js";
 import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
 import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
-import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
-import { DurationParseError, parseOptionalBytesSize, parseOptionalDurationIntoMs } from "../utils.js";
 import { SendMessageResponse } from "../dto/SendMessageResponse.js";
+import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
+import {
+  bufferFromBase64,
+  DurationParseError,
+  isHttpError,
+  parseOptionalBytesSize,
+  parseOptionalDurationIntoMs,
+} from "../utils.js";
 
 const logger = createLogger("Rest:ApiV1QueueController");
-const BASE64_REGEX = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
 
 export interface User {
   userId: number;
   name?: string;
 }
 
+@Tags("queue")
 @Route("api/v1/queue")
 export class ApiV1QueueController extends Controller {
   public constructor(private readonly store: Store) {
@@ -54,6 +61,7 @@ export class ApiV1QueueController extends Controller {
         visibilityTimeoutMs: parseOptionalDurationIntoMs(request.visibilityTimeout),
         deadLetterQueueName: request.deadLetter?.queueName,
         maxReceiveCount: request.deadLetter?.maxReceiveCount,
+        tags: request.tags,
       });
     } catch (err) {
       if (err instanceof DurationParseError) {
@@ -79,29 +87,31 @@ export class ApiV1QueueController extends Controller {
     try {
       const queues = await this.store.getQueueInfos();
       return {
-        queues: queues.map((q) => {
-          return {
-            name: q.name,
-            numberOfMessage: q.numberOfMessages,
-            numberOfMessagesNotVisible: q.numberOfMessagesNotVisible,
-            numberOfMessagesDelayed: q.numberOfMessagesDelayed,
-            created: q.created,
-            lastModified: q.lastModified,
-            delayMs: q.delayMs,
-            expiresMs: q.expiresMs,
-            expiresAt: q.expiresAt,
-            maxMessageSize: q.maxMessageSize,
-            messageRetentionPeriodMs: q.messageRetentionPeriodMs,
-            receiveMessageWaitTimeMs: q.receiveMessageWaitTimeMs,
-            visibilityTimeoutMs: q.visibilityTimeoutMs,
-            tags: q.tags,
-            deadLetterQueueName: q.deadLetterQueueName,
-            maxReceiveCount: q.maxReceiveCount,
-          } satisfies GetQueuesResponseQueue;
-        }),
+        queues: queues.map(queueInfoToGetQueueResponse),
       };
     } catch (err) {
       logger.error(`failed to get queues`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * get queue info
+   *
+   * @param queueName the name of the queue to get info on
+   * @example queueName "queue1"
+   */
+  @Get("{queueName}")
+  @SuccessResponse("200", "Queue info")
+  @Response<void>(404, "queue not found")
+  public async getQueue(@Path() queueName: string): Promise<GetQueueResponse> {
+    try {
+      return queueInfoToGetQueueResponse(await this.store.getQueueInfo(queueName));
+    } catch (err) {
+      if (err instanceof QueueNotFoundError) {
+        throw createError.NotFound("queue not found");
+      }
+      logger.error(`failed to get queue info`, err);
       throw err;
     }
   }
@@ -140,14 +150,21 @@ export class ApiV1QueueController extends Controller {
    */
   @Post("{queueName}/message")
   @SuccessResponse("200", "Message sent")
-  @Response<void>(400, "invalid base64")
+  @Response<void>(400, "invalid body")
   @Response<void>(404, "queue not found")
   public async sendMessage(
     @Path() queueName: string,
     @Body() request: SendMessageRequest
   ): Promise<SendMessageResponse> {
     try {
-      const body = this.bufferFromBase64(request.bodyBase64);
+      if (request.body === undefined && request.bodyBase64 === undefined) {
+        throw createError.BadRequest("either body or bodyBase64 must be specified");
+      }
+      if (request.body !== undefined && request.bodyBase64 !== undefined) {
+        throw createError.BadRequest("both body and bodyBase64 cannot both be specified");
+      }
+      const body = request.body ?? bufferFromBase64(request.bodyBase64 ?? "");
+
       const m = await this.store.sendMessage(queueName, body, {
         attributes: request.attributes,
         delayMs: parseOptionalDurationIntoMs(request.delay),
@@ -155,19 +172,15 @@ export class ApiV1QueueController extends Controller {
       });
       return { id: m.id };
     } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
       if (err instanceof QueueNotFoundError) {
         throw createError.NotFound("queue not found");
       }
       logger.error(`failed to send message`, err);
       throw err;
     }
-  }
-
-  private bufferFromBase64(base64Str: string): Buffer {
-    if (!BASE64_REGEX.test(base64Str)) {
-      throw new createError.BadRequest("invalid base64");
-    }
-    return Buffer.from(base64Str, "base64");
   }
 
   /**

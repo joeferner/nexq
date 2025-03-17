@@ -52,6 +52,18 @@ describe("ApiV1QueueController", async () => {
     });
   });
 
+  describe("getQueue", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE_NAME);
+      const resp = await controller.getQueue(QUEUE_NAME);
+      expect(resp.name).toBe(QUEUE_NAME);
+    });
+
+    test("queue not found", async () => {
+      await expectHttpError(async () => await controller.getQueue("bad-queue-name"), 404);
+    });
+  });
+
   describe("deleteQueue", async () => {
     test("good", async () => {
       await store.createQueue(QUEUE_NAME);
@@ -63,7 +75,7 @@ describe("ApiV1QueueController", async () => {
       await expectHttpError(async () => await controller.deleteQueue("bad-queue-name"), 404);
     });
 
-    test("queue not found", async () => {
+    test("queue associated with dead letter queue", async () => {
       await store.createQueue(`${QUEUE_NAME}-dlq`);
       await store.createQueue(QUEUE_NAME, { deadLetterQueueName: `${QUEUE_NAME}-dlq` });
       await expectHttpError(async () => await controller.deleteQueue(`${QUEUE_NAME}-dlq`), 400);
@@ -79,9 +91,22 @@ describe("ApiV1QueueController", async () => {
       expect(m?.bodyAsString()).toBe("test");
     });
 
-    test("base base64 encoding", async () => {
+    test("bad base64 encoding", async () => {
       await store.createQueue(QUEUE_NAME);
       await expectHttpError(async () => await controller.sendMessage(QUEUE_NAME, { bodyBase64: "xyz" }), 400);
+    });
+
+    test("both body and bodyBase64 specified", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await expectHttpError(
+        async () => await controller.sendMessage(QUEUE_NAME, { bodyBase64: btoa("test"), body: "test" }),
+        400
+      );
+    });
+
+    test("both body and bodyBase64 unspecified", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await expectHttpError(async () => await controller.sendMessage(QUEUE_NAME, {}), 400);
     });
 
     test("queue not found", async () => {

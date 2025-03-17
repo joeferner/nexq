@@ -12,7 +12,7 @@ export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlread
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
-export { createLogger, Logger } from "./logger.js";
+export { createLogger, Logger, LoggerConfig, LogLevel } from "./logger.js";
 export { Message } from "./Message.js";
 export { DEFAULT_MAX_NUMBER_OF_MESSAGES, DEFAULT_PASSWORD_HASH_ROUNDS, Store } from "./Store.js";
 

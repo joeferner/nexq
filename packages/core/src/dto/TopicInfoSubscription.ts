@@ -1,5 +1,5 @@
 export enum TopicProtocol {
-  Queue,
+  Queue = "Queue",
 }
 
 export interface TopicInfoQueueSubscription {

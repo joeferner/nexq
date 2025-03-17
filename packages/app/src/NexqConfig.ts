@@ -1,4 +1,4 @@
-import { CreateUserOptions } from "@nexq/core";
+import { CreateUserOptions, LoggerConfig } from "@nexq/core";
 import typia from "typia";
 import { MemoryStoreCreateConfig } from "@nexq/store-memory";
 import { RestConfig } from "@nexq/proto-rest";
@@ -8,6 +8,7 @@ export type MemoryStoreConfig = { type: "memory" } & MemoryStoreCreateConfig;
 export type SqlStoreConfig = { type: "sql" } & SqlStoreCreateConfig;
 
 export interface NexqConfig {
+  logger?: LoggerConfig;
   initialUser?: CreateUserOptions;
   store: MemoryStoreConfig | SqlStoreConfig;
   rest?: RestConfig;
