@@ -42,3 +42,12 @@ rest:
     key: ./certs/nexq.local.key
   # auth:
   #   - type: basic
+
+prometheus:
+  http:
+    bind: 0.0.0.0:7889
+  https:
+    bind: 0.0.0.0:7890
+    ca: ./certs/nexq-rootca.crt
+    cert: ./certs/nexq.local.crt
+    key: ./certs/nexq.local.key

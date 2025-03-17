@@ -21,9 +21,9 @@ import { iocContainer } from "./ioc.js";
 import { RegisterRoutes } from "./routes/routes.js";
 import { isHttpError } from "./utils.js";
 
-const logger = createLogger("Rest");
+const logger = createLogger("RestServer");
 
-export class Rest {
+export class RestServer {
   private readonly app: Express;
   private httpServer?: http.Server;
   private httpsServer?: https.Server;
@@ -52,6 +52,9 @@ export class Rest {
     this.app.use((req, _resp, next) => {
       logger.debug(`request ${req.method}: ${req.path}`);
       next();
+    });
+    this.app.get("/", (_req, res) => {
+      res.redirect(301, "/docs");
     });
     this.app.use("/swagger.json", (_req, res) => {
       res.setHeader("Content-Type", "application/json");

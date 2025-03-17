@@ -1,12 +1,13 @@
 import { Logger, RealTime, Store, Time } from "@nexq/core";
-import { Rest } from "@nexq/proto-rest";
+import { DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
+import { PrometheusServer } from "@nexq/proto-prometheus";
+import { RestServer } from "@nexq/proto-rest";
 import { MemoryStore } from "@nexq/store-memory";
 import { SqlStore } from "@nexq/store-sql";
 import fs from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
-import { DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
 
 export interface StartOptions {
   configFilename: string;
@@ -19,8 +20,13 @@ export async function start(options: StartOptions): Promise<void> {
   const store = await createStore(config, time);
 
   if (config.rest) {
-    const rest = new Rest(store, config.rest);
+    const rest = new RestServer(store, config.rest);
     await rest.start();
+  }
+
+  if (config.prometheus) {
+    const prometheus = new PrometheusServer(store, config.prometheus);
+    await prometheus.start();
   }
 }
 
