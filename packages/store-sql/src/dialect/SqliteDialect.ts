@@ -11,6 +11,7 @@ export class SqliteDialect extends Dialect<sqlite.Database> {
 
   public static async create(options: SqlStoreCreateConfigSqlite, time: Time): Promise<SqliteDialect> {
     const database = sqlite(options.connectionString, options.options);
+    database.pragma("journal_mode = WAL");
     const sql = new SqliteSql();
     await sql.migrate(database);
     return new SqliteDialect(sql, database, time);
