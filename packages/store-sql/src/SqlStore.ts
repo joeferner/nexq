@@ -40,6 +40,8 @@ import { clearRecord } from "./utils.js";
 
 const logger = createLogger("SqlStore");
 
+export const DEBUG_POLL_INTERVAL = 1000;
+
 /**
  * configure expected in nexq.yaml file
  */
@@ -80,7 +82,7 @@ export class SqlStore implements Store {
     this.time = options.time;
     this.dialect = options._dialect;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
-    this.pollInterval = options.config.pollInterval ?? 1000;
+    this.pollInterval = options.config.pollInterval ?? DEBUG_POLL_INTERVAL;
   }
 
   public static async create(options: SqlStoreCreateOptions): Promise<SqlStore> {

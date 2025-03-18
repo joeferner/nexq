@@ -9,45 +9,42 @@ initialUser:
 store:
   type: memory
 
+##
+## SQLite configuration
+##
 # store:
 #   type: sql
-## the database url.
+#   dialect: sqlite
+#   pollInterval: 1000
+
+## the database connection string.
 ##   sqlite
-##     sqlite::memory: 	         Open an in-memory database.
-##     sqlite:data.db	           Open the file data.db in the current directory.
-##     sqlite://data.db 	       Open the file data.db in the current directory.
-##     sqlite:///data.db	       Open the file data.db from the root (/) directory.
-##     sqlite://data.db?mode=rwc Open the file data.db for read, write, create access.
-#   url: sqlite::memory:
-#   pollInterval: 1s
-#   maxConnections: 5
-#   connectionAcquireTimeout: 3s
-#   cacheTtl: 5s
-#   migrate: true
+##     :memory: 	       Open an in-memory database.
+##     data.db	         Open the file data.db in the current directory.
+#   connectionString: ":memory:"
 
-#TODO aws:
-#TODO   enabled: true
-#TODO   bind: 0.0.0.0:7889
-#TODO   ssl:
-#TODO     bind: 0.0.0.0:7890
-#TODO   queueUrlPrefix: https://nexq.local:7890/sqs
-
+##
+## REST protocol configuration
+##
 rest:
   http:
     bind: 0.0.0.0:7887
-  https:
-    bind: 0.0.0.0:7888
-    ca: ./certs/nexq-rootca.crt
-    cert: ./certs/nexq.local.crt
-    key: ./certs/nexq.local.key
+  # https:
+  #   bind: 0.0.0.0:7888
+  #   ca: ./certs/nexq-rootca.crt
+  #   cert: ./certs/nexq.local.crt
+  #   key: ./certs/nexq.local.key
   # auth:
   #   - type: basic
 
+##
+## Prometheus metrics protocol configuration
+##
 prometheus:
   http:
     bind: 0.0.0.0:7889
-  https:
-    bind: 0.0.0.0:7890
-    ca: ./certs/nexq-rootca.crt
-    cert: ./certs/nexq.local.crt
-    key: ./certs/nexq.local.key
+  # https:
+  #   bind: 0.0.0.0:7890
+  #   ca: ./certs/nexq-rootca.crt
+  #   cert: ./certs/nexq.local.crt
+  #   key: ./certs/nexq.local.key

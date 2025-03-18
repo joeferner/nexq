@@ -38,6 +38,16 @@ async function parseCommandLineAndStart(): Promise<void> {
   await run(cmd, process.argv.slice(2));
 }
 
+process.on('SIGINT', () => {
+  // TODO shutdown gracefully
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  // TODO shutdown gracefully
+  process.exit(0);
+});
+
 parseCommandLineAndStart().catch((err) => {
   if (err instanceof ConfigParseError) {
     console.error(err.message);

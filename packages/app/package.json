@@ -28,6 +28,7 @@
     "cmd-ts": "^0.13.0",
     "find-root": "^1.1.0",
     "radash": "^12.1.0",
+    "ts-patch": "^3.3.0",
     "typia": "^8.0.0",
     "yaml": "^2.7.0"
   },
@@ -36,7 +37,6 @@
     "@types/node": "^22.13.10",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
-    "ts-patch": "^3.3.0",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.26.0"
   }

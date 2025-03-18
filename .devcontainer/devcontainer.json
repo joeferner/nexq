@@ -14,7 +14,8 @@
         "ms-python.black-formatter",
         "bierner.markdown-emoji",
         "qwtel.sqlite-viewer",
-        "smulyono.reveal"
+        "smulyono.reveal",
+        "ms-azuretools.vscode-docker"
       ]
     }
   }
