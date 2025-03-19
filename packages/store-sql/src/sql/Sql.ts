@@ -1,5 +1,6 @@
 import { UpdateMessageOptions } from "@nexq/core";
 import { RunResult } from "./dto/RunResult.js";
+import { Transaction } from "../dialect/Transaction.js";
 
 export const SQL_DELETE_QUEUE = "deleteQueue";
 export const SQL_PURGE_QUEUE = "purgeQueue";
@@ -477,11 +478,11 @@ export abstract class Sql<TDatabase> {
     this.queries[queryName] = sql;
   }
 
-  public abstract run(db: TDatabase, queryName: string, params: unknown[]): Promise<RunResult>;
+  public abstract run(db: Transaction | TDatabase, queryName: string, params: unknown[]): Promise<RunResult>;
 
   protected abstract runRawSql(db: TDatabase, sql: string, params: unknown[]): Promise<RunResult>;
 
-  public abstract all<TRow>(db: TDatabase, queryName: string, params: unknown[]): Promise<TRow[]>;
+  public abstract all<TRow>(db: Transaction | TDatabase, queryName: string, params: unknown[]): Promise<TRow[]>;
 
   protected getQuery(queryName: string): string {
     const sql = this.queries[queryName];

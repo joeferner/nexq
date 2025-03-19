@@ -16,6 +16,13 @@ import {
 } from "@nexq/core";
 import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
+import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
+import { RunResult } from "../sql/dto/RunResult.js";
+import { SqlCount } from "../sql/dto/SqlCount.js";
+import { SqlMessage, sqlMessageToMessage } from "../sql/dto/SqlMessage.js";
+import { SqlQueue, sqlQueueToQueueInfo } from "../sql/dto/SqlQueue.js";
+import { SqlTopicWithSubscription, sqlTopicWithSubscriptionToTopicInfo } from "../sql/dto/SqlTopicWithSubscription.js";
+import { SqlUser, sqlUserToUser } from "../sql/dto/SqlUser.js";
 import {
   Sql,
   SQL_CREATE_MESSAGE,
@@ -56,35 +63,31 @@ import {
   SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE,
   SQL_UPDATE_QUEUE_EXPIRES_AT,
 } from "../sql/Sql.js";
-import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
-import { RunResult } from "../sql/dto/RunResult.js";
-import { SqlCount } from "../sql/dto/SqlCount.js";
-import { SqlMessage, sqlMessageToMessage } from "../sql/dto/SqlMessage.js";
-import { SqlQueue, sqlQueueToQueueInfo } from "../sql/dto/SqlQueue.js";
-import { SqlTopicWithSubscription, sqlTopicWithSubscriptionToTopicInfo } from "../sql/dto/SqlTopicWithSubscription.js";
-import { SqlUser, sqlUserToUser } from "../sql/dto/SqlUser.js";
 import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
+import { Transaction } from "./Transaction.js";
 
-export abstract class Dialect<TDatabase> {
+export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   protected constructor(
-    protected readonly sql: Sql<TDatabase>,
+    protected readonly sql: TSql,
     protected readonly database: TDatabase,
     protected readonly time: Time
   ) {}
 
-  public async findUserByAccessKeyId(accessKeyId: string): Promise<User | undefined> {
-    const rows = await this.sql.all<SqlUser>(this.database, SQL_FIND_USER_BY_ACCESS_KEY_ID, [accessKeyId]);
+  public abstract beginTransaction(): Promise<Transaction>;
+
+  public async findUserByAccessKeyId(tx: Transaction | undefined, accessKeyId: string): Promise<User | undefined> {
+    const rows = await this.sql.all<SqlUser>(tx ?? this.database, SQL_FIND_USER_BY_ACCESS_KEY_ID, [accessKeyId]);
     return expect0or1Row(rows, sqlUserToUser);
   }
 
-  public async findUserByUsername(username: string): Promise<User | undefined> {
-    const rows = await this.sql.all<SqlUser>(this.database, SQL_FIND_USER_BY_USERNAME, [username]);
+  public async findUserByUsername(tx: Transaction | undefined, username: string): Promise<User | undefined> {
+    const rows = await this.sql.all<SqlUser>(tx ?? this.database, SQL_FIND_USER_BY_USERNAME, [username]);
     return expect0or1Row(rows, sqlUserToUser);
   }
 
-  public async createUser(options: DialectCreateUser): Promise<void> {
-    await this.sql.run(this.database, SQL_CREATE_USER, [
+  public async createUser(tx: Transaction | undefined, options: DialectCreateUser): Promise<void> {
+    await this.sql.run(tx ?? this.database, SQL_CREATE_USER, [
       options.id,
       options.username,
       options.passwordHash,
@@ -184,31 +187,41 @@ export abstract class Dialect<TDatabase> {
     queueName: string,
     options: { visibilityTimeoutMs: number; count: number }
   ): Promise<Message[]> {
-    const now = this.time.getCurrentTime();
-    const rows = await this.sql.all<SqlMessage>(this.database, SQL_FIND_MESSAGES_TO_RECEIVE, [
-      queueName,
-      now,
-      now,
-      options.count,
-    ]);
+    const tx = await this.beginTransaction();
+    try {
+      const now = this.time.getCurrentTime();
+      const rows = await this.sql.all<SqlMessage>(this.database, SQL_FIND_MESSAGES_TO_RECEIVE, [
+        queueName,
+        now,
+        now,
+        options.count,
+      ]);
 
-    return await Promise.all(
-      rows.map(async (row) => {
-        const receiptHandle = createId();
-        const newExpireTime = new Date(now.getTime() + options.visibilityTimeoutMs);
-        const firstReceivedAt = parseOptionalDate(row.first_received_at) ?? now;
-        const receiveCount = row.receive_count + 1;
-        await this.sql.run(this.database, SQL_RECEIVE_MESSAGE, [
-          newExpireTime,
-          receiptHandle,
-          firstReceivedAt,
-          receiveCount,
-          row.id,
-          queueName,
-        ]);
-        return sqlMessageToMessage(row, receiptHandle);
-      })
-    );
+      const results = await Promise.all(
+        rows.map(async (row) => {
+          const receiptHandle = createId();
+          const newExpireTime = new Date(now.getTime() + options.visibilityTimeoutMs);
+          const firstReceivedAt = parseOptionalDate(row.first_received_at) ?? now;
+          const receiveCount = row.receive_count + 1;
+          await this.sql.run(this.database, SQL_RECEIVE_MESSAGE, [
+            newExpireTime,
+            receiptHandle,
+            firstReceivedAt,
+            receiveCount,
+            row.id,
+            queueName,
+          ]);
+          return sqlMessageToMessage(row, receiptHandle);
+        })
+      );
+      await tx.commit();
+      return results;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
   }
 
   public async updateMessageVisibilityByReceiptHandle(
@@ -278,18 +291,18 @@ export abstract class Dialect<TDatabase> {
       rows.map(async (row) => {
         return {
           ...sqlQueueToQueueInfo(row),
-          numberOfMessages: await this.getNumberOfMessages(row.name, now),
-          numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(row.name, now),
-          numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(row.name, now),
+          numberOfMessages: await this.getNumberOfMessages(undefined, row.name, now),
+          numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(undefined, row.name, now),
+          numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(undefined, row.name, now),
         } satisfies QueueInfo;
       })
     );
     return R.alphabetical(queueInfos, (t) => t.name);
   }
 
-  public async getQueueInfo(queueName: string): Promise<QueueInfo | undefined> {
+  public async getQueueInfo(tx: Transaction | undefined, queueName: string): Promise<QueueInfo | undefined> {
     const now = this.time.getCurrentTime();
-    const rows = await this.sql.all<SqlQueue>(this.database, SQL_FIND_QUEUE_BY_NAME, [queueName]);
+    const rows = await this.sql.all<SqlQueue>(tx ?? this.database, SQL_FIND_QUEUE_BY_NAME, [queueName]);
     if (rows.length === 0) {
       return undefined;
     }
@@ -298,36 +311,44 @@ export abstract class Dialect<TDatabase> {
     }
     return {
       ...sqlQueueToQueueInfo(rows[0]),
-      numberOfMessages: await this.getNumberOfMessages(queueName, now),
-      numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(queueName, now),
-      numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(queueName, now),
+      numberOfMessages: await this.getNumberOfMessages(tx, queueName, now),
+      numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(tx, queueName, now),
+      numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(tx, queueName, now),
     };
   }
 
-  private async getNumberOfMessages(queueName: string, now: Date): Promise<number> {
-    const rows = await this.sql.all<SqlCount>(this.database, SQL_GET_QUEUE_NUMBER_OF_MESSAGES, [queueName, now, now]);
+  private async getNumberOfMessages(tx: Transaction | undefined, queueName: string, now: Date): Promise<number> {
+    const rows = await this.sql.all<SqlCount>(tx ?? this.database, SQL_GET_QUEUE_NUMBER_OF_MESSAGES, [
+      queueName,
+      now,
+      now,
+    ]);
     return rows[0].count;
   }
 
-  private async getNumberOfDelayedMessages(queueName: string, now: Date): Promise<number> {
-    const rows = await this.sql.all<SqlCount>(this.database, SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES, [
+  private async getNumberOfDelayedMessages(tx: Transaction | undefined, queueName: string, now: Date): Promise<number> {
+    const rows = await this.sql.all<SqlCount>(tx ?? this.database, SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES, [
       queueName,
       now,
     ]);
     return rows[0].count;
   }
 
-  private async getNumberOfNotVisibleMessages(queueName: string, now: Date): Promise<number> {
-    const rows = await this.sql.all<SqlCount>(this.database, SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES, [
+  private async getNumberOfNotVisibleMessages(
+    tx: Transaction | undefined,
+    queueName: string,
+    now: Date
+  ): Promise<number> {
+    const rows = await this.sql.all<SqlCount>(tx ?? this.database, SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES, [
       queueName,
       now,
     ]);
     return rows[0].count;
   }
 
-  public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
+  public async createQueue(tx: Transaction, queueName: string, options?: CreateQueueOptions): Promise<void> {
     const now = this.time.getCurrentTime();
-    await this.sql.run(this.database, SQL_CREATE_QUEUE, [
+    await this.sql.run(tx ?? this.database, SQL_CREATE_QUEUE, [
       queueName,
       options?.deadLetterQueueName ?? null,
       options?.delayMs ?? null,
@@ -429,17 +450,23 @@ export abstract class Dialect<TDatabase> {
     return topics.map(sqlTopicWithSubscriptionToTopicInfo);
   }
 
-  public async getTopicInfo(topicName: string): Promise<TopicInfo | undefined> {
-    const rows = await this.sql.all<SqlTopicWithSubscription>(this.database, SQL_FIND_TOPIC_INFO_BY_NAME, [topicName]);
+  public async getTopicInfo(tx: Transaction | undefined, topicName: string): Promise<TopicInfo | undefined> {
+    const rows = await this.sql.all<SqlTopicWithSubscription>(tx ?? this.database, SQL_FIND_TOPIC_INFO_BY_NAME, [
+      topicName,
+    ]);
     if (rows.length === 0) {
       return undefined;
     }
     return sqlTopicWithSubscriptionToTopicInfo(rows);
   }
 
-  public async createTopic(topicName: string, options?: CreateTopicOptions): Promise<void> {
+  public async createTopic(
+    tx: Transaction | undefined,
+    topicName: string,
+    options?: CreateTopicOptions
+  ): Promise<void> {
     const now = this.time.getCurrentTime();
-    await this.sql.run(this.database, SQL_CREATE_TOPIC, [
+    await this.sql.run(tx ?? this.database, SQL_CREATE_TOPIC, [
       topicName,
       options?.tags ? JSON.stringify(options.tags) : "{}",
       now,
@@ -447,8 +474,8 @@ export abstract class Dialect<TDatabase> {
     ]);
   }
 
-  public async subscribe(id: string, topicName: string, queueName: string): Promise<void> {
-    await this.sql.run(this.database, SQL_CREATE_SUBSCRIPTION, [id, topicName, queueName]);
+  public async subscribe(tx: Transaction | undefined, id: string, topicName: string, queueName: string): Promise<void> {
+    await this.sql.run(tx ?? this.database, SQL_CREATE_SUBSCRIPTION, [id, topicName, queueName]);
   }
 
   public async deleteTopic(topicName: string): Promise<void> {

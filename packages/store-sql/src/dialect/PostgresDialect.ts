@@ -4,10 +4,32 @@ import Pool from "pg-pool";
 import { SqlStoreCreateConfigPostgres } from "../SqlStore.js";
 import { PostgresSql } from "../sql/PostgresSql.js";
 import { Dialect } from "./Dialect.js";
+import { PostgresTransaction } from "./PostgresTransaction.js";
 
-export class PostgresDialect extends Dialect<Pool<PgClient>> {
+export class PostgresDialect extends Dialect<Pool<PgClient>, PostgresSql> {
   private constructor(sql: PostgresSql, pool: Pool<PgClient>, time: Time) {
     super(sql, pool, time);
+  }
+
+  public async beginTransaction(): Promise<PostgresTransaction> {
+    const client = await this.database.connect();
+    await client.query("BEGIN");
+
+    return {
+      client,
+
+      commit: async (): Promise<void> => {
+        await client.query("COMMIT");
+      },
+
+      rollback: async (): Promise<void> => {
+        await client.query("ROLLBACK");
+      },
+
+      release: async (): Promise<void> => {
+        client.release();
+      },
+    };
   }
 
   public static async create(options: SqlStoreCreateConfigPostgres, time: Time): Promise<PostgresDialect> {

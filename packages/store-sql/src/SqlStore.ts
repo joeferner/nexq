@@ -38,6 +38,7 @@ import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { NewQueueMessageEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
+import { Transaction } from "./dialect/Transaction.js";
 
 const logger = createLogger("SqlStore");
 
@@ -147,33 +148,43 @@ export class SqlStore implements Store {
   }
 
   public async createUser(options: CreateUserOptions): Promise<void> {
-    const existingUser = await this.dialect.findUserByUsername(options.username);
-    if (existingUser) {
-      throw new UsernameAlreadyExistsError(options.username);
-    }
-
-    if (options.accessKeyId) {
-      const existingUserWithAccessKey = await this.dialect.findUserByAccessKeyId(options.accessKeyId);
-      if (existingUserWithAccessKey) {
-        throw new UserAccessKeyIdAlreadyExistsError(options.accessKeyId);
+    const tx = await this.dialect.beginTransaction();
+    try {
+      const existingUser = await this.dialect.findUserByUsername(tx, options.username);
+      if (existingUser) {
+        throw new UsernameAlreadyExistsError(options.username);
       }
-    }
 
-    await this.dialect.createUser({
-      id: createId(),
-      username: options.username,
-      passwordHash: options.password ? await hashPassword(options.password, this.passwordHashRounds) : null,
-      accessKeyId: options.accessKeyId ?? null,
-      secretAccessKey: options.secretAccessKey ?? null,
-    });
+      if (options.accessKeyId) {
+        const existingUserWithAccessKey = await this.dialect.findUserByAccessKeyId(tx, options.accessKeyId);
+        if (existingUserWithAccessKey) {
+          throw new UserAccessKeyIdAlreadyExistsError(options.accessKeyId);
+        }
+      }
+
+      await this.dialect.createUser(tx, {
+        id: createId(),
+        username: options.username,
+        passwordHash: options.password ? await hashPassword(options.password, this.passwordHashRounds) : null,
+        accessKeyId: options.accessKeyId ?? null,
+        secretAccessKey: options.secretAccessKey ?? null,
+      });
+
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
   }
 
   public getUserByUsername(username: string): Promise<User | undefined> {
-    return this.dialect.findUserByUsername(username);
+    return this.dialect.findUserByUsername(undefined, username);
   }
 
   public getUserByAccessKeyId(accessKeyId: string): Promise<User | undefined> {
-    return this.dialect.findUserByAccessKeyId(accessKeyId);
+    return this.dialect.findUserByAccessKeyId(undefined, accessKeyId);
   }
 
   public getUsers(): Promise<User[]> {
@@ -181,23 +192,32 @@ export class SqlStore implements Store {
   }
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
-    const existingQueue = await this.dialect.getQueueInfo(queueName);
-    if (existingQueue) {
-      if (queueInfoEqualCreateQueueOptions(existingQueue, options ?? {})) {
-        return;
-      } else {
-        throw new QueueAlreadyExistsError(queueName);
+    const tx = await this.dialect.beginTransaction();
+    try {
+      const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
+      if (existingQueue) {
+        if (queueInfoEqualCreateQueueOptions(existingQueue, options ?? {})) {
+          return;
+        } else {
+          throw new QueueAlreadyExistsError(queueName);
+        }
       }
-    }
 
-    if (options?.deadLetterQueueName) {
-      const deadLetterQueue = await this.dialect.getQueueInfo(options.deadLetterQueueName);
-      if (!deadLetterQueue) {
-        throw new QueueNotFoundError(options.deadLetterQueueName);
+      if (options?.deadLetterQueueName) {
+        const deadLetterQueue = await this.dialect.getQueueInfo(tx, options.deadLetterQueueName);
+        if (!deadLetterQueue) {
+          throw new QueueNotFoundError(options.deadLetterQueueName);
+        }
       }
-    }
 
-    await this.dialect.createQueue(queueName, options);
+      await this.dialect.createQueue(tx, queueName, options);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
   }
 
   public async sendMessage(
@@ -496,19 +516,28 @@ export class SqlStore implements Store {
   }
 
   public async createTopic(topicName: string, options?: CreateTopicOptions): Promise<void> {
-    const requiredOptions: CreateTopicOptions = { ...options };
-    if (requiredOptions.tags === undefined) {
-      requiredOptions.tags = {};
-    }
-
-    const existingTopic = await this.dialect.getTopicInfo(topicName);
-    if (existingTopic) {
-      if (!topicInfoEqualCreateTopicOptions(existingTopic, requiredOptions)) {
-        throw new TopicAlreadyExistsError(topicName);
+    const tx = await this.dialect.beginTransaction();
+    try {
+      const requiredOptions: CreateTopicOptions = { ...options };
+      if (requiredOptions.tags === undefined) {
+        requiredOptions.tags = {};
       }
-    }
 
-    await this.dialect.createTopic(topicName, options);
+      const existingTopic = await this.dialect.getTopicInfo(tx, topicName);
+      if (existingTopic) {
+        if (!topicInfoEqualCreateTopicOptions(existingTopic, requiredOptions)) {
+          throw new TopicAlreadyExistsError(topicName);
+        }
+      }
+
+      await this.dialect.createTopic(tx, topicName, options);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
   }
 
   public subscribe(topicName: string, protocol: TopicProtocol, target: string): Promise<string> {
@@ -521,23 +550,32 @@ export class SqlStore implements Store {
   }
 
   public async subscribeQueue(topicName: string, queueName: string): Promise<string> {
-    const id = createId();
-    const topic = await this.getTopicRequired(topicName);
-    const queue = await this.getQueueRequired(queueName);
-    await this.dialect.subscribe(id, topic.name, queue.name);
-    return id;
+    const tx = await this.dialect.beginTransaction();
+    try {
+      const id = createId();
+      const topic = await this.getTopicRequired(topicName, tx);
+      const queue = await this.getQueueRequired(queueName, tx);
+      await this.dialect.subscribe(tx, id, topic.name, queue.name);
+      await tx.commit();
+      return id;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
   }
 
-  private async getQueueRequired(queueName: string): Promise<QueueInfo> {
-    const topic = await this.dialect.getQueueInfo(queueName);
+  private async getQueueRequired(queueName: string, tx?: Transaction): Promise<QueueInfo> {
+    const topic = await this.dialect.getQueueInfo(tx, queueName);
     if (topic) {
       return topic;
     }
     throw new QueueNotFoundError(queueName);
   }
 
-  private async getTopicRequired(topicName: string): Promise<TopicInfo> {
-    const topic = await this.dialect.getTopicInfo(topicName);
+  private async getTopicRequired(topicName: string, tx?: Transaction): Promise<TopicInfo> {
+    const topic = await this.dialect.getTopicInfo(tx, topicName);
     if (topic) {
       return topic;
     }

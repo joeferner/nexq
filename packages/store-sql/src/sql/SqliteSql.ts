@@ -4,6 +4,8 @@ import * as R from "radash";
 import { Sql } from "./Sql.js";
 import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
+import { isTransaction, Transaction } from "../dialect/Transaction.js";
+import { isSqliteTransaction } from "../dialect/SqliteTransaction.js";
 
 const logger = createLogger("SqliteSql");
 const sqlLogger = createLogger("SQL");
@@ -17,7 +19,11 @@ export class SqliteSql extends Sql<sqlite.Database> {
     super();
   }
 
-  public override async run(db: sqlite.Database, queryName: string, params: unknown[]): Promise<RunResult> {
+  public override async run(
+    db: Transaction | sqlite.Database,
+    queryName: string,
+    params: unknown[]
+  ): Promise<RunResult> {
     if (sqlLogger.isDebugEnabled()) {
       sqlLogger.debug(`sql: run: ${this.getQuery(queryName).trim()}`);
     }
@@ -37,7 +43,11 @@ export class SqliteSql extends Sql<sqlite.Database> {
     return { changes: result.changes };
   }
 
-  public override async all<TRow>(db: sqlite.Database, queryName: string, params: unknown[]): Promise<TRow[]> {
+  public override async all<TRow>(
+    db: Transaction | sqlite.Database,
+    queryName: string,
+    params: unknown[]
+  ): Promise<TRow[]> {
     if (sqlLogger.isDebugEnabled()) {
       sqlLogger.debug(`sql: all: ${this.getQuery(queryName).trim()}`);
     }
@@ -55,12 +65,20 @@ export class SqliteSql extends Sql<sqlite.Database> {
     }
   }
 
-  private prepare(db: sqlite.Database, queryName: string): sqlite.Statement {
+  private prepare(db: Transaction | sqlite.Database, queryName: string): sqlite.Statement {
     let stmt = this.preparedStatements[queryName];
     if (stmt) {
       return stmt;
     }
-    stmt = db.prepare(this.getQuery(queryName));
+    if (isTransaction(db)) {
+      if (isSqliteTransaction(db)) {
+        stmt = db.database.prepare(this.getQuery(queryName));
+      } else {
+        throw new Error("expected SqliteTransaction");
+      }
+    } else {
+      stmt = db.prepare(this.getQuery(queryName));
+    }
     this.preparedStatements[queryName] = stmt;
     return stmt;
   }

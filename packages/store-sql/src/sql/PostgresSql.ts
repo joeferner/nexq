@@ -1,6 +1,9 @@
 import { createLogger } from "@nexq/core";
+import * as pg from "pg";
 import { Client as PgClient } from "pg";
 import Pool from "pg-pool";
+import { isPostgresTransaction } from "../dialect/PostgresTransaction.js";
+import { isTransaction, Transaction } from "../dialect/Transaction.js";
 import { Sql } from "./Sql.js";
 import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
@@ -27,13 +30,17 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     });
   }
 
-  public override async run(db: Pool<PgClient>, queryName: string, params: unknown[]): Promise<RunResult> {
+  public override async run(
+    db: Transaction | Pool<PgClient>,
+    queryName: string,
+    params: unknown[]
+  ): Promise<RunResult> {
     const sql = this.getQuery(queryName).trim();
     if (sqlLogger.isDebugEnabled()) {
       sqlLogger.debug(`sql: run: ${sql}`);
     }
     this.transformParams(params);
-    const results = await db.query({
+    const results = await this.getClient(db).query({
       name: queryName,
       text: sql,
       values: params,
@@ -51,18 +58,34 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     return { changes: results.rowCount ?? 0 };
   }
 
-  public override async all<TRow>(db: Pool<PgClient>, queryName: string, params: unknown[]): Promise<TRow[]> {
+  public override async all<TRow>(
+    db: Transaction | Pool<PgClient>,
+    queryName: string,
+    params: unknown[]
+  ): Promise<TRow[]> {
     const sql = this.getQuery(queryName).trim();
     if (sqlLogger.isDebugEnabled()) {
       sqlLogger.debug(`sql: all: ${sql}`);
     }
     this.transformParams(params);
-    const results = await db.query({
+    const results = await this.getClient(db).query({
       name: queryName,
       text: sql,
       values: params,
     });
     return results.rows as TRow[];
+  }
+
+  private getClient(db: Pool<PgClient> | Transaction): Pool<PgClient> | (PgClient & pg.PoolClient) {
+    if (isTransaction(db)) {
+      if (isPostgresTransaction(db)) {
+        return db.client;
+      } else {
+        throw new Error(`expected PostgresTransaction`);
+      }
+    } else {
+      return db;
+    }
   }
 
   private transformParams(_params: unknown[]): void {
