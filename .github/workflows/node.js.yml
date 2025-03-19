@@ -22,6 +22,6 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
         cache-dependency-path: '**/package-lock.json'
-    - run: ./scripts/format.sh
     - run: ./scripts/build.sh
+    - run: ./scripts/format.sh
     - run: ./scripts/test.sh
