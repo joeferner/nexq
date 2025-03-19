@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexq.fullname" . }}
+  labels:
+    {{- include "nexq.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.prometheusService.type }}
+  ports:
+    {{- if .Values.restService.enabled }}
+    - port: {{ .Values.restService.port }}
+      targetPort: http
+      protocol: TCP
+      name: rest
+    {{- end }}
+    {{- if .Values.prometheusService.enabled }}
+    - port: {{ .Values.prometheusService.port }}
+      targetPort: http
+      protocol: TCP
+      name: prometheus
+    {{- end }}
+  selector:
+    {{- include "nexq.selectorLabels" . | nindent 4 }}
