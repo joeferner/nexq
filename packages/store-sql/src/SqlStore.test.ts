@@ -1,22 +1,21 @@
 import { CreateStoreOptions, runStoreTest } from "@nexq/test";
+import fs from "node:fs";
 import { describe, expect } from "vitest";
 import { SqlStore, SqlStoreCreateConfig, SqlStoreCreateConfigPostgres } from "./SqlStore.js";
-import fs from "node:fs";
-import { Store } from "@nexq/core";
 
 describe("SqlStore", async () => {
   await runStoreTest(async (options: CreateStoreOptions) => {
     let config: SqlStoreCreateConfig;
 
-    if (process.env['TEST_POSTGRES']) {
+    if (process.env["TEST_POSTGRES"]) {
       config = {
         dialect: "postgres",
         pollInterval: 0,
-        connectionString: 'postgres://nexq-postgres/nexq',
+        connectionString: "postgres://nexq-postgres/nexq",
         options: {
-          user: 'nexq',
-          password: 'password'
-        }
+          user: "nexq",
+          password: "password",
+        },
       } satisfies SqlStoreCreateConfigPostgres;
     } else {
       let filename = expect.getState().currentTestName?.replaceAll(/[>\s]+/g, "_");
@@ -38,9 +37,7 @@ describe("SqlStore", async () => {
       config,
     });
 
-    if (process.env['TEST_POSTGRES']) {
-      await store.deleteAllData();
-    }
+    await store.deleteAllData();
 
     if (options.initialUser) {
       await store.createUser(options.initialUser);

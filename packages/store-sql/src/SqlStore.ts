@@ -47,7 +47,7 @@ export const DEBUG_POLL_INTERVAL = 1000;
  * configure expected in nexq.yaml file
  */
 export interface _SqlStoreCreateConfig {
-  dialect: 'sqlite' | 'postgres';
+  dialect: "sqlite" | "postgres";
   pollInterval?: number;
   connectionString: string;
 }

@@ -71,7 +71,7 @@ export abstract class Dialect<TDatabase> {
     protected readonly sql: Sql<TDatabase>,
     protected readonly database: TDatabase,
     protected readonly time: Time
-  ) { }
+  ) {}
 
   public async findUserByAccessKeyId(accessKeyId: string): Promise<User | undefined> {
     const rows = await this.sql.all<SqlUser>(this.database, SQL_FIND_USER_BY_ACCESS_KEY_ID, [accessKeyId]);

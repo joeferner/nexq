@@ -23,7 +23,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
   private transformSql(query: string): string {
     let i = 1;
     return query.replaceAll(/\?/g, () => {
-      return '$' + i++;
+      return "$" + i++;
     });
   }
 
@@ -36,7 +36,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     const results = await db.query({
       name: queryName,
       text: sql,
-      values: params
+      values: params,
     });
     return { changes: results.rowCount ?? 0 };
   }
@@ -60,7 +60,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     const results = await db.query({
       name: queryName,
       text: sql,
-      values: params
+      values: params,
     });
     return results.rows as TRow[];
   }
@@ -154,13 +154,11 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
         )
       `);
 
-      await database.query(
-        `INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`,
-        [
-          MIGRATION_VERSION_INITIAL,
-          "initial",
-          new Date().toISOString()
-        ]);
+      await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
+        MIGRATION_VERSION_INITIAL,
+        "initial",
+        new Date().toISOString(),
+      ]);
     }
   }
 }

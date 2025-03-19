@@ -12,8 +12,8 @@ export class PostgresDialect extends Dialect<Pool<PgClient>> {
 
   public static async create(options: SqlStoreCreateConfigPostgres, time: Time): Promise<PostgresDialect> {
     const params = new URL(options.connectionString);
-    const database = params.pathname?.split('/')?.[1];
-    const port = parseInt(params.port ?? '5432');
+    const database = params.pathname?.split("/")?.[1];
+    const port = parseInt(params.port ?? "5432");
 
     pgTypes.setTypeParser(1700, parseFloat);
     pgTypes.setTypeParser(20, parseFloat);
@@ -24,7 +24,7 @@ export class PostgresDialect extends Dialect<Pool<PgClient>> {
       host: params.hostname,
       port,
       database,
-      ...options.options
+      ...options.options,
     });
     const sql = new PostgresSql();
     await sql.migrate(pool);
