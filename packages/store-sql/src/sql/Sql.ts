@@ -33,6 +33,11 @@ export const SQL_CREATE_SUBSCRIPTION = "createSubscription";
 export const SQL_DELETE_TOPIC = "deleteTopic";
 export const SQL_NAK_MESSAGE = "nakMessage";
 export const SQL_UPDATE_QUEUE_EXPIRES_AT = "updateQueueExpiresAt";
+export const SQL_DELETE_ALL_MESSAGES = "deleteAllMessages";
+export const SQL_DELETE_ALL_SUBSCRIPTIONS = "deleteAllSubscriptions";
+export const SQL_DELETE_ALL_TOPICS = "deleteAllTopics";
+export const SQL_DELETE_ALL_QUEUES = "deleteAllQueues";
+export const SQL_DELETE_ALL_USERS = "deleteAllUsers";
 
 export abstract class Sql<TDatabase> {
   private readonly queries: Record<string, string> = {};
@@ -460,6 +465,12 @@ export abstract class Sql<TDatabase> {
           name = ?
       `
     );
+
+    this.addQuery(SQL_DELETE_ALL_MESSAGES, `DELETE FROM ${this.tablePrefix}_message`);
+    this.addQuery(SQL_DELETE_ALL_SUBSCRIPTIONS, `DELETE FROM ${this.tablePrefix}_subscription`);
+    this.addQuery(SQL_DELETE_ALL_TOPICS, `DELETE FROM ${this.tablePrefix}_topic`);
+    this.addQuery(SQL_DELETE_ALL_QUEUES, `DELETE FROM ${this.tablePrefix}_queue`);
+    this.addQuery(SQL_DELETE_ALL_USERS, `DELETE FROM ${this.tablePrefix}_user`);
   }
 
   protected addQuery(queryName: string, sql: string): void {

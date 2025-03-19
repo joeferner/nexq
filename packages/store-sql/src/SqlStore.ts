@@ -32,12 +32,12 @@ import {
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
 } from "@nexq/core";
-import Database from "better-sqlite3";
+import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
+import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { NewQueueMessageEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
-import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 
 const logger = createLogger("SqlStore");
 
@@ -47,16 +47,44 @@ export const DEBUG_POLL_INTERVAL = 1000;
  * configure expected in nexq.yaml file
  */
 export interface _SqlStoreCreateConfig {
+  dialect: 'sqlite' | 'postgres';
   pollInterval?: number;
   connectionString: string;
 }
 
 export interface SqlStoreCreateConfigSqlite extends _SqlStoreCreateConfig {
   dialect: "sqlite";
-  options?: Database.Options;
+  options?: {
+    readonly?: boolean;
+    fileMustExist?: boolean;
+    timeout?: number;
+    nativeBinding?: string;
+  };
 }
 
-export type SqlStoreCreateConfig = SqlStoreCreateConfigSqlite;
+export interface SqlStoreCreateConfigPostgres extends _SqlStoreCreateConfig {
+  dialect: "postgres";
+  options?: {
+    user?: string;
+    password?: string;
+    keepAlive?: boolean;
+    statement_timeout?: false | number;
+    ssl?: {
+      ca?: string;
+      cert?: string;
+      key?: string;
+    };
+    query_timeout?: number;
+    lock_timeout?: number;
+    keepAliveInitialDelayMillis?: number;
+    idle_in_transaction_session_timeout?: number;
+    application_name?: string;
+    connectionTimeoutMillis?: number;
+    options?: string;
+  };
+}
+
+export type SqlStoreCreateConfig = SqlStoreCreateConfigSqlite | SqlStoreCreateConfigPostgres;
 
 /**
  * configuring expected when creating a SqlStore
@@ -72,14 +100,14 @@ export class SqlStore implements Store {
   private readonly time: Time;
   private readonly passwordHashRounds: number;
   private readonly pollInterval: number;
-  private readonly dialect: SqliteDialect;
+  private readonly dialect: SqliteDialect | PostgresDialect;
   private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
   private readonly cachedQueueInfo: Record<string, QueueInfo> = {};
   private readonly cachedTopicInfo: Record<string, TopicInfo> = {};
   private readonly queueTouched: Record<string, Date> = {};
   private pollHandle?: Timeout;
 
-  private constructor(options: SqlStoreCreateOptions & { _dialect: SqliteDialect }) {
+  private constructor(options: SqlStoreCreateOptions & { _dialect: SqliteDialect | PostgresDialect }) {
     this.time = options.time;
     this.dialect = options._dialect;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
@@ -98,12 +126,15 @@ export class SqlStore implements Store {
     return store;
   }
 
-  private static createDialect(options: SqlStoreCreateOptions): Promise<SqliteDialect> {
-    switch (options.config.dialect) {
+  private static createDialect(options: SqlStoreCreateOptions): Promise<SqliteDialect | PostgresDialect> {
+    const dialect = options.config.dialect;
+    switch (dialect) {
       case "sqlite":
         return SqliteDialect.create(options.config, options.time);
+      case "postgres":
+        return PostgresDialect.create(options.config, options.time);
       default:
-        throw new Error(`unhandled dialect: ${options.config.dialect}`);
+        throw new Error(`unhandled dialect: ${dialect}`);
     }
   }
 
@@ -517,5 +548,9 @@ export class SqlStore implements Store {
     const topic = await this.getTopicRequired(topicName);
     await this.dialect.deleteTopic(topic.name);
     delete this.cachedTopicInfo[topicName];
+  }
+
+  public async deleteAllData(): Promise<void> {
+    await this.dialect.deleteAllData();
   }
 }

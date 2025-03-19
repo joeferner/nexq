@@ -19,13 +19,14 @@ By default you can find the Swagger UI at http://localhost:7887/swagger-ui/
 - :white_check_mark: create queue
 - :white_check_mark: delete queue
 - :white_check_mark: purge queue
+- :white_check_mark: move messages
 - :white_check_mark: receive message
 - :white_check_mark: send message
 - :white_check_mark: delete message
 - :white_check_mark: change message visibility
 - :white_check_mark: re-prioritize message
-- :scroll: create topic
-- :scroll: delete topic
-- :scroll: list topics
-- :scroll: publish
-- :scroll: subscribe
+- :white_check_mark: create topic
+- :white_check_mark: delete topic
+- :white_check_mark: list topics
+- :white_check_mark: publish
+- :white_check_mark: subscribe

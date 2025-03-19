@@ -18,5 +18,5 @@
 ## Storage
 
 - :white_check_mark: [Memory](packages/store-memory/README.md)
-- :ballot_box_with_check: [SQL](packages/store-sql/README.md)
+- :white_check_mark: [SQL](packages/store-sql/README.md)
 - :scroll: - Raft [:link:](https://en.wikipedia.org/wiki/Raft_(algorithm))

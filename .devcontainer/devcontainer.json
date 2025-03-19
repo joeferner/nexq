@@ -3,6 +3,7 @@
     "dockerfile": "Dockerfile"
   },
   "runArgs": [
+    "--network=nexq",
     "--add-host=nexq.local:127.0.0.1",
     "--add-host=host.docker.internal:host-gateway"
   ],

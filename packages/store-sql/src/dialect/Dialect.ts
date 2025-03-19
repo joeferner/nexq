@@ -23,6 +23,11 @@ import {
   SQL_CREATE_SUBSCRIPTION,
   SQL_CREATE_TOPIC,
   SQL_CREATE_USER,
+  SQL_DELETE_ALL_MESSAGES,
+  SQL_DELETE_ALL_QUEUES,
+  SQL_DELETE_ALL_SUBSCRIPTIONS,
+  SQL_DELETE_ALL_TOPICS,
+  SQL_DELETE_ALL_USERS,
   SQL_DELETE_EXPIRED_MESSAGES_OVER_RECEIVE_COUNT,
   SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION,
   SQL_DELETE_MESSAGE_BY_MESSAGE_ID,
@@ -66,7 +71,7 @@ export abstract class Dialect<TDatabase> {
     protected readonly sql: Sql<TDatabase>,
     protected readonly database: TDatabase,
     protected readonly time: Time
-  ) {}
+  ) { }
 
   public async findUserByAccessKeyId(accessKeyId: string): Promise<User | undefined> {
     const rows = await this.sql.all<SqlUser>(this.database, SQL_FIND_USER_BY_ACCESS_KEY_ID, [accessKeyId]);
@@ -451,6 +456,14 @@ export abstract class Dialect<TDatabase> {
     if (results.changes !== 1) {
       throw new TopicNotFoundError(topicName);
     }
+  }
+
+  public async deleteAllData(): Promise<void> {
+    await this.sql.run(this.database, SQL_DELETE_ALL_MESSAGES, []);
+    await this.sql.run(this.database, SQL_DELETE_ALL_SUBSCRIPTIONS, []);
+    await this.sql.run(this.database, SQL_DELETE_ALL_TOPICS, []);
+    await this.sql.run(this.database, SQL_DELETE_ALL_QUEUES, []);
+    await this.sql.run(this.database, SQL_DELETE_ALL_USERS, []);
   }
 }
 

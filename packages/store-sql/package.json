@@ -22,12 +22,16 @@
   "dependencies": {
     "@nexq/core": "file:../core",
     "better-sqlite3": "^11.8.1",
+    "pg": "^8.14.1",
+    "pg-pool": "^3.8.0",
     "radash": "^12.1.0"
   },
   "devDependencies": {
     "@nexq/test": "file:../test",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "@types/pg-pool": "^2.0.6",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
     "typescript": "^5.8.2",
