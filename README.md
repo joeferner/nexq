@@ -1,3 +1,5 @@
+[![NexQ](https://github.com/joeferner/nexq/actions/workflows/node.js.yml/badge.svg)](https://github.com/joeferner/nexq/actions/workflows/node.js.yml)
+
 # Features
 
 :scroll: - Future
