@@ -3,6 +3,7 @@ import { RunResult } from "./dto/RunResult.js";
 
 export const SQL_DELETE_QUEUE = "deleteQueue";
 export const SQL_PURGE_QUEUE = "purgeQueue";
+export const SQL_MOVE_MESSAGES = "moveMessages";
 export const SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_QUEUE_NAME = "findQueueNamesWithDeadLetterQueueName";
 export const SQL_DELETE_MESSAGE_BY_MESSAGE_ID = "deleteMessageByMessageId";
 export const SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE = "deleteMessageByMessageIdAndReceiptHandle";
@@ -188,6 +189,21 @@ export abstract class Sql<TDatabase> {
           priority DESC,
           sent_at
         LIMIT ?
+      `
+    );
+
+    this.addQuery(
+      SQL_MOVE_MESSAGES,
+      `
+        UPDATE
+          ${this.tablePrefix}_message
+        SET
+          queue_name = ?,
+          retain_until = ?
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NULL OR ? > expires_at)
+          AND (delay_until IS NULL OR ? >= delay_until)
       `
     );
 

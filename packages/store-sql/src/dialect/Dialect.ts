@@ -14,6 +14,7 @@ import {
   UpdateMessageOptions,
   User,
 } from "@nexq/core";
+import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
 import {
   Sql,
@@ -22,8 +23,8 @@ import {
   SQL_CREATE_SUBSCRIPTION,
   SQL_CREATE_TOPIC,
   SQL_CREATE_USER,
-  SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION,
   SQL_DELETE_EXPIRED_MESSAGES_OVER_RECEIVE_COUNT,
+  SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION,
   SQL_DELETE_MESSAGE_BY_MESSAGE_ID,
   SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE,
   SQL_DELETE_MESSAGE_BY_RECEIPT_HANDLE,
@@ -43,6 +44,7 @@ import {
   SQL_GET_QUEUE_NUMBER_OF_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES,
   SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER,
+  SQL_MOVE_MESSAGES,
   SQL_NAK_MESSAGE,
   SQL_PURGE_QUEUE,
   SQL_RECEIVE_MESSAGE,
@@ -50,6 +52,7 @@ import {
   SQL_UPDATE_QUEUE_EXPIRES_AT,
 } from "../sql/Sql.js";
 import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
+import { RunResult } from "../sql/dto/RunResult.js";
 import { SqlCount } from "../sql/dto/SqlCount.js";
 import { SqlMessage, sqlMessageToMessage } from "../sql/dto/SqlMessage.js";
 import { SqlQueue, sqlQueueToQueueInfo } from "../sql/dto/SqlQueue.js";
@@ -57,7 +60,6 @@ import { SqlTopicWithSubscription, sqlTopicWithSubscriptionToTopicInfo } from ".
 import { SqlUser, sqlUserToUser } from "../sql/dto/SqlUser.js";
 import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
-import { RunResult } from "../sql/dto/RunResult.js";
 
 export abstract class Dialect<TDatabase> {
   protected constructor(
@@ -397,6 +399,22 @@ export abstract class Dialect<TDatabase> {
 
   public async purgeQueue(queueName: string): Promise<void> {
     await this.sql.run(this.database, SQL_PURGE_QUEUE, [queueName]);
+  }
+
+  public async moveMessages(
+    sourceQueueName: string,
+    targetQueueName: string,
+    retainUntil: Date | undefined
+  ): Promise<MoveMessagesResult> {
+    const now = this.time.getCurrentTime();
+    const results = await this.sql.run(this.database, SQL_MOVE_MESSAGES, [
+      targetQueueName,
+      retainUntil ?? null,
+      sourceQueueName,
+      now,
+      now,
+    ]);
+    return { movedMessageCount: results.changes };
   }
 
   public async getTopicInfos(): Promise<TopicInfo[]> {

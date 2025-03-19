@@ -37,6 +37,7 @@ import * as R from "radash";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { NewQueueMessageEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
+import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 
 const logger = createLogger("SqlStore");
 
@@ -442,6 +443,17 @@ export class SqlStore implements Store {
 
   public async purgeQueue(queueName: string): Promise<void> {
     await this.dialect.purgeQueue(queueName);
+  }
+
+  public async moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult> {
+    const now = this.time.getCurrentTime();
+    const sourceQueue = await this.getCachedQueueInfo(sourceQueueName);
+    const targetQueue = await this.getCachedQueueInfo(targetQueueName);
+    const retainUntil =
+      targetQueue.messageRetentionPeriodMs === undefined
+        ? undefined
+        : new Date(now.getTime() + targetQueue.messageRetentionPeriodMs);
+    return await this.dialect.moveMessages(sourceQueue.name, targetQueue.name, retainUntil);
   }
 
   public getTopicInfo(topicName: string): Promise<TopicInfo> {

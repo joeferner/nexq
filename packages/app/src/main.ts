@@ -38,12 +38,12 @@ async function parseCommandLineAndStart(): Promise<void> {
   await run(cmd, process.argv.slice(2));
 }
 
-process.on('SIGINT', () => {
+process.on("SIGINT", () => {
   // TODO shutdown gracefully
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on("SIGTERM", () => {
   // TODO shutdown gracefully
   process.exit(0);
 });

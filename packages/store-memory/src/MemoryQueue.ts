@@ -15,6 +15,7 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
+import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
@@ -286,5 +287,25 @@ export class MemoryQueue {
 
   public purge(): void {
     this.messages.length = 0;
+  }
+
+  public moveMessages(targetQueue: MemoryQueue): MoveMessagesResult {
+    let movedMessageCount = 0;
+    const now = this.time.getCurrentTime();
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i];
+      if (!message.isAvailable(now)) {
+        continue;
+      }
+
+      this.messages.splice(i, 1);
+      movedMessageCount++;
+      message.retainUntil =
+        targetQueue.messageRetentionPeriodMs === undefined
+          ? undefined
+          : new Date(now.getTime() + targetQueue.messageRetentionPeriodMs);
+      targetQueue.messages.push(message);
+    }
+    return { movedMessageCount };
   }
 }

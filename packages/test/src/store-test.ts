@@ -18,7 +18,8 @@ const TOPIC1_NAME = "topic1";
 const TOPIC2_NAME = "topic2";
 const MESSAGE1_BODY = "message1";
 const MESSAGE2_BODY = "message2";
-const MESSAGE3_BODY = "message2";
+const MESSAGE3_BODY = "message3";
+const MESSAGE4_BODY = "message4";
 
 export interface CreateStoreOptions {
   time: Time;
@@ -716,6 +717,42 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const batch2Messages = await store.receiveMessages(QUEUE1_NAME, { maxNumberOfMessages: 2 });
       expect(batch2Messages.length).toBe(1);
       expect(batch2Messages[0].bodyAsString()).toBe(MESSAGE3_BODY);
+    });
+
+    test("move messages", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { messageRetentionPeriodMs: 10 * 1000 });
+      await store.createQueue(QUEUE2_NAME, { messageRetentionPeriodMs: 1000 });
+
+      // send a messages
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY, { delayMs: 100 });
+      await store.sendMessage(QUEUE1_NAME, MESSAGE3_BODY);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE4_BODY);
+
+      // receive a message
+      await store.receiveMessage(QUEUE1_NAME);
+
+      // move messages
+      await expect(async () => store.moveMessages(QUEUE1_NAME, "bad-queue-name")).rejects.toThrowError(
+        /queue "bad-queue-name" not found/
+      );
+      await expect(async () => store.moveMessages("bad-queue-name", QUEUE2_NAME)).rejects.toThrowError(
+        /queue "bad-queue-name" not found/
+      );
+
+      const result = await store.moveMessages(QUEUE1_NAME, QUEUE2_NAME);
+      expect(result.movedMessageCount).toBe(2);
+
+      // validate
+      await assertQueueSize(store, QUEUE1_NAME, 0, 1, 1);
+      await assertQueueSize(store, QUEUE2_NAME, 2, 0, 0);
+
+      // validate retention period set
+      await time.advance(1001);
+      await store.poll();
+
+      await assertQueueEmpty(store, QUEUE2_NAME);
     });
   });
 

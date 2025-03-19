@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { expectHttpError } from "../test-utils.js";
 import { ApiV1QueueController } from "./ApiV1QueueController.js";
 
-const QUEUE_NAME = "test-queue";
+const QUEUE1_NAME = "test-queue1";
+const QUEUE2_NAME = "test-queue2";
 
 describe("ApiV1QueueController", async () => {
   let time!: MockTime;
@@ -20,24 +21,25 @@ describe("ApiV1QueueController", async () => {
 
   describe("createQueue", async () => {
     test("good", async () => {
-      await controller.createQueue({ name: QUEUE_NAME });
+      await controller.createQueue({ name: QUEUE1_NAME });
 
-      const queue = await store.getQueueInfo(QUEUE_NAME);
-      expect(queue.name).toBe(QUEUE_NAME);
+      const queue = await store.getQueueInfo(QUEUE1_NAME);
+      expect(queue.name).toBe(QUEUE1_NAME);
     });
 
     test("parse error", async () => {
-      await expectHttpError(async () => await controller.createQueue({ name: QUEUE_NAME, delay: "123z" }), 400);
+      await expectHttpError(async () => await controller.createQueue({ name: QUEUE1_NAME, delay: "123z" }), 400);
     });
 
     test("queue already exists", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(async () => await controller.createQueue({ name: QUEUE_NAME, delay: "1ms" }), 409);
+      await store.createQueue(QUEUE1_NAME);
+      await expectHttpError(async () => await controller.createQueue({ name: QUEUE1_NAME, delay: "1ms" }), 409);
     });
 
     test("dead letter queue not found", async () => {
       await expectHttpError(
-        async () => await controller.createQueue({ name: QUEUE_NAME, deadLetter: { queueName: `${QUEUE_NAME}-dlq` } }),
+        async () =>
+          await controller.createQueue({ name: QUEUE1_NAME, deadLetter: { queueName: `${QUEUE1_NAME}-dlq` } }),
         404
       );
     });
@@ -45,18 +47,18 @@ describe("ApiV1QueueController", async () => {
 
   describe("getQueues", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
       const resp = await controller.getQueues();
       expect(resp.queues.length).toBe(1);
-      expect(resp.queues[0].name).toBe(QUEUE_NAME);
+      expect(resp.queues[0].name).toBe(QUEUE1_NAME);
     });
   });
 
   describe("getQueue", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const resp = await controller.getQueue(QUEUE_NAME);
-      expect(resp.name).toBe(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      const resp = await controller.getQueue(QUEUE1_NAME);
+      expect(resp.name).toBe(QUEUE1_NAME);
     });
 
     test("queue not found", async () => {
@@ -66,8 +68,8 @@ describe("ApiV1QueueController", async () => {
 
   describe("deleteQueue", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await controller.deleteQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      await controller.deleteQueue(QUEUE1_NAME);
       expect((await store.getQueueInfos()).length).toBe(0);
     });
 
@@ -76,37 +78,37 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("queue associated with dead letter queue", async () => {
-      await store.createQueue(`${QUEUE_NAME}-dlq`);
-      await store.createQueue(QUEUE_NAME, { deadLetterQueueName: `${QUEUE_NAME}-dlq` });
-      await expectHttpError(async () => await controller.deleteQueue(`${QUEUE_NAME}-dlq`), 400);
+      await store.createQueue(`${QUEUE1_NAME}-dlq`);
+      await store.createQueue(QUEUE1_NAME, { deadLetterQueueName: `${QUEUE1_NAME}-dlq` });
+      await expectHttpError(async () => await controller.deleteQueue(`${QUEUE1_NAME}-dlq`), 400);
     });
   });
 
   describe("sendMessage", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await controller.sendMessage(QUEUE_NAME, { bodyBase64: btoa("test") });
-      await assertQueueSize(store, QUEUE_NAME, 1, 0, 0);
-      const m = await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      await controller.sendMessage(QUEUE1_NAME, { bodyBase64: btoa("test") });
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+      const m = await store.receiveMessage(QUEUE1_NAME);
       expect(m?.bodyAsString()).toBe("test");
     });
 
     test("bad base64 encoding", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(async () => await controller.sendMessage(QUEUE_NAME, { bodyBase64: "xyz" }), 400);
+      await store.createQueue(QUEUE1_NAME);
+      await expectHttpError(async () => await controller.sendMessage(QUEUE1_NAME, { bodyBase64: "xyz" }), 400);
     });
 
     test("both body and bodyBase64 specified", async () => {
-      await store.createQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
       await expectHttpError(
-        async () => await controller.sendMessage(QUEUE_NAME, { bodyBase64: btoa("test"), body: "test" }),
+        async () => await controller.sendMessage(QUEUE1_NAME, { bodyBase64: btoa("test"), body: "test" }),
         400
       );
     });
 
     test("both body and bodyBase64 unspecified", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(async () => await controller.sendMessage(QUEUE_NAME, {}), 400);
+      await store.createQueue(QUEUE1_NAME);
+      await expectHttpError(async () => await controller.sendMessage(QUEUE1_NAME, {}), 400);
     });
 
     test("queue not found", async () => {
@@ -116,11 +118,11 @@ describe("ApiV1QueueController", async () => {
 
   describe("purgeQueue", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await store.sendMessage(QUEUE_NAME, "test");
-      await controller.purgeQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      await store.sendMessage(QUEUE1_NAME, "test");
+      await controller.purgeQueue(QUEUE1_NAME);
 
-      await assertQueueEmpty(store, QUEUE_NAME);
+      await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
     test("queue not found", async () => {
@@ -128,23 +130,47 @@ describe("ApiV1QueueController", async () => {
     });
   });
 
+  describe("moveMessages", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await store.createQueue(QUEUE2_NAME);
+
+      await store.sendMessage(QUEUE1_NAME, "test1");
+      await store.sendMessage(QUEUE1_NAME, "test2");
+
+      const result = await controller.moveMessages(QUEUE1_NAME, QUEUE2_NAME);
+      expect(result.movedMessageCount).toBe(2);
+
+      await assertQueueEmpty(store, QUEUE1_NAME);
+      await assertQueueSize(store, QUEUE2_NAME, 2, 0, 0);
+    });
+
+    test("queue not found", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await store.createQueue(QUEUE2_NAME);
+
+      await expectHttpError(async () => await controller.moveMessages(QUEUE1_NAME, "bad-queue-name"), 404);
+      await expectHttpError(async () => await controller.moveMessages("bad-queue-name", QUEUE2_NAME), 404);
+    });
+  });
+
   describe("deleteMessage", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test");
-      await controller.deleteMessage(QUEUE_NAME, m.id);
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test");
+      await controller.deleteMessage(QUEUE1_NAME, m.id);
 
-      await assertQueueEmpty(store, QUEUE_NAME);
+      await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
     test("good with receipt handle", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test");
-      const r = await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test");
+      const r = await store.receiveMessage(QUEUE1_NAME);
       expect(r).toBeTruthy();
-      await controller.deleteMessage(QUEUE_NAME, m.id, r!.receiptHandle);
+      await controller.deleteMessage(QUEUE1_NAME, m.id, r!.receiptHandle);
 
-      await assertQueueEmpty(store, QUEUE_NAME);
+      await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
     test("queue not found", async () => {
@@ -156,30 +182,30 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("message id not found", async () => {
-      await store.createQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
       await expectHttpError(
-        async () => await controller.deleteMessage(QUEUE_NAME, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
+        async () => await controller.deleteMessage(QUEUE1_NAME, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
         404,
         "message id not found"
       );
     });
 
     test("message found but receipt handle does not match (not received)", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
       await expectHttpError(
-        async () => await controller.deleteMessage(QUEUE_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
+        async () => await controller.deleteMessage(QUEUE1_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
         404,
         "message found but receipt handle does not match"
       );
     });
 
     test("message found but receipt handle does not match (received)", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
-      await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
+      await store.receiveMessage(QUEUE1_NAME);
       await expectHttpError(
-        async () => await controller.deleteMessage(QUEUE_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
+        async () => await controller.deleteMessage(QUEUE1_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
         404,
         "message found but receipt handle does not match"
       );
@@ -188,38 +214,38 @@ describe("ApiV1QueueController", async () => {
 
   describe("updateMessage", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test", {
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test", {
         priority: 1,
         attributes: { originalAttr: "originalValue" },
       });
-      await controller.updateMessage(QUEUE_NAME, m.id, undefined, {
+      await controller.updateMessage(QUEUE1_NAME, m.id, undefined, {
         priority: 12,
         attributes: { newAttr: "newAttrValue" },
       });
 
-      const recv = await store.receiveMessage(QUEUE_NAME);
+      const recv = await store.receiveMessage(QUEUE1_NAME);
       expect(recv?.priority).toBe(12);
       expect(recv?.attributes["originalAttr"]).toBeUndefined();
       expect(recv?.attributes["newAttr"]).toBe("newAttrValue");
     });
 
     test("good with receipt handle", async () => {
-      await store.createQueue(QUEUE_NAME, { receiveMessageWaitTimeMs: 10, visibilityTimeoutMs: 5 * 1000 });
-      const m = await store.sendMessage(QUEUE_NAME, "test", { priority: 1 });
-      const r = await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME, { receiveMessageWaitTimeMs: 10, visibilityTimeoutMs: 5 * 1000 });
+      const m = await store.sendMessage(QUEUE1_NAME, "test", { priority: 1 });
+      const r = await store.receiveMessage(QUEUE1_NAME);
       await time.advance(4000);
       expect(r).toBeTruthy();
 
-      await controller.updateMessage(QUEUE_NAME, m.id, r!.receiptHandle, { priority: 12, visibilityTimeout: "5s" });
+      await controller.updateMessage(QUEUE1_NAME, m.id, r!.receiptHandle, { priority: 12, visibilityTimeout: "5s" });
       await time.advance(4000);
       await store.poll();
 
-      await assertQueueSize(store, QUEUE_NAME, 0, 0, 1);
+      await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
       await time.advance(1001);
       await store.poll();
 
-      const recv = await store.receiveMessage(QUEUE_NAME);
+      const recv = await store.receiveMessage(QUEUE1_NAME);
       expect(recv?.priority).toBe(12);
     });
 
@@ -235,10 +261,10 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("message id not found", async () => {
-      await store.createQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
       await expectHttpError(
         async () =>
-          await controller.updateMessage(QUEUE_NAME, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", undefined, {
+          await controller.updateMessage(QUEUE1_NAME, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", undefined, {
             priority: 12,
           }),
         404,
@@ -247,33 +273,33 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("message found but receipt handle does not match (not received)", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
       await expectHttpError(
         async () =>
-          await controller.updateMessage(QUEUE_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", { priority: 12 }),
+          await controller.updateMessage(QUEUE1_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", { priority: 12 }),
         404,
         "message found but receipt handle does not match"
       );
     });
 
     test("message found but receipt handle does not match (received)", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
-      await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
+      await store.receiveMessage(QUEUE1_NAME);
       await expectHttpError(
         async () =>
-          await controller.updateMessage(QUEUE_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", { priority: 12 }),
+          await controller.updateMessage(QUEUE1_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6", { priority: 12 }),
         404,
         "message found but receipt handle does not match"
       );
     });
 
     test("update message visibility timeout without receipt handle", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
       await expectHttpError(
-        async () => await controller.updateMessage(QUEUE_NAME, m.id, undefined, { visibilityTimeout: "5s" }),
+        async () => await controller.updateMessage(QUEUE1_NAME, m.id, undefined, { visibilityTimeout: "5s" }),
         400,
         "cannot update message visibility timeout without providing a receipt handle"
       );
@@ -282,16 +308,16 @@ describe("ApiV1QueueController", async () => {
 
   describe("nakMessage", async () => {
     test("good with receipt handle", async () => {
-      await store.createQueue(QUEUE_NAME, { receiveMessageWaitTimeMs: 10, maxReceiveCount: 1 });
-      const m = await store.sendMessage(QUEUE_NAME, "test", { priority: 1 });
-      const r = await store.receiveMessage(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME, { receiveMessageWaitTimeMs: 10, maxReceiveCount: 1 });
+      const m = await store.sendMessage(QUEUE1_NAME, "test", { priority: 1 });
+      const r = await store.receiveMessage(QUEUE1_NAME);
       await time.advance(4000);
       expect(r).toBeTruthy();
 
-      await controller.nakMessage(QUEUE_NAME, m.id, r!.receiptHandle);
+      await controller.nakMessage(QUEUE1_NAME, m.id, r!.receiptHandle);
       await store.poll();
 
-      await assertQueueEmpty(store, QUEUE_NAME);
+      await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
     test("queue not found", async () => {
@@ -308,11 +334,11 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("message id not found", async () => {
-      await store.createQueue(QUEUE_NAME);
+      await store.createQueue(QUEUE1_NAME);
       await expectHttpError(
         async () =>
           await controller.nakMessage(
-            QUEUE_NAME,
+            QUEUE1_NAME,
             "1effd43f-efc0-64a0-abb1-a262ad6a08d6",
             "1effd43f-efc0-64a0-abb1-a262ad6a08d6"
           ),
@@ -322,10 +348,10 @@ describe("ApiV1QueueController", async () => {
     });
 
     test("message found but receipt handle does not match (not received)", async () => {
-      await store.createQueue(QUEUE_NAME);
-      const m = await store.sendMessage(QUEUE_NAME, "test message");
+      await store.createQueue(QUEUE1_NAME);
+      const m = await store.sendMessage(QUEUE1_NAME, "test message");
       await expectHttpError(
-        async () => await controller.nakMessage(QUEUE_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
+        async () => await controller.nakMessage(QUEUE1_NAME, m.id, "1effd43f-efc0-64a0-abb1-a262ad6a08d6"),
         404,
         "message found but receipt handle does not match"
       );
@@ -334,24 +360,24 @@ describe("ApiV1QueueController", async () => {
 
   describe("receiveMessages", async () => {
     test("good", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await store.sendMessage(QUEUE_NAME, "test1");
+      await store.createQueue(QUEUE1_NAME);
+      await store.sendMessage(QUEUE1_NAME, "test1");
       await time.advance(1);
-      await store.sendMessage(QUEUE_NAME, "test2");
+      await store.sendMessage(QUEUE1_NAME, "test2");
 
-      const resp = await controller.receiveMessages(QUEUE_NAME, {});
+      const resp = await controller.receiveMessages(QUEUE1_NAME, {});
       expect(resp.messages.length).toBe(2);
       resp.messages.sort((a, b) => a.sentTime.localeCompare(b.sentTime));
 
       const message1 = resp.messages[0];
       expect(Buffer.from(message1.bodyBase64, "base64").toLocaleString()).toBe("test1");
-      await controller.deleteMessage(QUEUE_NAME, message1.id, message1.receiptHandle);
+      await controller.deleteMessage(QUEUE1_NAME, message1.id, message1.receiptHandle);
 
       const message2 = resp.messages[1];
       expect(Buffer.from(message2.bodyBase64, "base64").toLocaleString()).toBe("test2");
-      await controller.deleteMessage(QUEUE_NAME, message2.id, message2.receiptHandle);
+      await controller.deleteMessage(QUEUE1_NAME, message2.id, message2.receiptHandle);
 
-      await assertQueueEmpty(store, QUEUE_NAME);
+      await assertQueueEmpty(store, QUEUE1_NAME);
     });
   });
 });

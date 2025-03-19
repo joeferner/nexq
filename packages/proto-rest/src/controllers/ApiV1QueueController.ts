@@ -25,6 +25,7 @@ import {
   parseOptionalBytesSize,
   parseOptionalDurationIntoMs,
 } from "../utils.js";
+import { MoveMessagesResponse } from "../dto/MoveMessagesResponse.js";
 
 const logger = createLogger("Rest:ApiV1QueueController");
 
@@ -179,6 +180,36 @@ export class ApiV1QueueController extends Controller {
         throw createError.NotFound("queue not found");
       }
       logger.error(`failed to send message`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * move all visible messages from this queue to a new queue
+   *
+   * @param sourceQueueName the name of the queue to move messages from
+   * @param targetQueueName the target queue to move messages to
+   * @example sourceQueueName "queue1-dlq"
+   * @example targetQueueName "queue1"
+   */
+  @Post("{sourceQueueName}/message/move")
+  @SuccessResponse("200", "Messages moved")
+  @Response<void>(404, "queue not found")
+  public async moveMessages(
+    @Path() sourceQueueName: string,
+    @Query() targetQueueName: string
+  ): Promise<MoveMessagesResponse> {
+    try {
+      const result = await this.store.moveMessages(sourceQueueName, targetQueueName);
+      return { movedMessageCount: result.movedMessageCount };
+    } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
+      if (err instanceof QueueNotFoundError) {
+        throw createError.NotFound("queue not found");
+      }
+      logger.error(`failed to move messages`, err);
       throw err;
     }
   }

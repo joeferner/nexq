@@ -33,6 +33,7 @@ import * as R from "radash";
 import { MemoryQueue } from "./MemoryQueue.js";
 import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
+import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 
 const logger = createLogger("MemoryStore");
 
@@ -101,6 +102,12 @@ export class MemoryStore implements Store {
     const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
     this.queues[queueName] = queue;
     logger.info(`created new queue "${queueName}"`);
+  }
+
+  public async moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult> {
+    const sourceQueue = this.getQueueRequired(sourceQueueName);
+    const targetQueue = this.getQueueRequired(targetQueueName);
+    return sourceQueue.moveMessages(targetQueue);
   }
 
   public async sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult> {

@@ -1,6 +1,7 @@
 import { CreateQueueOptions } from "./dto/CreateQueueOptions.js";
 import { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 import { CreateUserOptions } from "./dto/CreateUserOptions.js";
+import { MoveMessagesResult } from "./dto/MoveMessagesResult.js";
 import { QueueInfo } from "./dto/QueueInfo.js";
 import { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
 import { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
@@ -42,6 +43,7 @@ export interface Store {
   deleteMessage(queueName: string, messageId: string, receiptHandle?: string): Promise<void>;
   deleteQueue(queueName: string): Promise<void>;
   purgeQueue(queueName: string): Promise<void>;
+  moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult>;
 
   getTopicInfo(topicName: string): Promise<TopicInfo>;
   getTopicInfos(): Promise<TopicInfo[]>;
