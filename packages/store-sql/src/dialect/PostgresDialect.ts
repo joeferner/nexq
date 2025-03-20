@@ -1,13 +1,13 @@
 import { Time } from "@nexq/core";
-import { Client as PgClient, types as pgTypes } from "pg";
+import pg from "pg";
 import Pool from "pg-pool";
 import { SqlStoreCreateConfigPostgres } from "../SqlStore.js";
 import { PostgresSql } from "../sql/PostgresSql.js";
 import { Dialect } from "./Dialect.js";
 import { PostgresTransaction } from "./PostgresTransaction.js";
 
-export class PostgresDialect extends Dialect<Pool<PgClient>, PostgresSql> {
-  private constructor(sql: PostgresSql, pool: Pool<PgClient>, time: Time) {
+export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
+  private constructor(sql: PostgresSql, pool: Pool<pg.Client>, time: Time) {
     super(sql, pool, time);
   }
 
@@ -37,8 +37,8 @@ export class PostgresDialect extends Dialect<Pool<PgClient>, PostgresSql> {
     const database = params.pathname?.split("/")?.[1];
     const port = parseInt(params.port ?? "5432");
 
-    pgTypes.setTypeParser(1700, parseFloat);
-    pgTypes.setTypeParser(20, parseFloat);
+    pg.types.setTypeParser(1700, parseFloat);
+    pg.types.setTypeParser(20, parseFloat);
 
     const pool = new Pool({
       user: params.username,

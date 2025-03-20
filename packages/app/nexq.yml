@@ -2,10 +2,10 @@
 
 # This user is created on a store that has not yet been initialized
 initialUsers:
-  username: admin
-  password: admin
-  accessKeyId: key
-  secretAccessKey: secret
+  - username: admin
+    password: admin
+    accessKeyId: key
+    secretAccessKey: secret
 
 store:
   type: memory
