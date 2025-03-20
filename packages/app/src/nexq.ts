@@ -52,11 +52,11 @@ async function createStore(config: NexqConfig, time: Time): Promise<Store> {
   switch (config.store.type) {
     case "memory": {
       const storeConfig: MemoryStoreConfig = config.store;
-      return await MemoryStore.create({ initialUser: config.initialUser, config: storeConfig, time });
+      return await MemoryStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });
     }
     case "sql": {
       const storeConfig: SqlStoreConfig = config.store;
-      return await SqlStore.create({ initialUser: config.initialUser, config: storeConfig, time });
+      return await SqlStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });
     }
     default:
       throw new Error(`unexpected store type ${type}`);

@@ -29,11 +29,11 @@ securityContext: {}
   # runAsUser: 1000
 
 configYaml: |
-  initialUser:
-    username: admin
-    password: admin
-    accessKeyId: key
-    secretAccessKey: secret
+  initialUsers:
+    - username: admin
+      password: admin
+      accessKeyId: key
+      secretAccessKey: secret
 
   store:
     type: memory

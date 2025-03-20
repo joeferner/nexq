@@ -93,7 +93,7 @@ export type SqlStoreCreateConfig = SqlStoreCreateConfigSqlite | SqlStoreCreateCo
 export interface SqlStoreCreateOptions {
   time: Time;
   passwordHashRounds?: number;
-  initialUser?: CreateUserOptions;
+  initialUsers?: CreateUserOptions[];
   config: SqlStoreCreateConfig;
 }
 
@@ -121,8 +121,14 @@ export class SqlStore implements Store {
       ...options,
       _dialect: dialect,
     });
-    if (options.initialUser) {
-      await store.createUser(options.initialUser);
+
+    if (options.initialUsers) {
+      const existingUsers = await store.getUsers();
+      if (existingUsers.length === 0) {
+        for (const initialUser of options.initialUsers) {
+          await store.createUser(initialUser);
+        }
+      }
     }
     return store;
   }

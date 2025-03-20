@@ -39,8 +39,10 @@ describe("SqlStore", async () => {
 
     await store.deleteAllData();
 
-    if (options.initialUser) {
-      await store.createUser(options.initialUser);
+    if (options.initialUsers) {
+      for (const initialUser of options.initialUsers) {
+        await store.createUser(initialUser);
+      }
     }
 
     return store;

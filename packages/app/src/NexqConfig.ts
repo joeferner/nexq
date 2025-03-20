@@ -10,7 +10,7 @@ export type SqlStoreConfig = { type: "sql" } & SqlStoreCreateConfig;
 
 export interface NexqConfig {
   logger?: LoggerConfig;
-  initialUser?: CreateUserOptions;
+  initialUsers?: CreateUserOptions[];
   store: MemoryStoreConfig | SqlStoreConfig;
   rest?: RestConfig;
   prometheus?: PrometheusConfig;

@@ -1,6 +1,6 @@
 
 # This user is created on a store that has not yet been initialized
-initialUser:
+initialUsers:
   username: admin
   password: admin
   accessKeyId: key

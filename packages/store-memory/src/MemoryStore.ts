@@ -50,7 +50,7 @@ export interface MemoryStoreCreateConfig {
 export interface MemoryStoreCreateOptions {
   time: Time;
   passwordHashRounds?: number;
-  initialUser?: CreateUserOptions;
+  initialUsers?: CreateUserOptions[];
   config: MemoryStoreCreateConfig;
 }
 
@@ -71,8 +71,10 @@ export class MemoryStore implements Store {
 
   public static async create(options: MemoryStoreCreateOptions): Promise<MemoryStore> {
     const store = new MemoryStore(options);
-    if (options.initialUser) {
-      await store.createUser(options.initialUser);
+    if (options.initialUsers) {
+      for (const initialUser of options.initialUsers) {
+        await store.createUser(initialUser);
+      }
     }
     return store;
   }

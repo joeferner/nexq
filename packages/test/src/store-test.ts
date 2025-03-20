@@ -23,7 +23,7 @@ const MESSAGE4_BODY = "message4";
 
 export interface CreateStoreOptions {
   time: Time;
-  initialUser?: CreateUserOptions;
+  initialUsers?: CreateUserOptions[];
 }
 
 export async function assertQueueSize(
@@ -893,7 +893,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
     test("initial user", async () => {
       await store.shutdown();
-      store = await createStore({ time, initialUser: { username: "user1" } });
+      store = await createStore({ time, initialUsers: [{ username: "user1" }] });
 
       // verify user
       const users = await store.getUsers();
