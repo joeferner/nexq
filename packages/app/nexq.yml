@@ -1,3 +1,4 @@
+# configuration file accepts environment variable substitution using: "${env:USER}"
 
 # This user is created on a store that has not yet been initialized
 initialUsers:

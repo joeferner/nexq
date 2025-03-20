@@ -10,7 +10,9 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier src --write",
     "prepare": "ts-patch install",
-    "start": "node build/main.js"
+    "start": "node build/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
   },
   "author": "Joe Ferner <joe@fernsroth.com>",
   "license": "MIT",
@@ -21,8 +23,8 @@
   },
   "dependencies": {
     "@nexq/core": "file:../core",
-    "@nexq/proto-rest": "file:../proto-rest",
     "@nexq/proto-prometheus": "file:../proto-prometheus",
+    "@nexq/proto-rest": "file:../proto-rest",
     "@nexq/store-memory": "file:../store-memory",
     "@nexq/store-sql": "file:../store-sql",
     "cmd-ts": "^0.13.0",
@@ -38,6 +40,7 @@
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
     "typescript": "~5.8.2",
-    "typescript-eslint": "^8.26.0"
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.9"
   }
 }

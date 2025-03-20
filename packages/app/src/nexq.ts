@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
+import { envSubstitution } from "./utils.js";
 
 export interface StartOptions {
   configFilename: string;
@@ -31,7 +32,9 @@ export async function start(options: StartOptions): Promise<void> {
 }
 
 async function loadConfig(configFilename: string): Promise<NexqConfig> {
-  const data = await fs.promises.readFile(configFilename, "utf8");
+  let data = await fs.promises.readFile(configFilename, "utf8");
+  data = envSubstitution(data);
+
   let dataParsed: object;
   try {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
