@@ -124,6 +124,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           FOREIGN KEY(dead_letter_queue_name) REFERENCES nexq_queue(name)
         )
       `);
+      await database.query(`CREATE UNIQUE INDEX nexq_queue_name_idx ON nexq_queue(name)`);
 
       await database.query(`
         CREATE TABLE nexq_topic(
@@ -133,6 +134,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           last_modified_at TIMESTAMP NOT NULL
         )
       `);
+      await database.query(`CREATE UNIQUE INDEX nexq_topic_name_idx ON nexq_topic(name)`);
 
       await database.query(`
         CREATE TABLE nexq_subscription(
@@ -144,6 +146,9 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           FOREIGN KEY(topic_name) REFERENCES nexq_topic(name) ON DELETE CASCADE
         )
       `);
+      await database.query(`CREATE UNIQUE INDEX nexq_subscription_id_idx ON nexq_subscription(id)`);
+      await database.query(`CREATE INDEX nexq_subscription_topic_name_idx ON nexq_subscription(topic_name)`);
+      await database.query(`CREATE INDEX nexq_subscription_queue_name_idx ON nexq_subscription(queue_name)`);
 
       await database.query(`
         CREATE TABLE nexq_message(
@@ -164,6 +169,9 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           FOREIGN KEY(queue_name) REFERENCES nexq_queue(name) ON DELETE CASCADE
         )
       `);
+      await database.query(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
+      await database.query(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
+      await database.query(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
 
       await database.query(`
         CREATE TABLE nexq_user(
@@ -176,6 +184,8 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           UNIQUE (access_key_id)
         )
       `);
+      await database.query(`CREATE UNIQUE INDEX nexq_user_id_idx ON nexq_user(id)`);
+      await database.query(`CREATE UNIQUE INDEX nexq_user_username_idx ON nexq_user(username)`);
 
       await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
         MIGRATION_VERSION_INITIAL,

@@ -97,7 +97,8 @@ export class SqliteSql extends Sql<sqlite.Database> {
     if (!migrations.some((m) => m.version === MIGRATION_VERSION_INITIAL)) {
       logger.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
 
-      database.exec(`CREATE TABLE nexq_queue(
+      database.exec(`
+        CREATE TABLE nexq_queue(
           name TEXT PRIMARY KEY,
           created_at TEXT NOT NULL,
           last_modified_at TEXT NOT NULL,
@@ -112,25 +113,36 @@ export class SqliteSql extends Sql<sqlite.Database> {
           max_receive_count INTEGER,
           tags TEXT NOT NULL,
           FOREIGN KEY(dead_letter_queue_name) REFERENCES nexq_queue(name)
-        )`);
+        )
+      `);
+      database.exec(`CREATE UNIQUE INDEX nexq_queue_name_idx ON nexq_queue(name)`);
 
-      database.exec(`CREATE TABLE nexq_topic(
+      database.exec(`
+        CREATE TABLE nexq_topic(
           name TEXT PRIMARY KEY,
           tags TEXT NOT NULL,
           created_at TEXT NOT NULL,
           last_modified_at TEXT NOT NULL
-        )`);
+        )
+      `);
+      database.exec(`CREATE UNIQUE INDEX nexq_topic_name_idx ON nexq_topic(name)`);
 
-      database.exec(`CREATE TABLE nexq_subscription(
+      database.exec(`
+        CREATE TABLE nexq_subscription(
           id TEXT NOT NULL PRIMARY KEY,
           topic_name TEXT NOT NULL,
           queue_name TEXT NOT NULL,
           UNIQUE (topic_name, queue_name),
           FOREIGN KEY(queue_name) REFERENCES nexq_queue(name) ON DELETE CASCADE,
           FOREIGN KEY(topic_name) REFERENCES nexq_topic(name) ON DELETE CASCADE
-        )`);
+        )
+      `);
+      database.exec(`CREATE UNIQUE INDEX nexq_subscription_id_idx ON nexq_subscription(id)`);
+      database.exec(`CREATE INDEX nexq_subscription_topic_name_idx ON nexq_subscription(topic_name)`);
+      database.exec(`CREATE INDEX nexq_subscription_queue_name_idx ON nexq_subscription(queue_name)`);
 
-      database.exec(`CREATE TABLE nexq_message(
+      database.exec(`
+        CREATE TABLE nexq_message(
           id TEXT NOT NULL,
           queue_name TEXT NOT NULL,
           priority INTEGER NOT NULL,
@@ -146,9 +158,14 @@ export class SqliteSql extends Sql<sqlite.Database> {
           last_nak_reason TEXT,
           PRIMARY KEY (id, queue_name),
           FOREIGN KEY(queue_name) REFERENCES nexq_queue(name) ON DELETE CASCADE
-        )`);
+        )
+      `);
+      database.exec(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
+      database.exec(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
+      database.exec(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
 
-      database.exec(`CREATE TABLE nexq_user(
+      database.exec(`
+        CREATE TABLE nexq_user(
           id TEXT NOT NULL PRIMARY KEY,
           username TEXT NOT NULL,
           password_hash TEXT,
@@ -156,7 +173,10 @@ export class SqliteSql extends Sql<sqlite.Database> {
           secret_access_key TEXT,
           UNIQUE (username),
           UNIQUE (access_key_id)
-        )`);
+        )
+      `);
+      database.exec(`CREATE UNIQUE INDEX nexq_user_id_idx ON nexq_user(id)`);
+      database.exec(`CREATE UNIQUE INDEX nexq_user_username_idx ON nexq_user(username)`);
 
       database
         .prepare(`INSERT INTO nexq_migration(version, name, applied_at) VALUES (?, ?, ?)`)
