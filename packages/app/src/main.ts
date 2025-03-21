@@ -1,6 +1,6 @@
 /* eslint no-console: "off" */
 
-import { command, run, string, option } from "cmd-ts";
+import { command, run, string, option, multioption, array } from "cmd-ts";
 import findRoot from "find-root";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -14,7 +14,7 @@ async function parseCommandLineAndStart(): Promise<void> {
   const packageJsonFilename = path.join(root, "package.json");
   // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment
   const packageJson: { version: string } = JSON.parse(await fs.promises.readFile(packageJsonFilename, "utf8"));
-  const defaultConfigFilename = path.join(process.cwd(), "nexq.yml");
+  const defaultConfigFilename = path.join(process.cwd(), "config/nexq.yml");
 
   const cmd = command({
     name: "nexq",
@@ -25,13 +25,21 @@ async function parseCommandLineAndStart(): Promise<void> {
         short: "c",
         long: "config",
         type: string,
-        description: "configuration file [default: ./nexq.yml]",
+        description: "configuration file [default: ./config/nexq.yml]",
         defaultValue: () => defaultConfigFilename,
       }),
+      configOverrides: multioption({
+        short: 'D',
+        long: 'D',
+        type: array(string),
+        description: "override a configuration value"
+      })
     },
     handler: async (args) => {
-      const configFilename = args.config;
-      await start({ configFilename });
+      await start({ 
+        ...args,
+        configFilename: args.config
+      });
     },
   });
 

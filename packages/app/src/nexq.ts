@@ -1,22 +1,29 @@
+/* eslint no-console: "off" */
+
 import { Logger, RealTime, Store, Time } from "@nexq/core";
-import { DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
+import { createLogger, DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
 import { PrometheusServer } from "@nexq/proto-prometheus";
 import { RestServer } from "@nexq/proto-rest";
 import { MemoryStore } from "@nexq/store-memory";
 import { SqlStore } from "@nexq/store-sql";
 import fs from "node:fs";
+import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
-import { envSubstitution } from "./utils.js";
+import { applyConfigOverrides, envSubstitution } from "./utils.js";
 
 export interface StartOptions {
   configFilename: string;
+  configOverrides?: string[];
 }
 
 export async function start(options: StartOptions): Promise<void> {
-  const config = await loadConfig(options.configFilename);
+  const fullConfigFilename = path.resolve(options.configFilename);
+  const config = await loadConfig(fullConfigFilename, options.configOverrides);
   Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);
+  const logger = createLogger("NexQ");
+  logger.info(`using config "${fullConfigFilename}"`);
   const time = new RealTime();
   const store = await createStore(config, time);
 
@@ -31,8 +38,19 @@ export async function start(options: StartOptions): Promise<void> {
   }
 }
 
-async function loadConfig(configFilename: string): Promise<NexqConfig> {
-  let data = await fs.promises.readFile(configFilename, "utf8");
+async function loadConfig(configFilename: string, configOverrides?: string[]): Promise<NexqConfig> {
+  if (!(fs.existsSync(configFilename))) {
+    console.error(`config file "${configFilename}" does not exist`);
+    process.exit(1);
+  }
+
+  let data: string;
+  try {
+    data = await fs.promises.readFile(configFilename, "utf8");
+  } catch (err) {
+    console.error(`failed to read config file "${configFilename}": ${err as Error}`);
+    process.exit(1);
+  }
   data = envSubstitution(data);
 
   let dataParsed: object;
@@ -42,6 +60,7 @@ async function loadConfig(configFilename: string): Promise<NexqConfig> {
   } catch (err) {
     throw new ConfigParseError(configFilename, err as Error);
   }
+  applyConfigOverrides(dataParsed, configOverrides);
   const result = validateNexqConfig(dataParsed);
   if (result.success) {
     return result.data;

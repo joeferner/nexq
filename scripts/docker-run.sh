@@ -7,4 +7,4 @@ cd "${SCRIPT_DIR}/.."
 
 source ./scripts/_utils.sh
 
-docker run --rm -it nexq "$@"
+docker run --rm -it nexq -- "$@"

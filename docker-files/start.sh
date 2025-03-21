@@ -2,6 +2,8 @@
 set -e
 set -u
 
-cd "/opt/nexq/"
-
-node app/build/main.js --config /opt/nexq/config/nexq.yml
+if [ $# -eq 0 ]; then
+  node app/build/main.js --config /opt/nexq/config/nexq.yml
+else
+  node app/build/main.js "$@"
+fi

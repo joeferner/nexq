@@ -36,7 +36,7 @@ RUN \
     --mount=type=bind,source=packages/proto-prometheus/package-lock.json,target=package-lock.json \
     --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev
-    
+
 WORKDIR /opt/nexq/app
 RUN \
     --mount=type=bind,source=packages/app/package.json,target=package.json \
@@ -51,10 +51,11 @@ COPY packages/proto-rest /opt/nexq/proto-rest
 COPY packages/proto-prometheus /opt/nexq/proto-prometheus
 COPY packages/app /opt/nexq/app
 
-COPY packages/app/nexq.yml /opt/nexq/config/nexq.yml
-COPY docker-files/start.sh /opt/nexq/start.sh
+COPY packages/app/config/nexq.yml /opt/nexq/config/nexq.yml
+COPY docker-files/start.sh /opt/nexq/start
 
 WORKDIR /opt/nexq/
 USER node
 
-CMD ["/opt/nexq/start.sh"]
+ENTRYPOINT ["/bin/sh"]
+CMD ["./start", "--help"]
