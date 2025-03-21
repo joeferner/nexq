@@ -4,6 +4,7 @@ import {
   CreateTopicOptions,
   Message,
   MessageNotFoundError,
+  MoveMessagesResult,
   QueueInfo,
   QueueNotFoundError,
   ReceiptHandleIsInvalidError,
@@ -14,7 +15,6 @@ import {
   UpdateMessageOptions,
   User,
 } from "@nexq/core";
-import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
 import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
 import { RunResult } from "../sql/dto/RunResult.js";

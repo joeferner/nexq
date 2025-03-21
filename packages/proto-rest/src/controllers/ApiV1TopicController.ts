@@ -1,5 +1,6 @@
 import {
   createLogger,
+  parseOptionalDurationIntoMs,
   QueueNotFoundError,
   Store,
   TopicAlreadyExistsError,
@@ -15,7 +16,7 @@ import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { SendMessageResponse } from "../dto/SendMessageResponse.js";
 import { SubscribeQueueRequest } from "../dto/SubscribeQueueRequest.js";
 import { SubscribeResponse } from "../dto/SubscribeResponse.js";
-import { bufferFromBase64, isHttpError, parseOptionalDurationIntoMs } from "../utils.js";
+import { bufferFromBase64, isHttpError } from "../utils.js";
 
 const logger = createLogger("Rest:ApiV1TopicController");
 

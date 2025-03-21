@@ -1,7 +1,6 @@
 /* eslint no-console: "off" */
 
-import { Logger, RealTime, Store, Time } from "@nexq/core";
-import { createLogger, DEFAULT_LOGGER_CONFIG } from "@nexq/core/build/logger.js";
+import { createLogger, DEFAULT_LOGGER_CONFIG, Logger, RealTime, Store, Time } from "@nexq/core";
 import { PrometheusServer } from "@nexq/proto-prometheus";
 import { RestServer } from "@nexq/proto-rest";
 import { MemoryStore } from "@nexq/store-memory";

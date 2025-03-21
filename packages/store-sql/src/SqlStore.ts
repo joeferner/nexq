@@ -10,6 +10,8 @@ import {
   InvalidUpdateError,
   Message,
   MessageExceededMaxMessageSizeError,
+  MoveMessagesResult,
+  parseDurationIntoMs,
   QueueAlreadyExistsError,
   QueueInfo,
   queueInfoEqualCreateQueueOptions,
@@ -32,7 +34,6 @@ import {
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
 } from "@nexq/core";
-import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
 import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
@@ -42,14 +43,14 @@ import { Transaction } from "./dialect/Transaction.js";
 
 const logger = createLogger("SqlStore");
 
-export const DEBUG_POLL_INTERVAL = 1000;
+export const DEFAULT_POLL_INTERVAL = "30s";
 
 /**
  * configure expected in nexq.yaml file
  */
 export interface _SqlStoreCreateConfig {
   dialect: "sqlite" | "postgres";
-  pollInterval?: number;
+  pollInterval?: string;
   connectionString: string;
 }
 
@@ -100,7 +101,7 @@ export interface SqlStoreCreateOptions {
 export class SqlStore implements Store {
   private readonly time: Time;
   private readonly passwordHashRounds: number;
-  private readonly pollInterval: number;
+  private readonly pollIntervalMs: number;
   private readonly dialect: SqliteDialect | PostgresDialect;
   private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
   private readonly cachedQueueInfo: Record<string, QueueInfo> = {};
@@ -112,7 +113,7 @@ export class SqlStore implements Store {
     this.time = options.time;
     this.dialect = options._dialect;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
-    this.pollInterval = options.config.pollInterval ?? DEBUG_POLL_INTERVAL;
+    this.pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
   }
 
   public static async create(options: SqlStoreCreateOptions): Promise<SqlStore> {
@@ -397,11 +398,11 @@ export class SqlStore implements Store {
         await this.pollQueue(queueInfo);
       }
     } finally {
-      if (!this.pollHandle && this.pollInterval > 0) {
+      if (!this.pollHandle && this.pollIntervalMs > 0) {
         this.pollHandle = this.time.setTimeout(() => {
           this.pollHandle = undefined;
           void this.poll();
-        }, this.pollInterval);
+        }, this.pollIntervalMs);
       }
     }
   }

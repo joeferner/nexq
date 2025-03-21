@@ -12,7 +12,7 @@ export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlread
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
-export { createLogger, Logger, LoggerConfig, LogLevel } from "./logger.js";
+export { createLogger, Logger, LoggerConfig, LogLevel, DEFAULT_LOGGER_CONFIG } from "./logger.js";
 export { Message } from "./Message.js";
 export { DEFAULT_MAX_NUMBER_OF_MESSAGES, DEFAULT_PASSWORD_HASH_ROUNDS, Store } from "./Store.js";
 
@@ -24,11 +24,21 @@ export { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
 export { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
 export { SendMessageOptions } from "./dto/SendMessageOptions.js";
 export { SendMessageResult } from "./dto/SendMessageResult.js";
+export { MoveMessagesResult } from "./dto/MoveMessagesResult.js";
 export { TopicInfo, topicInfoEqualCreateTopicOptions } from "./dto/TopicInfo.js";
-export { TopicInfoSubscription, TopicInfoQueueSubscription, TopicProtocol } from "./dto/TopicInfoSubscription.js";
+export { TopicInfoQueueSubscription, TopicInfoSubscription, TopicProtocol } from "./dto/TopicInfoSubscription.js";
 export { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";
 
 export { RealTime, Time, Timeout } from "./Time.js";
 export { Trigger } from "./Trigger.js";
 export { User } from "./User.js";
-export { createId, hashPassword, parseBind, verifyPassword } from "./utils.js";
+export {
+  createId,
+  hashPassword,
+  parseBind,
+  parseDurationIntoMs,
+  parseOptionalBytesSize,
+  parseOptionalDurationIntoMs,
+  verifyPassword,
+  DurationParseError,
+} from "./utils.js";

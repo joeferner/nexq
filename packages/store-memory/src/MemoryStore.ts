@@ -8,6 +8,8 @@ import {
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
   Message,
+  MoveMessagesResult,
+  parseDurationIntoMs,
   QueueAlreadyExistsError,
   QueueInfo,
   queueInfoEqualCreateQueueOptions,
@@ -33,15 +35,16 @@ import * as R from "radash";
 import { MemoryQueue } from "./MemoryQueue.js";
 import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
-import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 
 const logger = createLogger("MemoryStore");
+
+export const DEFAULT_POLL_INTERVAL = "30s";
 
 /**
  * configure expected in nexq.yaml file
  */
 export interface MemoryStoreCreateConfig {
-  pollInterval?: number;
+  pollInterval?: string;
 }
 
 /**
@@ -60,13 +63,13 @@ export class MemoryStore implements Store {
   private readonly queues: Record<string, MemoryQueue> = {};
   private readonly topics: Record<string, MemoryTopic> = {};
   private readonly passwordHashRounds: number;
-  private readonly pollInterval: number;
+  private readonly pollIntervalMs: number;
   private pollHandle?: Timeout;
 
   private constructor(options: MemoryStoreCreateOptions) {
     this.time = options.time;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
-    this.pollInterval = options.config.pollInterval ?? 1000;
+    this.pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
   }
 
   public static async create(options: MemoryStoreCreateOptions): Promise<MemoryStore> {
@@ -141,11 +144,11 @@ export class MemoryStore implements Store {
       this.removeExpiredQueues(now);
       this.pollQueues(now);
     } finally {
-      if (!this.pollHandle && this.pollInterval > 0) {
+      if (!this.pollHandle && this.pollIntervalMs > 0) {
         this.pollHandle = this.time.setTimeout(() => {
           this.pollHandle = undefined;
           void this.poll();
-        }, this.pollInterval);
+        }, this.pollIntervalMs);
       }
     }
   }

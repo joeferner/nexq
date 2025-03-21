@@ -10,7 +10,7 @@ describe("SqlStore", async () => {
     if (process.env["TEST_POSTGRES"]) {
       config = {
         dialect: "postgres",
-        pollInterval: 0,
+        pollInterval: "30s",
         connectionString: "postgres://nexq-postgres/nexq",
         options: {
           user: "nexq",
@@ -28,7 +28,7 @@ describe("SqlStore", async () => {
         }
         fs.mkdirSync("test-results", { recursive: true });
       }
-      config = { dialect: "sqlite", pollInterval: 0, connectionString: filename ?? ":memory:" };
+      config = { dialect: "sqlite", pollInterval: "30s", connectionString: filename ?? ":memory:" };
     }
 
     const store = await SqlStore.create({

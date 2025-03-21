@@ -16,13 +16,21 @@ store:
 # store:
 #   type: sql
 #   dialect: sqlite
-#   pollInterval: 1000
+#   pollInterval: 30s
 
 ## the database connection string.
-##   sqlite
 ##     :memory: 	       Open an in-memory database.
 ##     data.db	         Open the file data.db in the current directory.
 #   connectionString: ":memory:"
+
+##
+## Postgres configuration
+##
+# store:
+#   type: sql
+#   dialect: postgres
+#   pollInterval: 30s
+#   connectionString: "postgres://nexq-postgres/nexq"
 
 ##
 ## REST protocol configuration

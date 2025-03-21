@@ -6,6 +6,7 @@ import {
   Message,
   MessageExceededMaxMessageSizeError,
   MessageNotFoundError,
+  MoveMessagesResult,
   QueueInfo,
   ReceiptHandleIsInvalidError,
   ReceiveMessagesOptions,
@@ -15,7 +16,6 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
-import { MoveMessagesResult } from "@nexq/core/build/dto/MoveMessagesResult.js";
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
