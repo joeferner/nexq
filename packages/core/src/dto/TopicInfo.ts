@@ -8,6 +8,12 @@ export interface TopicInfo {
   tags: Record<string, string>;
 }
 
-export function topicInfoEqualCreateTopicOptions(topicInfo: TopicInfo, options: CreateTopicOptions): boolean {
-  return R.isEqual(topicInfo.tags, options.tags);
+export function topicInfoEqualCreateTopicOptions(
+  topicInfo: TopicInfo,
+  options: CreateTopicOptions
+): true | { reason: string } {
+  if (!R.isEqual(topicInfo.tags ?? {}, options.tags ?? {})) {
+    return { reason: "tags are different" };
+  }
+  return true;
 }

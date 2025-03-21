@@ -20,33 +20,36 @@ export interface QueueInfo {
   maxReceiveCount?: number;
 }
 
-export function queueInfoEqualCreateQueueOptions(queueInfo: QueueInfo, options: CreateQueueOptions): boolean {
+export function queueInfoEqualCreateQueueOptions(
+  queueInfo: QueueInfo,
+  options: CreateQueueOptions
+): true | { reason: string } {
   if (queueInfo.deadLetterQueueName !== options.deadLetterQueueName) {
-    return false;
+    return { reason: "deadLetterQueueName is different" };
   }
   if (queueInfo.delayMs !== options.delayMs) {
-    return false;
+    return { reason: "delayMs is different" };
   }
   if (queueInfo.messageRetentionPeriodMs !== options.messageRetentionPeriodMs) {
-    return false;
+    return { reason: "messageRetentionPeriodMs is different" };
   }
   if (queueInfo.visibilityTimeoutMs !== options.visibilityTimeoutMs) {
-    return false;
+    return { reason: "visibilityTimeoutMs is different" };
   }
   if (queueInfo.receiveMessageWaitTimeMs !== options.receiveMessageWaitTimeMs) {
-    return false;
+    return { reason: "receiveMessageWaitTimeMs is different" };
   }
   if (queueInfo.expiresMs !== options.expiresMs) {
-    return false;
+    return { reason: "expiresMs is different" };
   }
   if (queueInfo.maxReceiveCount !== options.maxReceiveCount) {
-    return false;
+    return { reason: "maxReceiveCount is different" };
   }
   if (queueInfo.maxMessageSize !== options.maxMessageSize) {
-    return false;
+    return { reason: "maxMessageSize is different" };
   }
-  if (!R.isEqual(queueInfo.tags, options.tags)) {
-    return false;
+  if (!R.isEqual(queueInfo.tags ?? {}, options.tags ?? {})) {
+    return { reason: "tags are different" };
   }
   return true;
 }

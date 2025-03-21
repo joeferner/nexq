@@ -31,7 +31,8 @@ describe("ApiV1TopicController", async () => {
       await store.createTopic(TOPIC_NAME);
       await expectHttpError(
         async () => await controller.createTopic({ name: TOPIC_NAME, tags: { tag1: "tag1Value" } }),
-        409
+        409,
+        "topic already exists: tags are different"
       );
     });
   });

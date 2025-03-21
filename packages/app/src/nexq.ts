@@ -39,7 +39,7 @@ export async function start(options: StartOptions): Promise<void> {
 }
 
 async function loadConfig(configFilename: string, configOverrides?: string[]): Promise<NexqConfig> {
-  if (!(fs.existsSync(configFilename))) {
+  if (!fs.existsSync(configFilename)) {
     console.error(`config file "${configFilename}" does not exist`);
     process.exit(1);
   }

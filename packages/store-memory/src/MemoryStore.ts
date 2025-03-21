@@ -90,8 +90,9 @@ export class MemoryStore implements Store {
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
     const existingQueue = this.queues[queueName];
     if (existingQueue) {
-      if (!queueInfoEqualCreateQueueOptions(existingQueue.getInfo(), options ?? {})) {
-        throw new QueueAlreadyExistsError(queueName);
+      const match = queueInfoEqualCreateQueueOptions(existingQueue.getInfo(), options ?? {});
+      if (match !== true) {
+        throw new QueueAlreadyExistsError(queueName, match.reason);
       }
     }
 
@@ -297,8 +298,9 @@ export class MemoryStore implements Store {
 
     const existingTopic = this.topics[topicName];
     if (existingTopic) {
-      if (!topicInfoEqualCreateTopicOptions(existingTopic.getInfo(), requiredOptions)) {
-        throw new TopicAlreadyExistsError(topicName);
+      const m = topicInfoEqualCreateTopicOptions(existingTopic.getInfo(), requiredOptions);
+      if (m !== true) {
+        throw new TopicAlreadyExistsError(topicName, m.reason);
       }
     }
     this.topics[topicName] = new MemoryTopic(topicName, options ?? {});

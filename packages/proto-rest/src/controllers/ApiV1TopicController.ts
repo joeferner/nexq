@@ -41,7 +41,7 @@ export class ApiV1TopicController extends Controller {
       });
     } catch (err) {
       if (err instanceof TopicAlreadyExistsError) {
-        throw createError.Conflict("topic already exists");
+        throw createError.Conflict(`topic already exists: ${err.reason}`);
       }
       logger.error(`failed to create topic`, err);
       throw err;

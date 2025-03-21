@@ -29,16 +29,16 @@ async function parseCommandLineAndStart(): Promise<void> {
         defaultValue: () => defaultConfigFilename,
       }),
       configOverrides: multioption({
-        short: 'D',
-        long: 'D',
+        short: "D",
+        long: "D",
         type: array(string),
-        description: "override a configuration value"
-      })
+        description: "override a configuration value",
+      }),
     },
     handler: async (args) => {
-      await start({ 
+      await start({
         ...args,
-        configFilename: args.config
+        configFilename: args.config,
       });
     },
   });

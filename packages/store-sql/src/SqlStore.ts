@@ -202,11 +202,11 @@ export class SqlStore implements Store {
     try {
       const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
       if (existingQueue) {
-        if (queueInfoEqualCreateQueueOptions(existingQueue, options ?? {})) {
+        const match = queueInfoEqualCreateQueueOptions(existingQueue, options ?? {});
+        if (match === true) {
           return;
-        } else {
-          throw new QueueAlreadyExistsError(queueName);
         }
+        throw new QueueAlreadyExistsError(queueName, match.reason);
       }
 
       if (options?.deadLetterQueueName) {
@@ -531,9 +531,11 @@ export class SqlStore implements Store {
 
       const existingTopic = await this.dialect.getTopicInfo(tx, topicName);
       if (existingTopic) {
-        if (!topicInfoEqualCreateTopicOptions(existingTopic, requiredOptions)) {
-          throw new TopicAlreadyExistsError(topicName);
+        const m = topicInfoEqualCreateTopicOptions(existingTopic, requiredOptions);
+        if (m === true) {
+          return;
         }
+        throw new TopicAlreadyExistsError(topicName, m.reason);
       }
 
       await this.dialect.createTopic(tx, topicName, options);

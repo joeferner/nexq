@@ -136,6 +136,20 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(message!.bodyAsString()).toBe(MESSAGE1_BODY);
     });
 
+    test("binary message", async () => {
+      const message = Buffer.from([1, 2, 3, 100, 200, 254]);
+
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send binary message
+      await store.sendMessage(QUEUE1_NAME, message);
+
+      // receive message
+      const m = await store.receiveMessage(QUEUE1_NAME);
+      expect(m?.body).toEqual(message);
+    });
+
     test("queue ordering: fifo", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);
@@ -630,6 +644,11 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       });
     });
 
+    test("duplicate queues (without tags)", async () => {
+      await store.createQueue(QUEUE1_NAME, {});
+      await store.createQueue(QUEUE1_NAME, {});
+    });
+
     test("delete queue", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);
@@ -782,6 +801,18 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await expect(async () => store.createTopic(TOPIC1_NAME, { tags: { tag1: "tag1Value" } })).rejects.toThrowError(
         /topic.*already exists/
       );
+    });
+
+    test("duplicate queues", async () => {
+      await store.createTopic(TOPIC1_NAME, { tags: { a: "b" } });
+      await expect(async () => await store.createTopic(TOPIC1_NAME, { tags: { a: "c" } })).rejects.toThrowError(
+        /topic "topic1" already exists: tags are different/
+      );
+    });
+
+    test("duplicate queues (without tags)", async () => {
+      await store.createTopic(TOPIC1_NAME, {});
+      await store.createTopic(TOPIC1_NAME, {});
     });
 
     test("subscribe", async () => {

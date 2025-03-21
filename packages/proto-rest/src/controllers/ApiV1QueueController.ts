@@ -69,7 +69,7 @@ export class ApiV1QueueController extends Controller {
         throw createError.BadRequest(err.message);
       }
       if (err instanceof QueueAlreadyExistsError) {
-        throw createError.Conflict("queue already exists");
+        throw createError.Conflict(`queue already exists: ${err.reason}`);
       }
       if (err instanceof QueueNotFoundError && err.queueName === request.deadLetter?.queueName) {
         throw createError.NotFound(`dead letter queue not found`);

@@ -33,7 +33,11 @@ describe("ApiV1QueueController", async () => {
 
     test("queue already exists", async () => {
       await store.createQueue(QUEUE1_NAME);
-      await expectHttpError(async () => await controller.createQueue({ name: QUEUE1_NAME, delay: "1ms" }), 409);
+      await expectHttpError(
+        async () => await controller.createQueue({ name: QUEUE1_NAME, delay: "1ms" }),
+        409,
+        "queue already exists: delayMs"
+      );
     });
 
     test("dead letter queue not found", async () => {

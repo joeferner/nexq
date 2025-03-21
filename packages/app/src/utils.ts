@@ -1,4 +1,4 @@
-import setValue from 'set-value';
+import setValue from "set-value";
 
 export function envSubstitution(str: string): string {
   return str.replaceAll(/\$\{env:(.*?)\}/g, (_s, arg): string => {
@@ -22,17 +22,17 @@ function applyConfigOverride(config: object, configOverride: string): void {
     isQuoted = true;
     const previousQuote = configOverride.substring(0, configOverride.length - 1).lastIndexOf('"');
     if (previousQuote < 0) {
-      throw new Error(`invalid config override "${configOverride}", mismatched quotes`)
+      throw new Error(`invalid config override "${configOverride}", mismatched quotes`);
     }
     const quotedValue = configOverride.substring(previousQuote).trim();
     const left = configOverride.substring(0, previousQuote).trim();
-    if (!left.endsWith('=')) {
-      throw new Error(`invalid config override "${configOverride}", could not parse`)
+    if (!left.endsWith("=")) {
+      throw new Error(`invalid config override "${configOverride}", could not parse`);
     }
     path = left.substring(0, left.length - 1);
     value = quotedValue.substring(1, quotedValue.length - 1);
   } else {
-    const i = configOverride.lastIndexOf('=');
+    const i = configOverride.lastIndexOf("=");
     if (i < 0) {
       throw new Error(`invalid config override "${configOverride}", missing equals (=)`);
     }
