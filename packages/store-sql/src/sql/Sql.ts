@@ -22,6 +22,8 @@ export const SQL_DELETE_MESSAGE_BY_RECEIPT_HANDLE = "deleteMessageByReceiptHandl
 export const SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION = "deleteExpiredMessagesOverRetention";
 export const SQL_DELETE_EXPIRED_MESSAGES_OVER_RECEIVE_COUNT = "deleteExpiredMessagesOverReceiveCount";
 export const SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER = "moveExpiredMessagesToDeadLetter";
+export const SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE = "moveExpiredMessagesToEndOfQueue";
+export const SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES = "sqlDecreasePriorityOfExpiredMessages";
 export const SQL_FIND_QUEUES = "findQueues";
 export const SQL_FIND_QUEUE_BY_NAME = "findQueueByName";
 export const SQL_GET_QUEUE_NUMBER_OF_MESSAGES = "getQueueNumberOfMessages";
@@ -171,13 +173,14 @@ export abstract class Sql<TDatabase> {
           queue_name,
           priority,
           sent_at,
+          order_by,
           retain_until,
           message_body,
           receive_count,
           attributes,
           expires_at,
           delay_until
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
@@ -194,41 +197,8 @@ export abstract class Sql<TDatabase> {
           AND (delay_until IS NULL OR ? >= delay_until)
         ORDER BY
           priority DESC,
-          sent_at
+          order_by
         LIMIT ?
-      `
-    );
-
-    this.addQuery(
-      SQL_PEEK_MESSAGES,
-      `
-        SELECT
-          *
-        FROM
-          ${this.tablePrefix}_message
-        WHERE
-          queue_name = ?
-          AND (expires_at IS NULL OR ? > expires_at)
-          AND (delay_until IS NULL OR ? >= delay_until)
-        ORDER BY
-          priority DESC,
-          sent_at
-        LIMIT ?
-      `
-    );
-
-    this.addQuery(
-      SQL_MOVE_MESSAGES,
-      `
-        UPDATE
-          ${this.tablePrefix}_message
-        SET
-          queue_name = ?,
-          retain_until = ?
-        WHERE
-          queue_name = ?
-          AND (expires_at IS NULL OR ? > expires_at)
-          AND (delay_until IS NULL OR ? >= delay_until)
       `
     );
 
@@ -245,6 +215,39 @@ export abstract class Sql<TDatabase> {
         WHERE
           id = ?
           AND queue_name = ?
+      `
+    );
+
+    this.addQuery(
+      SQL_PEEK_MESSAGES,
+      `
+        SELECT
+          *
+        FROM
+          ${this.tablePrefix}_message
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NULL OR ? > expires_at)
+          AND (delay_until IS NULL OR ? >= delay_until)
+        ORDER BY
+          priority DESC,
+          order_by
+        LIMIT ?
+      `
+    );
+
+    this.addQuery(
+      SQL_MOVE_MESSAGES,
+      `
+        UPDATE
+          ${this.tablePrefix}_message
+        SET
+          queue_name = ?,
+          retain_until = ?
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NULL OR ? > expires_at)
+          AND (delay_until IS NULL OR ? >= delay_until)
       `
     );
 
@@ -305,11 +308,42 @@ export abstract class Sql<TDatabase> {
           expires_at = ?,
           receive_count = 0,
           receipt_handle = null,
-          sent_at = ?
+          sent_at = ?,
+          order_by = ?
         WHERE
           queue_name = ?
           AND (expires_at IS NOT NULL AND ? > expires_at)
           AND receive_count >= ?
+      `
+    );
+
+    this.addQuery(
+      SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE,
+      `
+        UPDATE 
+          ${this.tablePrefix}_message
+        SET
+          expires_at = null,
+          receipt_handle = null,
+          order_by = ?
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NOT NULL AND ? > expires_at)
+      `
+    );
+
+    this.addQuery(
+      SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES,
+      `
+        UPDATE 
+          ${this.tablePrefix}_message
+        SET
+          expires_at = null,
+          receipt_handle = null,
+          priority = priority - ?
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NOT NULL AND ? > expires_at)
       `
     );
 
@@ -391,10 +425,11 @@ export abstract class Sql<TDatabase> {
           expires_at,
           max_receive_count,
           max_message_size,
+          nak_expire_behavior,
           tags,
           created_at,
           last_modified_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 

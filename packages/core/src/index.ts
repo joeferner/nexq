@@ -16,7 +16,12 @@ export { createLogger, DEFAULT_LOGGER_CONFIG, Logger, LoggerConfig, LogLevel } f
 export { Message, ReceivedMessage } from "./Message.js";
 export { DEFAULT_MAX_NUMBER_OF_MESSAGES, DEFAULT_PASSWORD_HASH_ROUNDS, Store } from "./Store.js";
 
-export { CreateQueueOptions } from "./dto/CreateQueueOptions.js";
+export {
+  CreateQueueOptions,
+  DecreasePriorityByNakExpireBehavior,
+  NakExpireBehaviorOptions,
+  isDecreasePriorityByNakExpireBehavior,
+} from "./dto/CreateQueueOptions.js";
 export { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 export { CreateUserOptions } from "./dto/CreateUserOptions.js";
 export { MoveMessagesResult } from "./dto/MoveMessagesResult.js";

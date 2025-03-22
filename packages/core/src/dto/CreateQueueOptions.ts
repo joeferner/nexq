@@ -1,9 +1,25 @@
+export type DecreasePriorityByNakExpireBehavior = { decreasePriorityBy: number };
+export type NakExpireBehaviorOptions = "retry" | "moveToEnd" | DecreasePriorityByNakExpireBehavior;
+
+export function isDecreasePriorityByNakExpireBehavior(option: unknown): option is DecreasePriorityByNakExpireBehavior {
+  if (!option || !(typeof option === "object")) {
+    return false;
+  }
+  return "decreasePriorityBy" in option;
+}
+
 export interface CreateQueueOptions {
   /**
    * Optional dead letter queue in which messages that either have reached
    * their max receive count or have been nak'ed will be sent.
    */
   deadLetterQueueName?: string;
+
+  /**
+   * The number of times a message is delivered to the source queue before
+   * being moved to the dead-letter queue.
+   */
+  maxReceiveCount?: number;
 
   /**
    * The length of time, for which the delivery of all messages in the queue
@@ -37,10 +53,16 @@ export interface CreateQueueOptions {
   expiresMs?: number;
 
   /**
-   * The number of times a message is delivered to the source queue before
-   * being moved to the dead-letter queue.
+   * Determines the behavior of messages when they are either nak'ed or have
+   * expired visibility timeout. If the message has exceeded it's maxReceiveCount
+   * the message will be moved to the dead letter queue irregardless of this
+   * setting.
+   *
+   * retry     - the message is kept at the same position (default)
+   * moveToEnd - the message is moved to the end of the queue
+   * { decreasePriorityBy: number } - decrease the priority of messages by the given amount
    */
-  maxReceiveCount?: number;
+  nakExpireBehavior?: NakExpireBehaviorOptions;
 
   /**
    * maximum size a message can be

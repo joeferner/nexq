@@ -111,6 +111,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
           visibility_timeout_ms INTEGER,
           dead_letter_queue_name TEXT,
           max_receive_count INTEGER,
+          nak_expire_behavior TEXT NOT NULL,
           tags TEXT NOT NULL,
           FOREIGN KEY(dead_letter_queue_name) REFERENCES nexq_queue(name)
         )
@@ -147,6 +148,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
           queue_name TEXT NOT NULL,
           priority INTEGER NOT NULL,
           sent_at TEXT NOT NULL,
+          order_by TEXT NOT NULL,
           retain_until TEXT,
           message_body TEXT NOT NULL,
           receive_count INTEGER NOT NULL,
@@ -163,6 +165,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
       database.exec(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
       database.exec(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
       database.exec(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
+      database.exec(`CREATE INDEX nexq_message_order_by_idx ON nexq_message(order_by)`);
       database.exec(`CREATE INDEX nexq_message_expires_at_idx ON nexq_message(expires_at)`);
       database.exec(`CREATE INDEX nexq_message_delay_until_idx ON nexq_message(delay_until)`);
 

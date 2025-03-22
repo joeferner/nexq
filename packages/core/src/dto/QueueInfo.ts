@@ -1,5 +1,6 @@
 import * as R from "radash";
-import { CreateQueueOptions } from "./CreateQueueOptions.js";
+import { CreateQueueOptions, NakExpireBehaviorOptions } from "./CreateQueueOptions.js";
+import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "../Store.js";
 
 export interface QueueInfo {
   name: string;
@@ -18,6 +19,7 @@ export interface QueueInfo {
   tags: Record<string, string>;
   deadLetterQueueName?: string;
   maxReceiveCount?: number;
+  nakExpireBehavior: NakExpireBehaviorOptions;
 }
 
 export function queueInfoEqualCreateQueueOptions(
@@ -50,6 +52,14 @@ export function queueInfoEqualCreateQueueOptions(
   }
   if (!R.isEqual(queueInfo.tags ?? {}, options.tags ?? {})) {
     return { reason: "tags are different" };
+  }
+  if (
+    !R.isEqual(
+      queueInfo.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR,
+      options.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR
+    )
+  ) {
+    return { reason: "nakExpireBehavior are different" };
   }
   return true;
 }

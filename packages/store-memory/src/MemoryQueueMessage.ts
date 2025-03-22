@@ -32,6 +32,7 @@ export class MemoryQueueMessage {
    * Time the message was originally sent
    */
   public readonly sentTime: Date;
+  public orderTime: Date;
   public lastNakReason: string | undefined;
 
   public constructor(options: CreateMemoryQueueMessageOptions) {
@@ -39,6 +40,7 @@ export class MemoryQueueMessage {
     this.body = options.body;
     this.attributes = options.attributes;
     this.sentTime = options.sentTime;
+    this.orderTime = options.sentTime;
     this.priority = options.priority;
     this._delayUntil = options.delayUntil;
     this.lastNakReason = options.lastNakReason;
@@ -102,7 +104,7 @@ export class MemoryQueueMessage {
       return priorityDiff;
     }
 
-    return this.sentTime.getTime() - other.sentTime.getTime();
+    return this.orderTime.getTime() - other.orderTime.getTime();
   }
 
   public update(now: Date, updateMessageOptions: UpdateMessageOptions): void {

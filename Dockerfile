@@ -58,4 +58,4 @@ WORKDIR /opt/nexq/
 USER node
 
 ENTRYPOINT ["/bin/sh"]
-CMD ["./start", "--help"]
+CMD ["./start"]

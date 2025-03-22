@@ -6,6 +6,7 @@ export interface SqlMessage {
   queue_name: string;
   priority: number;
   sent_at: string | Date;
+  order_by: string | Date;
   message_body: string;
   receive_count: number;
   attributes: string;

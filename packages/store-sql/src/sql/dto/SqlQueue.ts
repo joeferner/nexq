@@ -1,4 +1,4 @@
-import { QueueInfo } from "@nexq/core";
+import { NakExpireBehaviorOptions, QueueInfo } from "@nexq/core";
 import { parseDate, parseOptionalDate } from "../../utils.js";
 
 export interface SqlQueue {
@@ -14,6 +14,7 @@ export interface SqlQueue {
   visibility_timeout_ms: number | null;
   dead_letter_queue_name: string | null;
   max_receive_count: number | null;
+  nak_expire_behavior: string;
   tags: string;
 }
 
@@ -34,5 +35,6 @@ export function sqlQueueToQueueInfo(
     tags: JSON.parse(row.tags) as Record<string, string>,
     deadLetterQueueName: row.dead_letter_queue_name ?? undefined,
     maxReceiveCount: row.max_receive_count ?? undefined,
+    nakExpireBehavior: JSON.parse(row.nak_expire_behavior) as NakExpireBehaviorOptions,
   };
 }

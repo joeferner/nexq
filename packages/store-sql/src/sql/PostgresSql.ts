@@ -120,6 +120,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           visibility_timeout_ms INTEGER,
           dead_letter_queue_name TEXT,
           max_receive_count INTEGER,
+          nak_expire_behavior TEXT NOT NULL,
           tags TEXT NOT NULL,
           FOREIGN KEY(dead_letter_queue_name) REFERENCES nexq_queue(name)
         )
@@ -156,6 +157,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           queue_name TEXT NOT NULL,
           priority INTEGER NOT NULL,
           sent_at TIMESTAMP NOT NULL,
+          order_by TIMESTAMP NOT NULL,
           retain_until TEXT,
           message_body TEXT NOT NULL,
           receive_count INTEGER NOT NULL,
@@ -172,6 +174,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
       await database.query(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
       await database.query(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
       await database.query(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
+      await database.query(`CREATE INDEX nexq_message_order_by_idx ON nexq_message(order_by)`);
       await database.query(`CREATE INDEX nexq_message_expires_at_idx ON nexq_message(expires_at)`);
       await database.query(`CREATE INDEX nexq_message_delay_until_idx ON nexq_message(delay_until)`);
 

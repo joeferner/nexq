@@ -18,7 +18,7 @@ describe("SqlStore", async () => {
         },
       } satisfies SqlStoreCreateConfigPostgres;
     } else {
-      let filename = expect.getState().currentTestName?.replaceAll(/[>\s]+/g, "_");
+      let filename = expect.getState().currentTestName?.replaceAll(/[>:/\s]+/g, "_");
       if (filename) {
         filename = `test-results/${filename}.sqlite`;
         try {

@@ -8,6 +8,7 @@ import {
   DeleteDeadLetterQueueError,
   hashPassword,
   InvalidUpdateError,
+  isDecreasePriorityByNakExpireBehavior,
   Message,
   MessageExceededMaxMessageSizeError,
   MoveMessagesResult,
@@ -434,6 +435,27 @@ export class SqlStore implements Store {
         if (results.changes > 0) {
           logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded receive count`);
         }
+      }
+
+      if (queueInfo.nakExpireBehavior === "retry") {
+        // do nothing
+      } else if (queueInfo.nakExpireBehavior === "moveToEnd") {
+        const results = await this.dialect.moveExpiredMessagesToEndOfQueue(queueInfo);
+        if (results.changes > 0) {
+          logger.debug(`moved ${results.changes} messages from "${queueInfo.name}" to end of queue`);
+        }
+      } else if (isDecreasePriorityByNakExpireBehavior(queueInfo.nakExpireBehavior)) {
+        const results = await this.dialect.decreasePriorityOfExpiredMessages(
+          queueInfo,
+          queueInfo.nakExpireBehavior.decreasePriorityBy
+        );
+        if (results.changes > 0) {
+          logger.debug(
+            `decrease the priority of ${results.changes} messages in "${queueInfo.name}" by ${queueInfo.nakExpireBehavior.decreasePriorityBy}`
+          );
+        }
+      } else {
+        throw new Error(`unhandled nakExpireBehavior "${JSON.stringify(queueInfo.nakExpireBehavior)}"`);
       }
     }
   }

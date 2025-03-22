@@ -32,6 +32,7 @@ import {
   SQL_CREATE_SUBSCRIPTION,
   SQL_CREATE_TOPIC,
   SQL_CREATE_USER,
+  SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES,
   SQL_DELETE_ALL_MESSAGES,
   SQL_DELETE_ALL_QUEUES,
   SQL_DELETE_ALL_SUBSCRIPTIONS,
@@ -58,6 +59,7 @@ import {
   SQL_GET_QUEUE_NUMBER_OF_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES,
   SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER,
+  SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE,
   SQL_MOVE_MESSAGES,
   SQL_NAK_MESSAGE,
   SQL_PEEK_MESSAGES,
@@ -69,6 +71,7 @@ import {
 import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
 import { Transaction } from "./Transaction.js";
+import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "@nexq/core/build/Store.js";
 
 export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   protected constructor(
@@ -123,12 +126,13 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       id,
       queueInfo.name,
       options?.priority ?? 0,
-      now,
+      now, // sent at
+      now, // order by
       retainUntil,
       body,
-      0,
+      0, // receive count
       options?.attributes ? JSON.stringify(options.attributes) : "{}",
-      null,
+      null, // expires at
       options?.delayMs ? new Date(now.getTime() + options.delayMs) : null,
     ]);
   }
@@ -298,10 +302,29 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     return await this.sql.run(this.database, SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER, [
       deadLetterQueueInfo.name,
       newExpiresAt,
-      now,
+      now, // sent at
+      now, // order by
       queueInfo.name,
-      now,
+      now, // expires at
       queueInfo.maxReceiveCount,
+    ]);
+  }
+
+  public async moveExpiredMessagesToEndOfQueue(queueInfo: QueueInfo): Promise<RunResult> {
+    const now = this.time.getCurrentTime();
+    return await this.sql.run(this.database, SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE, [
+      now, // new order by
+      queueInfo.name,
+      now, // expires at check
+    ]);
+  }
+
+  public async decreasePriorityOfExpiredMessages(queueInfo: QueueInfo, decreasePriorityBy: number): Promise<RunResult> {
+    const now = this.time.getCurrentTime();
+    return await this.sql.run(this.database, SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES, [
+      decreasePriorityBy,
+      queueInfo.name,
+      now, // expires at check
     ]);
   }
 
@@ -381,6 +404,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       options?.expiresMs !== undefined ? new Date(now.getTime() + options.expiresMs) : null,
       options?.maxReceiveCount ?? null,
       options?.maxMessageSize ?? null,
+      JSON.stringify(options?.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR),
       options?.tags ? JSON.stringify(options.tags) : "{}",
       now,
       now,

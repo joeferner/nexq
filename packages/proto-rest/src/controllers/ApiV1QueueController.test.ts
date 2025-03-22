@@ -42,8 +42,7 @@ describe("ApiV1QueueController", async () => {
 
     test("dead letter queue not found", async () => {
       await expectHttpError(
-        async () =>
-          await controller.createQueue({ name: QUEUE1_NAME, deadLetter: { queueName: `${QUEUE1_NAME}-dlq` } }),
+        async () => await controller.createQueue({ name: QUEUE1_NAME, deadLetterQueueName: `${QUEUE1_NAME}-dlq` }),
         404
       );
     });

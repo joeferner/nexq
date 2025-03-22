@@ -554,6 +554,118 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(deadLetterMessage1!.lastNakReason).toBe("test message");
     });
 
+    test("nak/expire behavior: default", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, {});
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY);
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE3_BODY);
+      await time.advance(1);
+
+      // nak message
+      let recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+      await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
+      await store.poll();
+
+      // validate message 1 received again
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+
+      // expire messages
+      await time.advance(101);
+      await store.poll();
+
+      // validate message 1 received again
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+    });
+
+    test("nak/expire behavior: move to end", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { nakExpireBehavior: "moveToEnd" });
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY);
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE3_BODY);
+      await time.advance(1);
+
+      // nak message
+      let recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+      await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
+      await store.poll();
+
+      // validate message 1 received again
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.body).toBe(MESSAGE2_BODY);
+
+      // expire messages
+      await time.advance(101);
+      await store.poll();
+
+      // validate message 3 received
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.body).toBe(MESSAGE3_BODY);
+    });
+
+    test("nak/expire behavior: decrease priority", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { nakExpireBehavior: { decreasePriorityBy: 10 } });
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY, { priority: 20 });
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY, { priority: 10 });
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE3_BODY, { priority: 1 });
+      await time.advance(1);
+
+      // nak message
+      let recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+      expect(recvMessage?.priority).toBe(20);
+      await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
+      await store.poll(); // message 1 should be at 10 now
+
+      // validate message 1 received again: at this point it should have the same
+      // priority as message 2 but the ordering time should be sooner
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+      expect(recvMessage?.priority).toBe(10);
+      await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
+      await store.poll(); // message 1 should be at 0 now
+
+      // validate message 2 received
+      recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+      expect(recvMessage?.priority).toBe(10);
+      expect(recvMessage?.body).toBe(MESSAGE2_BODY);
+
+      // expire messages
+      await time.advance(101);
+      await store.poll();
+
+      // validate message 3 received, both 1 and 2 should have priority 0 at this point
+      recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.priority).toBe(1);
+      expect(recvMessage?.body).toBe(MESSAGE3_BODY);
+
+      recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.priority).toBe(0);
+      expect(recvMessage?.body).toBe(MESSAGE1_BODY);
+
+      recvMessage = await store.receiveMessage(QUEUE1_NAME);
+      expect(recvMessage?.priority).toBe(0);
+      expect(recvMessage?.body).toBe(MESSAGE2_BODY);
+    });
+
     test("dead letter queue with messageRetentionPeriodMs", async () => {
       // create the queue
       await store.createQueue(DEAD_LETTER_QUEUE1_NAME, { messageRetentionPeriodMs: 1000 });
@@ -657,6 +769,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
         expiresMs: 5,
         maxReceiveCount: 6,
         maxMessageSize: 7,
+        nakExpireBehavior: "retry",
         tags: {
           tag1: "tag1Value",
           tag2: "tag2Value",
@@ -679,6 +792,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
         expiresAt: new Date(time.getCurrentTime().getTime() + 5),
         maxMessageSize: 7,
         messageRetentionPeriodMs: 2,
+        nakExpireBehavior: "retry",
         receiveMessageWaitTimeMs: 4,
         visibilityTimeoutMs: 3,
         tags: {
@@ -707,6 +821,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await checkChangeThrows({ ...createOptions, expiresMs: 42 });
       await checkChangeThrows({ ...createOptions, maxReceiveCount: 42 });
       await checkChangeThrows({ ...createOptions, maxMessageSize: 42 });
+      await checkChangeThrows({ ...createOptions, nakExpireBehavior: "moveToEnd" });
       await checkChangeThrows({
         ...createOptions,
         tags: {

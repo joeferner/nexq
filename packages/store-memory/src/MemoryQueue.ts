@@ -18,6 +18,12 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
+import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "@nexq/core/build/Store.js";
+import {
+  isDecreasePriorityByNakExpireBehavior,
+  NakExpireBehaviorOptions,
+} from "@nexq/core/build/dto/CreateQueueOptions.js";
+import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
 
@@ -39,6 +45,7 @@ export class MemoryQueue {
   private readonly maxMessageSize?: number;
   private readonly tags: Record<string, string>;
   private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
+  private readonly nakExpireBehavior: NakExpireBehaviorOptions;
   private expiresAt: Date | undefined;
 
   public constructor(options: { name: string; time: Time } & CreateQueueOptions) {
@@ -55,6 +62,7 @@ export class MemoryQueue {
     this.maxReceiveCount = options.maxReceiveCount;
     this.maxMessageSize = options.maxMessageSize;
     this.tags = options.tags ? structuredClone(options.tags) : {};
+    this.nakExpireBehavior = options.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR;
     if (options.expiresMs !== undefined) {
       this.expiresMs = options.expiresMs;
       this.expiresAt = new Date(options.time.getCurrentTime().getTime() + options.expiresMs);
@@ -206,6 +214,7 @@ export class MemoryQueue {
       messageRetentionPeriodMs: this.messageRetentionPeriodMs,
       receiveMessageWaitTimeMs: this.receiveMessageWaitTimeMs,
       visibilityTimeoutMs: this.visibilityTimeoutMs,
+      nakExpireBehavior: R.clone(this.nakExpireBehavior),
       tags: structuredClone(this.tags),
       deadLetterQueueName: this.deadLetterQueueName,
       maxReceiveCount: this.maxReceiveCount,
@@ -232,15 +241,23 @@ export class MemoryQueue {
         }
       }
 
-      if (
-        message.expiresAt &&
-        this.maxReceiveCount &&
-        now > message.expiresAt &&
-        message.receiveCount >= this.maxReceiveCount
-      ) {
-        expiredMessages.push(message);
-        this.messages.splice(i, 1);
-        continue;
+      if (message.expiresAt && now > message.expiresAt) {
+        message.expiresAt = undefined;
+        if (this.maxReceiveCount && message.receiveCount >= this.maxReceiveCount) {
+          expiredMessages.push(message);
+          this.messages.splice(i, 1);
+          continue;
+        } else {
+          if (this.nakExpireBehavior === "retry") {
+            // do nothing
+          } else if (this.nakExpireBehavior === "moveToEnd") {
+            message.orderTime = now;
+          } else if (isDecreasePriorityByNakExpireBehavior(this.nakExpireBehavior)) {
+            message.priority -= this.nakExpireBehavior.decreasePriorityBy;
+          } else {
+            throw new Error(`unhandled nakExpireBehavior ${JSON.stringify(this.nakExpireBehavior)}`);
+          }
+        }
       }
     }
     return expiredMessages;

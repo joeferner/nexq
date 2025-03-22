@@ -1,4 +1,4 @@
-import { CreateQueueOptions } from "./dto/CreateQueueOptions.js";
+import { CreateQueueOptions, NakExpireBehaviorOptions } from "./dto/CreateQueueOptions.js";
 import { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 import { CreateUserOptions } from "./dto/CreateUserOptions.js";
 import { MoveMessagesResult } from "./dto/MoveMessagesResult.js";
@@ -16,6 +16,7 @@ import { User } from "./User.js";
 
 export const DEFAULT_PASSWORD_HASH_ROUNDS = 10;
 export const DEFAULT_MAX_NUMBER_OF_MESSAGES = 10;
+export const DEFAULT_NAK_EXPIRE_BEHAVIOR: NakExpireBehaviorOptions = "retry";
 
 export interface Store {
   shutdown(): Promise<void>;

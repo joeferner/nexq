@@ -59,8 +59,9 @@ export class ApiV1QueueController extends Controller {
         messageRetentionPeriodMs: parseOptionalDurationIntoMs(request.messageRetentionPeriod),
         receiveMessageWaitTimeMs: parseOptionalDurationIntoMs(request.receiveMessageWaitTime),
         visibilityTimeoutMs: parseOptionalDurationIntoMs(request.visibilityTimeout),
-        deadLetterQueueName: request.deadLetter?.queueName,
-        maxReceiveCount: request.deadLetter?.maxReceiveCount,
+        deadLetterQueueName: request.deadLetterQueueName,
+        maxReceiveCount: request.maxReceiveCount,
+        nakExpireBehavior: request.nakExpireBehavior,
         tags: request.tags,
       });
     } catch (err) {
@@ -70,7 +71,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueAlreadyExistsError) {
         throw createHttpError.Conflict(`queue already exists: ${err.reason}`);
       }
-      if (err instanceof QueueNotFoundError && err.queueName === request.deadLetter?.queueName) {
+      if (err instanceof QueueNotFoundError && err.queueName === request.deadLetterQueueName) {
         throw createHttpError.NotFound(`dead letter queue not found`);
       }
       logger.error(`failed to create queue`, err);

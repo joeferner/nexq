@@ -1,3 +1,5 @@
+import { NakExpireBehaviorOptions } from "@nexq/core";
+
 export interface CreateQueueRequest {
   /**
    * The name of the queue
@@ -50,23 +52,30 @@ export interface CreateQueueRequest {
   visibilityTimeout?: string;
 
   /**
-   * dead letter queue
+   * name of the dead letter queue
+   *
+   * @example "my-queue-dlq"
    */
-  deadLetter?: {
-    /**
-     * name of the dead letter queue
-     *
-     * @example "my-queue-dlq"
-     */
-    queueName: string;
+  deadLetterQueueName?: string;
 
-    /**
-     * max number of time to receive a message before moving it to the dlq
-     *
-     * @example "10"
-     */
-    maxReceiveCount?: number;
-  };
+  /**
+   * max number of time to receive a message before moving it to the dlq
+   *
+   * @example "10"
+   */
+  maxReceiveCount?: number;
+
+  /**
+   * Determines the behavior of messages when they are either nak'ed or have
+   * expired visibility timeout. If the message has exceeded it's maxReceiveCount
+   * the message will be moved to the dead letter queue irregardless of this
+   * setting.
+   *
+   * retry     - the message is kept at the same position (default)
+   * moveToEnd - the message is moved to the end of the queue
+   * { decreasePriorityBy: number } - decrease the priority of messages by the given amount
+   */
+  nakExpireBehavior?: NakExpireBehaviorOptions;
 
   /**
    * tags to apply to this queue
