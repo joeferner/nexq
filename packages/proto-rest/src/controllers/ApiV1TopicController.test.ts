@@ -76,33 +76,15 @@ describe("ApiV1TopicController", async () => {
       await store.createTopic(TOPIC_NAME);
       await store.subscribe(TOPIC_NAME, TopicProtocol.Queue, QUEUE_NAME);
 
-      await controller.publish(TOPIC_NAME, { bodyBase64: btoa("test") });
+      await controller.publish(TOPIC_NAME, { body: "test" });
 
       await assertQueueSize(store, QUEUE_NAME, 1, 0, 0);
       const m = await store.receiveMessage(QUEUE_NAME);
-      expect(m?.bodyAsString()).toBe("test");
-    });
-
-    test("bad base64 encoding", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(async () => await controller.publish(TOPIC_NAME, { bodyBase64: "xyz" }), 400);
-    });
-
-    test("both body and bodyBase64 specified", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(
-        async () => await controller.publish(TOPIC_NAME, { bodyBase64: btoa("test"), body: "test" }),
-        400
-      );
-    });
-
-    test("both body and bodyBase64 unspecified", async () => {
-      await store.createQueue(QUEUE_NAME);
-      await expectHttpError(async () => await controller.publish(TOPIC_NAME, {}), 400);
+      expect(m?.body).toBe("test");
     });
 
     test("topic not found", async () => {
-      await expectHttpError(async () => await controller.publish("bad-topic-name", { bodyBase64: "" }), 404);
+      await expectHttpError(async () => await controller.publish("bad-topic-name", { body: "" }), 404);
     });
   });
 

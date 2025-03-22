@@ -68,7 +68,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const message = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 5000 });
       assert(message);
       const messageReceiptHandle = message.receiptHandle;
-      expect(message.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(message.body).toBe(MESSAGE1_BODY);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // try getting more messages
@@ -104,7 +104,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const messageAgain = await store.receiveMessage(QUEUE1_NAME);
       expect(messageAgain).toBeTruthy();
       const messageReceiptHandleAgain = messageAgain!.receiptHandle;
-      expect(messageAgain!.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(messageAgain!.body).toBe(MESSAGE1_BODY);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // delete message
@@ -133,21 +133,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await store.poll();
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
       const message = await recvPromise;
-      expect(message!.bodyAsString()).toBe(MESSAGE1_BODY);
-    });
-
-    test("binary message", async () => {
-      const message = Buffer.from([1, 2, 3, 100, 200, 254]);
-
-      // create the queue
-      await store.createQueue(QUEUE1_NAME);
-
-      // send binary message
-      await store.sendMessage(QUEUE1_NAME, message);
-
-      // receive message
-      const m = await store.receiveMessage(QUEUE1_NAME);
-      expect(m?.body).toEqual(message);
+      expect(message!.body).toBe(MESSAGE1_BODY);
     });
 
     test("queue ordering: fifo", async () => {
@@ -163,13 +149,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const message1 = await store.receiveMessage(QUEUE1_NAME);
       assert(message1);
       expect(message1.id).toBe(sentMessage1.id);
-      expect(message1.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(message1.body).toBe(MESSAGE1_BODY);
 
       // receive message 2
       const message2 = await store.receiveMessage(QUEUE1_NAME);
       assert(message2);
       expect(message2.id).toBe(sentMessage2.id);
-      expect(message2.bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(message2.body).toBe(MESSAGE2_BODY);
 
       // receive message 3 (none)
       const message3 = await store.receiveMessage(QUEUE1_NAME);
@@ -189,13 +175,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const message2 = await store.receiveMessage(QUEUE1_NAME);
       assert(message2);
       expect(message2.id).toBe(sentMessage2.id);
-      expect(message2.bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(message2.body).toBe(MESSAGE2_BODY);
 
       // receive message 1
       const message1 = await store.receiveMessage(QUEUE1_NAME);
       assert(message1);
       expect(message1.id).toBe(sentMessage1.id);
-      expect(message1.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(message1.body).toBe(MESSAGE1_BODY);
 
       // receive message 3 (none)
       const message3 = await store.receiveMessage(QUEUE1_NAME);
@@ -227,11 +213,11 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // at this point we should have message2, message3, message1 in the dead letter queue in that order
       const message2 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
-      expect(message2?.bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(message2?.body).toBe(MESSAGE2_BODY);
       const message3 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
-      expect(message3?.bodyAsString()).toBe(MESSAGE3_BODY);
+      expect(message3?.body).toBe(MESSAGE3_BODY);
       const message1 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
-      expect(message1?.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(message1?.body).toBe(MESSAGE1_BODY);
     });
 
     test("queue with expires", async () => {
@@ -729,13 +715,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // receive batch 1
       const batch1Messages = await store.receiveMessages(QUEUE1_NAME, { maxNumberOfMessages: 2 });
       expect(batch1Messages.length).toBe(2);
-      expect(batch1Messages[0].bodyAsString()).toBe(MESSAGE1_BODY);
-      expect(batch1Messages[1].bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(batch1Messages[0].body).toBe(MESSAGE1_BODY);
+      expect(batch1Messages[1].body).toBe(MESSAGE2_BODY);
 
       // receive batch 2
       const batch2Messages = await store.receiveMessages(QUEUE1_NAME, { maxNumberOfMessages: 2 });
       expect(batch2Messages.length).toBe(1);
-      expect(batch2Messages[0].bodyAsString()).toBe(MESSAGE3_BODY);
+      expect(batch2Messages[0].body).toBe(MESSAGE3_BODY);
     });
 
     test("move messages", async () => {
@@ -898,14 +884,14 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // receive messages
       const q1m1 = await store.receiveMessage(QUEUE1_NAME);
-      expect(q1m1?.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(q1m1?.body).toBe(MESSAGE1_BODY);
       const q1m2 = await store.receiveMessage(QUEUE1_NAME);
-      expect(q1m2?.bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(q1m2?.body).toBe(MESSAGE2_BODY);
 
       const q2m1 = await store.receiveMessage(QUEUE2_NAME);
-      expect(q2m1?.bodyAsString()).toBe(MESSAGE1_BODY);
+      expect(q2m1?.body).toBe(MESSAGE1_BODY);
       const q2m2 = await store.receiveMessage(QUEUE2_NAME);
-      expect(q2m2?.bodyAsString()).toBe(MESSAGE2_BODY);
+      expect(q2m2?.body).toBe(MESSAGE2_BODY);
     });
   });
 

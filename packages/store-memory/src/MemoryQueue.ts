@@ -16,7 +16,6 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
-import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
 
@@ -60,10 +59,7 @@ export class MemoryQueue {
     }
   }
 
-  public sendMessage(
-    body: string | Buffer,
-    options?: SendMessageOptions & { lastNakReason?: string }
-  ): SendMessageResult {
+  public sendMessage(body: string, options?: SendMessageOptions & { lastNakReason?: string }): SendMessageResult {
     const now = this.time.getCurrentTime();
     const id = createId();
     const delay = options?.delayMs ?? this.delayMs;
@@ -77,7 +73,7 @@ export class MemoryQueue {
         priority: options?.priority ?? 0,
         sentTime: now,
         attributes: options?.attributes ?? {},
-        body: R.isString(body) ? Buffer.from(body) : body,
+        body,
         delayUntil,
         retainUntil:
           this.messageRetentionPeriodMs === undefined

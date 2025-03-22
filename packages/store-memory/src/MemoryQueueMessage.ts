@@ -5,7 +5,7 @@ export interface CreateMemoryQueueMessageOptions {
   priority: number;
   sentTime: Date;
   attributes: Record<string, string>;
-  body: Buffer;
+  body: string;
   delayUntil: Date | undefined;
   lastNakReason?: string;
   retainUntil: Date | undefined;
@@ -13,7 +13,7 @@ export interface CreateMemoryQueueMessageOptions {
 
 export class MemoryQueueMessage {
   public readonly id: string;
-  public readonly body: Buffer;
+  public readonly body: string;
   public attributes: Record<string, string>;
   public priority: number;
   /**
@@ -60,7 +60,7 @@ export class MemoryQueueMessage {
       this._firstReceiveTime = now;
     }
     this._receiveCount++;
-    return new Message({
+    return {
       id: this.id,
       receiptHandle: this._receiptHandle,
       body: this.body,
@@ -68,7 +68,7 @@ export class MemoryQueueMessage {
       priority: this.priority,
       lastNakReason: this.lastNakReason,
       attributes: this.attributes,
-    });
+    };
   }
 
   public isAvailable(now: Date): boolean {

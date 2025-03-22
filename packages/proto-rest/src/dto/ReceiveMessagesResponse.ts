@@ -5,7 +5,7 @@ export interface ReceiveMessagesResponse {
 export interface ReceiveMessagesResponseMessage {
   id: string;
   receiptHandle: string;
-  bodyBase64: string;
+  body: string;
   priority: number;
   attributes: Record<string, string>;
 

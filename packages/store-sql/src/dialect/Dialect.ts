@@ -108,7 +108,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   public async sendMessage(
     queueInfo: QueueInfo,
     id: string,
-    body: Buffer,
+    body: string,
     options?: SendMessageOptions
   ): Promise<void> {
     const now = this.time.getCurrentTime();

@@ -1,6 +1,6 @@
 import { Store } from "@nexq/core";
-import { assertQueueEmpty, assertQueueSize, MockTime } from "@nexq/test";
 import { MemoryStore } from "@nexq/store-memory";
+import { assertQueueEmpty, assertQueueSize, MockTime } from "@nexq/test";
 import { beforeEach, describe, expect, test } from "vitest";
 import { expectHttpError } from "../test-utils.js";
 import { ApiV1QueueController } from "./ApiV1QueueController.js";
@@ -91,32 +91,14 @@ describe("ApiV1QueueController", async () => {
   describe("sendMessage", async () => {
     test("good", async () => {
       await store.createQueue(QUEUE1_NAME);
-      await controller.sendMessage(QUEUE1_NAME, { bodyBase64: btoa("test") });
+      await controller.sendMessage(QUEUE1_NAME, { body: "test" });
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
       const m = await store.receiveMessage(QUEUE1_NAME);
-      expect(m?.bodyAsString()).toBe("test");
-    });
-
-    test("bad base64 encoding", async () => {
-      await store.createQueue(QUEUE1_NAME);
-      await expectHttpError(async () => await controller.sendMessage(QUEUE1_NAME, { bodyBase64: "xyz" }), 400);
-    });
-
-    test("both body and bodyBase64 specified", async () => {
-      await store.createQueue(QUEUE1_NAME);
-      await expectHttpError(
-        async () => await controller.sendMessage(QUEUE1_NAME, { bodyBase64: btoa("test"), body: "test" }),
-        400
-      );
-    });
-
-    test("both body and bodyBase64 unspecified", async () => {
-      await store.createQueue(QUEUE1_NAME);
-      await expectHttpError(async () => await controller.sendMessage(QUEUE1_NAME, {}), 400);
+      expect(m!.body).toBe("test");
     });
 
     test("queue not found", async () => {
-      await expectHttpError(async () => await controller.sendMessage("bad-queue-name", { bodyBase64: "" }), 404);
+      await expectHttpError(async () => await controller.sendMessage("bad-queue-name", { body: "" }), 404);
     });
   });
 
@@ -374,11 +356,11 @@ describe("ApiV1QueueController", async () => {
       resp.messages.sort((a, b) => a.sentTime.localeCompare(b.sentTime));
 
       const message1 = resp.messages[0];
-      expect(Buffer.from(message1.bodyBase64, "base64").toLocaleString()).toBe("test1");
+      expect(message1.body).toBe("test1");
       await controller.deleteMessage(QUEUE1_NAME, message1.id, message1.receiptHandle);
 
       const message2 = resp.messages[1];
-      expect(Buffer.from(message2.bodyBase64, "base64").toLocaleString()).toBe("test2");
+      expect(message2.body).toBe("test2");
       await controller.deleteMessage(QUEUE1_NAME, message2.id, message2.receiptHandle);
 
       await assertQueueEmpty(store, QUEUE1_NAME);

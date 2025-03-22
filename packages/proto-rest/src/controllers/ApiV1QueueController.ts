@@ -11,7 +11,7 @@ import {
   ReceiptHandleIsInvalidError,
   Store,
 } from "@nexq/core";
-import createError from "http-errors";
+import createHttpError from "http-errors";
 import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse, Tags } from "tsoa";
 import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
 import { GetQueueResponse, queueInfoToGetQueueResponse } from "../dto/GetQueueResponse.js";
@@ -22,7 +22,7 @@ import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { SendMessageResponse } from "../dto/SendMessageResponse.js";
 import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
-import { bufferFromBase64, isHttpError } from "../utils.js";
+import { isHttpError } from "../utils.js";
 
 const logger = createLogger("Rest:ApiV1QueueController");
 
@@ -63,13 +63,13 @@ export class ApiV1QueueController extends Controller {
       });
     } catch (err) {
       if (err instanceof DurationParseError) {
-        throw createError.BadRequest(err.message);
+        throw createHttpError.BadRequest(err.message);
       }
       if (err instanceof QueueAlreadyExistsError) {
-        throw createError.Conflict(`queue already exists: ${err.reason}`);
+        throw createHttpError.Conflict(`queue already exists: ${err.reason}`);
       }
       if (err instanceof QueueNotFoundError && err.queueName === request.deadLetter?.queueName) {
-        throw createError.NotFound(`dead letter queue not found`);
+        throw createHttpError.NotFound(`dead letter queue not found`);
       }
       logger.error(`failed to create queue`, err);
       throw err;
@@ -107,7 +107,7 @@ export class ApiV1QueueController extends Controller {
       return queueInfoToGetQueueResponse(await this.store.getQueueInfo(queueName));
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to get queue info`, err);
       throw err;
@@ -129,10 +129,10 @@ export class ApiV1QueueController extends Controller {
       await this.store.deleteQueue(queueName);
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       if (err instanceof DeleteDeadLetterQueueError) {
-        throw createError.BadRequest("cannot delete dead letter queue associated with a queue");
+        throw createHttpError.BadRequest("cannot delete dead letter queue associated with a queue");
       }
       logger.error(`failed to delete queue`, err);
       throw err;
@@ -155,15 +155,7 @@ export class ApiV1QueueController extends Controller {
     @Body() request: SendMessageRequest
   ): Promise<SendMessageResponse> {
     try {
-      if (request.body === undefined && request.bodyBase64 === undefined) {
-        throw createError.BadRequest("either body or bodyBase64 must be specified");
-      }
-      if (request.body !== undefined && request.bodyBase64 !== undefined) {
-        throw createError.BadRequest("both body and bodyBase64 cannot both be specified");
-      }
-      const body = request.body ?? bufferFromBase64(request.bodyBase64 ?? "");
-
-      const m = await this.store.sendMessage(queueName, body, {
+      const m = await this.store.sendMessage(queueName, request.body, {
         attributes: request.attributes,
         delayMs: parseOptionalDurationIntoMs(request.delay),
         priority: request.priority,
@@ -174,7 +166,7 @@ export class ApiV1QueueController extends Controller {
         throw err;
       }
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to send message`, err);
       throw err;
@@ -204,7 +196,7 @@ export class ApiV1QueueController extends Controller {
         throw err;
       }
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to move messages`, err);
       throw err;
@@ -232,13 +224,13 @@ export class ApiV1QueueController extends Controller {
       await this.store.deleteMessage(queueName, messageId, receiptHandle);
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       if (err instanceof MessageNotFoundError) {
-        throw createError.NotFound("message id not found");
+        throw createHttpError.NotFound("message id not found");
       }
       if (err instanceof ReceiptHandleIsInvalidError) {
-        throw createError.NotFound("message found but receipt handle does not match");
+        throw createHttpError.NotFound("message found but receipt handle does not match");
       }
       logger.error(`failed to delete message`, err);
       throw err;
@@ -273,16 +265,16 @@ export class ApiV1QueueController extends Controller {
       });
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       if (err instanceof MessageNotFoundError) {
-        throw createError.NotFound("message id not found");
+        throw createHttpError.NotFound("message id not found");
       }
       if (err instanceof ReceiptHandleIsInvalidError) {
-        throw createError.NotFound("message found but receipt handle does not match");
+        throw createHttpError.NotFound("message found but receipt handle does not match");
       }
       if (err instanceof InvalidUpdateError) {
-        throw createError.BadRequest(err.message);
+        throw createHttpError.BadRequest(err.message);
       }
       logger.error(`failed to update message`, err);
       throw err;
@@ -314,13 +306,13 @@ export class ApiV1QueueController extends Controller {
       await this.store.nakMessage(queueName, messageId, receiptHandle, reason);
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       if (err instanceof MessageNotFoundError) {
-        throw createError.NotFound("message id not found");
+        throw createHttpError.NotFound("message id not found");
       }
       if (err instanceof ReceiptHandleIsInvalidError) {
-        throw createError.NotFound("message found but receipt handle does not match");
+        throw createHttpError.NotFound("message found but receipt handle does not match");
       }
       logger.error(`failed to nak message`, err);
       throw err;
@@ -341,7 +333,7 @@ export class ApiV1QueueController extends Controller {
       await this.store.purgeQueue(queueName);
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to purge queue`, err);
       throw err;
@@ -375,13 +367,13 @@ export class ApiV1QueueController extends Controller {
             priority: m.priority,
             attributes: m.attributes,
             sentTime: m.sentTime.toISOString(),
-            bodyBase64: m.body.toString("base64"),
+            body: m.body,
           } satisfies ReceiveMessagesResponseMessage;
         }),
       };
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to receive message`, err);
       throw err;

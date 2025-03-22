@@ -157,7 +157,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           priority INTEGER NOT NULL,
           sent_at TIMESTAMP NOT NULL,
           retain_until TEXT,
-          message_body BYTEA NOT NULL,
+          message_body TEXT NOT NULL,
           receive_count INTEGER NOT NULL,
           attributes TEXT NOT NULL,
           expires_at TIMESTAMP,

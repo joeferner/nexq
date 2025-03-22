@@ -34,12 +34,11 @@ import {
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
 } from "@nexq/core";
-import * as R from "radash";
 import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
+import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
-import { Transaction } from "./dialect/Transaction.js";
 
 const logger = createLogger("SqlStore");
 
@@ -227,16 +226,9 @@ export class SqlStore implements Store {
     }
   }
 
-  public async sendMessage(
-    queueName: string,
-    body: string | Buffer,
-    options?: SendMessageOptions
-  ): Promise<SendMessageResult> {
+  public async sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult> {
     const id = createId();
     const queueInfo = await this.getCachedQueueInfo(queueName);
-    if (R.isString(body)) {
-      body = Buffer.from(body);
-    }
     if (queueInfo.maxMessageSize && body.length > queueInfo.maxMessageSize) {
       throw new MessageExceededMaxMessageSizeError(body.length, queueInfo.maxMessageSize);
     }
@@ -247,15 +239,12 @@ export class SqlStore implements Store {
 
   public async publishMessage(
     topicName: string,
-    body: string | Buffer,
+    body: string,
     options?: SendMessageOptions
   ): Promise<SendMessageResult> {
     const id = createId();
     const topic = await this.getCachedTopicInfo(topicName);
     const queueInfos = await Promise.all(topic.subscriptions.map((sub) => this.getCachedQueueInfo(sub.queueName)));
-    if (R.isString(body)) {
-      body = Buffer.from(body);
-    }
     for (const queueInfo of queueInfos) {
       if (queueInfo.maxMessageSize && body.length > queueInfo.maxMessageSize) {
         throw new MessageExceededMaxMessageSizeError(body.length, queueInfo.maxMessageSize);

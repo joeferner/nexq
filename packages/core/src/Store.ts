@@ -25,7 +25,7 @@ export interface Store {
   getUsers(): Promise<User[]>;
 
   createQueue(queueName: string, options?: CreateQueueOptions): Promise<void>;
-  sendMessage(queueName: string, body: string | Buffer, options?: SendMessageOptions): Promise<SendMessageResult>;
+  sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult>;
   receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<Message | undefined>;
   receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<Message[]>;
   poll(): Promise<void>;
@@ -50,5 +50,5 @@ export interface Store {
   createTopic(topicName: string, options?: CreateTopicOptions): Promise<void>;
   subscribe(topicName: string, protocol: TopicProtocol, target: string): Promise<string>;
   deleteTopic(topicName: string): Promise<void>;
-  publishMessage(topicName: string, body: string | Buffer, options?: SendMessageOptions): Promise<SendMessageResult>;
+  publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult>;
 }

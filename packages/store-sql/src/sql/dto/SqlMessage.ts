@@ -6,7 +6,7 @@ export interface SqlMessage {
   queue_name: string;
   priority: number;
   sent_at: string | Date;
-  message_body: Buffer;
+  message_body: string;
   receive_count: number;
   attributes: string;
   expires_at: string | Date | null;
@@ -17,7 +17,7 @@ export interface SqlMessage {
 }
 
 export function sqlMessageToMessage(row: SqlMessage, receiptHandle: string): Message {
-  return new Message({
+  return {
     id: row.id,
     priority: row.priority,
     receiptHandle,
@@ -25,5 +25,5 @@ export function sqlMessageToMessage(row: SqlMessage, receiptHandle: string): Mes
     attributes: JSON.parse(row.attributes) as Record<string, string>,
     body: row.message_body,
     lastNakReason: row.last_nak_reason ?? undefined,
-  });
+  };
 }

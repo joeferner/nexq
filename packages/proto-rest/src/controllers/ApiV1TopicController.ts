@@ -7,7 +7,7 @@ import {
   TopicNotFoundError,
   TopicProtocol,
 } from "@nexq/core";
-import createError from "http-errors";
+import createHttpError from "http-errors";
 import { Body, Controller, Delete, Get, Path, Post, Response, Route, SuccessResponse, Tags } from "tsoa";
 import { CreateTopicRequest } from "../dto/CreateTopicRequest.js";
 import { GetTopicResponse, topicInfoToGetTopicResponse } from "../dto/GetTopicResponse.js";
@@ -16,7 +16,7 @@ import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { SendMessageResponse } from "../dto/SendMessageResponse.js";
 import { SubscribeQueueRequest } from "../dto/SubscribeQueueRequest.js";
 import { SubscribeResponse } from "../dto/SubscribeResponse.js";
-import { bufferFromBase64, isHttpError } from "../utils.js";
+import { isHttpError } from "../utils.js";
 
 const logger = createLogger("Rest:ApiV1TopicController");
 
@@ -42,7 +42,7 @@ export class ApiV1TopicController extends Controller {
       });
     } catch (err) {
       if (err instanceof TopicAlreadyExistsError) {
-        throw createError.Conflict(`topic already exists: ${err.reason}`);
+        throw createHttpError.Conflict(`topic already exists: ${err.reason}`);
       }
       logger.error(`failed to create topic`, err);
       throw err;
@@ -80,7 +80,7 @@ export class ApiV1TopicController extends Controller {
       return topicInfoToGetTopicResponse(await this.store.getTopicInfo(topicName));
     } catch (err) {
       if (err instanceof TopicNotFoundError) {
-        throw createError.NotFound("topic not found");
+        throw createHttpError.NotFound("topic not found");
       }
       logger.error(`failed to get topic info`, err);
       throw err;
@@ -101,7 +101,7 @@ export class ApiV1TopicController extends Controller {
       await this.store.deleteTopic(topicName);
     } catch (err) {
       if (err instanceof TopicNotFoundError) {
-        throw createError.NotFound("topic not found");
+        throw createHttpError.NotFound("topic not found");
       }
       logger.error(`failed to delete topic`, err);
       throw err;
@@ -121,15 +121,7 @@ export class ApiV1TopicController extends Controller {
   @Response<void>(404, "topic not found")
   public async publish(@Path() topicName: string, @Body() request: SendMessageRequest): Promise<SendMessageResponse> {
     try {
-      if (request.body === undefined && request.bodyBase64 === undefined) {
-        throw createError.BadRequest("either body or bodyBase64 must be specified");
-      }
-      if (request.body !== undefined && request.bodyBase64 !== undefined) {
-        throw createError.BadRequest("both body and bodyBase64 cannot both be specified");
-      }
-      const body = request.body ?? bufferFromBase64(request.bodyBase64 ?? "");
-
-      const m = await this.store.publishMessage(topicName, body, {
+      const m = await this.store.publishMessage(topicName, request.body, {
         attributes: request.attributes,
         delayMs: parseOptionalDurationIntoMs(request.delay),
         priority: request.priority,
@@ -140,7 +132,7 @@ export class ApiV1TopicController extends Controller {
         throw err;
       }
       if (err instanceof TopicNotFoundError) {
-        throw createError.NotFound("topic not found");
+        throw createHttpError.NotFound("topic not found");
       }
       logger.error(`failed to publish`, err);
       throw err;
@@ -169,10 +161,10 @@ export class ApiV1TopicController extends Controller {
         throw err;
       }
       if (err instanceof TopicNotFoundError) {
-        throw createError.NotFound("topic not found");
+        throw createHttpError.NotFound("topic not found");
       }
       if (err instanceof QueueNotFoundError) {
-        throw createError.NotFound("queue not found");
+        throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to subscribe`, err);
       throw err;

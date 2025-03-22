@@ -148,7 +148,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
           priority INTEGER NOT NULL,
           sent_at TEXT NOT NULL,
           retain_until TEXT,
-          message_body BLOB NOT NULL,
+          message_body TEXT NOT NULL,
           receive_count INTEGER NOT NULL,
           attributes TEXT NOT NULL,
           expires_at TEXT,
