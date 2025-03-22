@@ -373,7 +373,7 @@ describe("ApiV1QueueController", async () => {
       await time.advance(1);
       await store.sendMessage(QUEUE1_NAME, "test2");
 
-      const resp = await controller.peekMessages(QUEUE1_NAME, {});
+      const resp = await controller.peekMessages(QUEUE1_NAME);
       expect(resp.messages.length).toBe(2);
       resp.messages.sort((a, b) => a.sentTime.localeCompare(b.sentTime));
 

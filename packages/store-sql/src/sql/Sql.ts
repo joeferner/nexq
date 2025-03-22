@@ -110,9 +110,18 @@ export abstract class Sql<TDatabase> {
       SQL_FIND_MESSAGE_BY_ID,
       `
         SELECT
-          *
+          *,
+          (
+            SELECT
+              count(*)
+            FROM
+              ${this.tablePrefix}_message m2
+            WHERE
+              m2.priority <= m1.priority
+              AND m2.order_by <= m1.order_by
+          ) AS position
         FROM
-          ${this.tablePrefix}_message
+          ${this.tablePrefix}_message m1
         WHERE
           queue_name = ?
           AND id = ?

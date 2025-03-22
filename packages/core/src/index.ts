@@ -13,14 +13,19 @@ export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.j
 
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
 export { createLogger, DEFAULT_LOGGER_CONFIG, Logger, LoggerConfig, LogLevel } from "./logger.js";
-export { Message, ReceivedMessage } from "./Message.js";
-export { DEFAULT_MAX_NUMBER_OF_MESSAGES, DEFAULT_PASSWORD_HASH_ROUNDS, Store } from "./Store.js";
+export { GetMessage, Message, ReceivedMessage, isAvailable, isDelayed } from "./Message.js";
+export {
+  DEFAULT_MAX_NUMBER_OF_MESSAGES,
+  DEFAULT_PASSWORD_HASH_ROUNDS,
+  DEFAULT_NAK_EXPIRE_BEHAVIOR,
+  Store,
+} from "./Store.js";
 
 export {
   CreateQueueOptions,
   DecreasePriorityByNakExpireBehavior,
-  NakExpireBehaviorOptions,
   isDecreasePriorityByNakExpireBehavior,
+  NakExpireBehaviorOptions,
 } from "./dto/CreateQueueOptions.js";
 export { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 export { CreateUserOptions } from "./dto/CreateUserOptions.js";

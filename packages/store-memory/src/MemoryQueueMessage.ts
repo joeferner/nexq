@@ -1,4 +1,4 @@
-import { createId, Message, ReceivedMessage, UpdateMessageOptions } from "@nexq/core";
+import { createId, GetMessage, Message, ReceivedMessage, UpdateMessageOptions } from "@nexq/core";
 
 export interface CreateMemoryQueueMessageOptions {
   id: string;
@@ -76,6 +76,20 @@ export class MemoryQueueMessage {
     };
   }
 
+  public toGetMessage(positionInQueue: number, now: Date): GetMessage {
+    return {
+      ...this.toMessage(),
+      positionInQueue,
+      delayUntil: this._delayUntil,
+      isAvailable: this.isAvailable(now),
+      receiveCount: this.receiveCount,
+      expiresAt: this.expiresAt,
+      receiptHandle: this.receiptHandle,
+      firstReceivedAt: this._firstReceiveTime,
+      lastNakReason: this.lastNakReason,
+    } satisfies GetMessage;
+  }
+
   public isAvailable(now: Date): boolean {
     if (this.expiresAt !== undefined) {
       if (this.expiresAt >= now) {
@@ -122,5 +136,6 @@ export class MemoryQueueMessage {
   public nak(now: Date, reason?: string): void {
     this.expiresAt = new Date(now.getTime() - 1);
     this.lastNakReason = reason;
+    this._receiptHandle = undefined;
   }
 }

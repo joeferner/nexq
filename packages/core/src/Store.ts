@@ -11,7 +11,7 @@ import { SendMessageResult } from "./dto/SendMessageResult.js";
 import { TopicInfo } from "./dto/TopicInfo.js";
 import { TopicProtocol } from "./dto/TopicInfoSubscription.js";
 import { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";
-import { Message, ReceivedMessage } from "./Message.js";
+import { GetMessage, Message, ReceivedMessage } from "./Message.js";
 import { User } from "./User.js";
 
 export const DEFAULT_PASSWORD_HASH_ROUNDS = 10;
@@ -31,6 +31,7 @@ export interface Store {
   receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<ReceivedMessage | undefined>;
   receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]>;
   peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]>;
+  getMessage(queueName: string, messageId: string): Promise<GetMessage>;
   poll(): Promise<void>;
   updateMessageVisibilityByReceiptHandle(queueName: string, receiptHandle: string, timeMs: number): Promise<void>;
   deleteMessageByReceiptHandle(queueName: string, receiptHandle: string): Promise<void>;

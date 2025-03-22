@@ -2,6 +2,8 @@ import {
   createId,
   CreateQueueOptions,
   CreateTopicOptions,
+  DEFAULT_NAK_EXPIRE_BEHAVIOR,
+  GetMessage,
   Message,
   MessageNotFoundError,
   MoveMessagesResult,
@@ -21,7 +23,12 @@ import * as R from "radash";
 import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
 import { RunResult } from "../sql/dto/RunResult.js";
 import { SqlCount } from "../sql/dto/SqlCount.js";
-import { SqlMessage, sqlMessageToMessage, sqlMessageToReceivedMessage } from "../sql/dto/SqlMessage.js";
+import {
+  SqlMessage,
+  sqlMessageToGetMessage,
+  sqlMessageToMessage,
+  sqlMessageToReceivedMessage,
+} from "../sql/dto/SqlMessage.js";
 import { SqlQueue, sqlQueueToQueueInfo } from "../sql/dto/SqlQueue.js";
 import { SqlTopicWithSubscription, sqlTopicWithSubscriptionToTopicInfo } from "../sql/dto/SqlTopicWithSubscription.js";
 import { SqlUser, sqlUserToUser } from "../sql/dto/SqlUser.js";
@@ -72,7 +79,6 @@ import {
 import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
 import { Transaction } from "./Transaction.js";
-import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "@nexq/core/build/Store.js";
 
 export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   protected constructor(
@@ -241,6 +247,23 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       options.maxNumberOfMessages,
     ]);
     return rows.map(sqlMessageToMessage);
+  }
+
+  public async getMessage(queueName: string, messageId: string): Promise<GetMessage> {
+    const now = this.time.getCurrentTime();
+    const messages = await this.sql.all<SqlMessage & { position: number }>(this.database, SQL_FIND_MESSAGE_BY_ID, [
+      queueName,
+      messageId,
+    ]);
+    if (messages.length === 0) {
+      throw new MessageNotFoundError(queueName, messageId);
+    }
+    if (messages.length > 1) {
+      throw new Error(`expected 1 message but found ${messages.length}`);
+    }
+
+    const message = messages[0];
+    return sqlMessageToGetMessage(message, message.position - 1, now);
   }
 
   /**

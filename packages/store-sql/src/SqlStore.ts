@@ -6,6 +6,7 @@ import {
   CreateUserOptions,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
+  GetMessage,
   hashPassword,
   InvalidUpdateError,
   isDecreasePriorityByNakExpireBehavior,
@@ -319,6 +320,11 @@ export class SqlStore implements Store {
   public async peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]> {
     const queue = await this.getCachedQueueInfo(queueName);
     return this.dialect.peekMessages(queue.name, toRequiredPeekMessagesOptions(options));
+  }
+
+  public async getMessage(queueName: string, messageId: string): Promise<GetMessage> {
+    const queue = await this.getCachedQueueInfo(queueName);
+    return this.dialect.getMessage(queue.name, messageId);
   }
 
   private trigger(message: NewQueueMessageEvent): void {

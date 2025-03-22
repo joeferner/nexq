@@ -2,11 +2,15 @@ import {
   createId,
   createLogger,
   CreateQueueOptions,
+  DEFAULT_NAK_EXPIRE_BEHAVIOR,
+  GetMessage,
   InvalidUpdateError,
+  isDecreasePriorityByNakExpireBehavior,
   Message,
   MessageExceededMaxMessageSizeError,
   MessageNotFoundError,
   MoveMessagesResult,
+  NakExpireBehaviorOptions,
   PeekMessagesOptions,
   QueueInfo,
   ReceiptHandleIsInvalidError,
@@ -18,11 +22,6 @@ import {
   Trigger,
   UpdateMessageOptions,
 } from "@nexq/core";
-import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "@nexq/core/build/Store.js";
-import {
-  isDecreasePriorityByNakExpireBehavior,
-  NakExpireBehaviorOptions,
-} from "@nexq/core/build/dto/CreateQueueOptions.js";
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent } from "./events.js";
@@ -193,6 +192,18 @@ export class MemoryQueue {
     }
 
     return messages;
+  }
+
+  public async getMessage(messageId: string): Promise<GetMessage> {
+    const now = this.time.getCurrentTime();
+    this.sortMessages();
+    for (let i = 0; i < this.messages.length; i++) {
+      const message = this.messages[i];
+      if (message.id === messageId) {
+        return message.toGetMessage(i, now);
+      }
+    }
+    throw new MessageNotFoundError(this.name, messageId);
   }
 
   private async sleepOrWaitForEvent(ms: number): Promise<void> {

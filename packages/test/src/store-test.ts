@@ -143,6 +143,56 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 0, 1, 0);
     });
 
+    test("get message", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME, { nakExpireBehavior: "moveToEnd" });
+
+      // send a message
+      const originalMessage = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await time.advance(1);
+
+      let m = await store.getMessage(QUEUE1_NAME, originalMessage.id);
+      expect(m.id).toBe(originalMessage.id);
+      expect(m.positionInQueue).toBe(0);
+      expect(m.delayUntil).toBeUndefined();
+      expect(m.isAvailable).toBeTruthy();
+      expect(m.receiveCount).toBe(0);
+      expect(m.expiresAt).toBeUndefined();
+      expect(m.receiptHandle).toBeUndefined();
+      expect(m.firstReceivedAt).toBeUndefined();
+      expect(m.lastNakReason).toBeUndefined();
+
+      // send receive more messages
+      await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY);
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE3_BODY);
+      await time.advance(1);
+      const recvMessage = await store.receiveMessage(QUEUE1_NAME);
+
+      m = await store.getMessage(QUEUE1_NAME, originalMessage.id);
+      expect(m.id).toBe(originalMessage.id);
+      expect(m.positionInQueue).toBe(0);
+      expect(m.isAvailable).toBeFalsy();
+      expect(m.receiptHandle).toBe(recvMessage?.receiptHandle);
+
+      // nak
+      await store.nakMessage(QUEUE1_NAME, m.id, recvMessage!.receiptHandle, "testing");
+      await time.advance(1);
+      await store.poll();
+
+      m = await store.getMessage(QUEUE1_NAME, originalMessage.id);
+      expect(m.id).toBe(originalMessage.id);
+      expect(m.positionInQueue).toBe(2);
+      expect(m.isAvailable).toBeTruthy();
+      expect(m.lastNakReason).toBe("testing");
+      expect(m.receiptHandle).toBeUndefined();
+
+      // bad message id
+      await expect(async () => await store.getMessage(QUEUE1_NAME, "bad-message-id")).rejects.toThrowError(
+        'message id "bad-message-id" is invalid for queue "queue1"'
+      );
+    });
+
     test("receive message", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);

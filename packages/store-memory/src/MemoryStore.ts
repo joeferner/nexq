@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
+  GetMessage,
   Message,
   MoveMessagesResult,
   parseDurationIntoMs,
@@ -153,6 +154,11 @@ export class MemoryStore implements Store {
   public async peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]> {
     const queue = this.getQueueRequired(queueName);
     return queue.peekMessages(toRequiredPeekMessagesOptions(options));
+  }
+
+  public async getMessage(queueName: string, messageId: string): Promise<GetMessage> {
+    const queue = this.getQueueRequired(queueName);
+    return queue.getMessage(messageId);
   }
 
   public async poll(): Promise<void> {

@@ -14,10 +14,10 @@ import {
 import createHttpError from "http-errors";
 import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse, Tags } from "tsoa";
 import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
+import { GetMessageResponse } from "../dto/GetMessageResponse.js";
 import { GetQueueResponse, queueInfoToGetQueueResponse } from "../dto/GetQueueResponse.js";
 import { GetQueuesResponse } from "../dto/GetQueuesResponse.js";
 import { MoveMessagesResponse } from "../dto/MoveMessagesResponse.js";
-import { PeekMessagesRequest } from "../dto/PeekMessagesRequest.js";
 import { PeekMessagesResponse, PeekMessagesResponseMessage } from "../dto/PeekMessagesResponse.js";
 import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
 import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
@@ -286,7 +286,7 @@ export class ApiV1QueueController extends Controller {
   }
 
   /**
-   * update a message
+   * nak a message
    *
    * @param queueName the name of the queue to send to
    * @param messageId the id of the message to delete
@@ -388,20 +388,25 @@ export class ApiV1QueueController extends Controller {
    * peek messages in a queue
    *
    * @param queueName the name of the queue to peek messages from
+   * @param maxNumberOfMessages maximum number of message to peek
+   * @param includeDelayed true, to include delayed messages
+   * @param includeNotVisible true, to include not visible (received messages)
    * @example queueName "queue1"
    */
-  @Post("{queueName}/peek")
+  @Get("{queueName}/peek")
   @SuccessResponse("200", "messages peeked")
   @Response<void>(404, "queue not found")
   public async peekMessages(
     @Path() queueName: string,
-    @Body() request: PeekMessagesRequest
+    @Query("maxNumberOfMessages") maxNumberOfMessages?: number,
+    @Query("includeNotVisible") includeNotVisible?: boolean,
+    @Query("includeDelayed") includeDelayed?: boolean
   ): Promise<PeekMessagesResponse> {
     try {
       const messages = await this.store.peekMessages(queueName, {
-        maxNumberOfMessages: request.maxNumberOfMessages,
-        includeDelayed: request.includeDelayed,
-        includeNotVisible: request.includeNotVisible,
+        maxNumberOfMessages,
+        includeDelayed,
+        includeNotVisible,
       });
       return {
         messages: messages.map((m) => {
@@ -419,6 +424,46 @@ export class ApiV1QueueController extends Controller {
         throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to peek messages`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * get a message in a queue
+   *
+   * @param queueName the name of the queue to get a message from
+   * @param messageId the id of the message to get
+   * @example queueName "queue1"
+   */
+  @Get("{queueName}/message/{messageId}")
+  @SuccessResponse("200", "got message")
+  @Response<void>(404, "queue or message not found")
+  public async getMessage(@Path() queueName: string, @Path() messageId: string): Promise<GetMessageResponse> {
+    try {
+      const message = await this.store.getMessage(queueName, messageId);
+      return {
+        id: message.id,
+        priority: message.priority,
+        attributes: message.attributes,
+        sentTime: message.sentTime.toISOString(),
+        body: message.body,
+        positionInQueue: message.positionInQueue,
+        delayUntil: message.delayUntil?.toISOString(),
+        isAvailable: message.isAvailable,
+        receiveCount: message.receiveCount,
+        expiresAt: message.expiresAt?.toISOString(),
+        receiptHandle: message.receiptHandle,
+        firstReceivedAt: message.firstReceivedAt?.toISOString(),
+        lastNakReason: message.lastNakReason,
+      } satisfies GetMessageResponse;
+    } catch (err) {
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      if (err instanceof MessageNotFoundError) {
+        throw createHttpError.NotFound("message not found");
+      }
+      logger.error(`failed to get message`, err);
       throw err;
     }
   }
