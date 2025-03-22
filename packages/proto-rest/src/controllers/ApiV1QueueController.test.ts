@@ -366,4 +366,23 @@ describe("ApiV1QueueController", async () => {
       await assertQueueEmpty(store, QUEUE1_NAME);
     });
   });
+
+  describe("peekMessages", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await store.sendMessage(QUEUE1_NAME, "test1");
+      await time.advance(1);
+      await store.sendMessage(QUEUE1_NAME, "test2");
+
+      const resp = await controller.peekMessages(QUEUE1_NAME, {});
+      expect(resp.messages.length).toBe(2);
+      resp.messages.sort((a, b) => a.sentTime.localeCompare(b.sentTime));
+
+      const message1 = resp.messages[0];
+      expect(message1.body).toBe("test1");
+
+      const message2 = resp.messages[1];
+      expect(message2.body).toBe("test2");
+    });
+  });
 });

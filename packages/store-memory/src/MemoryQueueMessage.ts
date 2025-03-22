@@ -1,4 +1,4 @@
-import { createId, Message, UpdateMessageOptions } from "@nexq/core";
+import { createId, Message, ReceivedMessage, UpdateMessageOptions } from "@nexq/core";
 
 export interface CreateMemoryQueueMessageOptions {
   id: string;
@@ -53,16 +53,19 @@ export class MemoryQueueMessage {
     return this._receiveCount;
   }
 
-  public markReceived(newExpiresTime: Date, now: Date): Message {
+  public markReceived(newExpiresTime: Date, now: Date): ReceivedMessage {
     this.expiresAt = newExpiresTime;
     this._receiptHandle = createId();
     if (this._firstReceiveTime === undefined) {
       this._firstReceiveTime = now;
     }
     this._receiveCount++;
+    return { ...this.toMessage(), receiptHandle: this._receiptHandle };
+  }
+
+  public toMessage(): Message {
     return {
       id: this.id,
-      receiptHandle: this._receiptHandle,
       body: this.body,
       sentTime: this.sentTime,
       priority: this.priority,

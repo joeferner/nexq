@@ -163,6 +163,8 @@ export class SqliteSql extends Sql<sqlite.Database> {
       database.exec(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
       database.exec(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
       database.exec(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
+      database.exec(`CREATE INDEX nexq_message_expires_at_idx ON nexq_message(expires_at)`);
+      database.exec(`CREATE INDEX nexq_message_delay_until_idx ON nexq_message(delay_until)`);
 
       database.exec(`
         CREATE TABLE nexq_user(

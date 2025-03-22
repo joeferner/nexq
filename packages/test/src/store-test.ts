@@ -57,6 +57,92 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await store.shutdown();
     });
 
+    test("peek messages", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // test empty queue
+      expect(await store.peekMessages(QUEUE1_NAME)).toEqual([]);
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+
+      // test 1 item
+      const messages = await store.peekMessages(QUEUE1_NAME);
+      expect(messages.length).toBe(1);
+      expect(messages[0].body).toBe(MESSAGE1_BODY);
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+    });
+
+    test("peek messages (includeNotVisible)", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send/receive a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.receiveMessage(QUEUE1_NAME);
+
+      // peek without option
+      const messagesWithoutOption = await store.peekMessages(QUEUE1_NAME);
+      expect(messagesWithoutOption.length).toBe(0);
+
+      // peek with option
+      const messages = await store.peekMessages(QUEUE1_NAME, { includeNotVisible: true });
+      expect(messages.length).toBe(1);
+      await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
+    });
+
+    test("peek messages (include everything)", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send/receive a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await store.receiveMessage(QUEUE1_NAME);
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY, { delayMs: 100 });
+
+      // peek without option
+      const messagesWithoutOption = await store.peekMessages(QUEUE1_NAME);
+      expect(messagesWithoutOption.length).toBe(0);
+
+      // peek with option
+      const messages = await store.peekMessages(QUEUE1_NAME, { includeNotVisible: true, includeDelayed: true });
+      expect(messages.length).toBe(2);
+      await assertQueueSize(store, QUEUE1_NAME, 0, 1, 1);
+    });
+
+    test("peek messages (max messages)", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send/receive a message
+      for (let i = 0; i < 11; i++) {
+        await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      }
+
+      // peek
+      const messages = await store.peekMessages(QUEUE1_NAME, { maxNumberOfMessages: 10 });
+      expect(messages.length).toBe(10);
+      await assertQueueSize(store, QUEUE1_NAME, 11, 0, 0);
+    });
+
+    test("peek messages (includeDelayed)", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send/receive a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY, { delayMs: 1000 });
+
+      // peek without option
+      const messagesWithoutOption = await store.peekMessages(QUEUE1_NAME);
+      expect(messagesWithoutOption.length).toBe(0);
+
+      // peek with option
+      const messages = await store.peekMessages(QUEUE1_NAME, { includeDelayed: true });
+      expect(messages.length).toBe(1);
+      await assertQueueSize(store, QUEUE1_NAME, 0, 1, 0);
+    });
+
     test("receive message", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);

@@ -1,4 +1,4 @@
-import { Message } from "@nexq/core";
+import { Message, ReceivedMessage } from "@nexq/core";
 import { parseDate } from "../../utils.js";
 
 export interface SqlMessage {
@@ -16,14 +16,20 @@ export interface SqlMessage {
   last_nak_reason: string | null;
 }
 
-export function sqlMessageToMessage(row: SqlMessage, receiptHandle: string): Message {
+export function sqlMessageToMessage(row: SqlMessage): Message {
   return {
     id: row.id,
     priority: row.priority,
-    receiptHandle,
     sentTime: parseDate(row.sent_at),
     attributes: JSON.parse(row.attributes) as Record<string, string>,
     body: row.message_body,
     lastNakReason: row.last_nak_reason ?? undefined,
+  };
+}
+
+export function sqlMessageToReceivedMessage(row: SqlMessage, receiptHandle: string): ReceivedMessage {
+  return {
+    ...sqlMessageToMessage(row),
+    receiptHandle,
   };
 }

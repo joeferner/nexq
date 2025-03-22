@@ -2,6 +2,7 @@ import { CreateQueueOptions } from "./dto/CreateQueueOptions.js";
 import { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 import { CreateUserOptions } from "./dto/CreateUserOptions.js";
 import { MoveMessagesResult } from "./dto/MoveMessagesResult.js";
+import { PeekMessagesOptions } from "./dto/PeekMessagesOptions.js";
 import { QueueInfo } from "./dto/QueueInfo.js";
 import { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
 import { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
@@ -10,7 +11,7 @@ import { SendMessageResult } from "./dto/SendMessageResult.js";
 import { TopicInfo } from "./dto/TopicInfo.js";
 import { TopicProtocol } from "./dto/TopicInfoSubscription.js";
 import { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";
-import { Message } from "./Message.js";
+import { Message, ReceivedMessage } from "./Message.js";
 import { User } from "./User.js";
 
 export const DEFAULT_PASSWORD_HASH_ROUNDS = 10;
@@ -26,8 +27,9 @@ export interface Store {
 
   createQueue(queueName: string, options?: CreateQueueOptions): Promise<void>;
   sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult>;
-  receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<Message | undefined>;
-  receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<Message[]>;
+  receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<ReceivedMessage | undefined>;
+  receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]>;
+  peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]>;
   poll(): Promise<void>;
   updateMessageVisibilityByReceiptHandle(queueName: string, receiptHandle: string, timeMs: number): Promise<void>;
   deleteMessageByReceiptHandle(queueName: string, receiptHandle: string): Promise<void>;

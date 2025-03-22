@@ -5,9 +5,11 @@ import {
   Message,
   MessageNotFoundError,
   MoveMessagesResult,
+  PeekMessagesOptions,
   QueueInfo,
   QueueNotFoundError,
   ReceiptHandleIsInvalidError,
+  ReceivedMessage,
   SendMessageOptions,
   Time,
   TopicInfo,
@@ -19,7 +21,7 @@ import * as R from "radash";
 import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
 import { RunResult } from "../sql/dto/RunResult.js";
 import { SqlCount } from "../sql/dto/SqlCount.js";
-import { SqlMessage, sqlMessageToMessage } from "../sql/dto/SqlMessage.js";
+import { SqlMessage, sqlMessageToMessage, sqlMessageToReceivedMessage } from "../sql/dto/SqlMessage.js";
 import { SqlQueue, sqlQueueToQueueInfo } from "../sql/dto/SqlQueue.js";
 import { SqlTopicWithSubscription, sqlTopicWithSubscriptionToTopicInfo } from "../sql/dto/SqlTopicWithSubscription.js";
 import { SqlUser, sqlUserToUser } from "../sql/dto/SqlUser.js";
@@ -58,6 +60,7 @@ import {
   SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER,
   SQL_MOVE_MESSAGES,
   SQL_NAK_MESSAGE,
+  SQL_PEEK_MESSAGES,
   SQL_PURGE_QUEUE,
   SQL_RECEIVE_MESSAGE,
   SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE,
@@ -186,7 +189,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   public async receiveMessages(
     queueName: string,
     options: { visibilityTimeoutMs: number; count: number }
-  ): Promise<Message[]> {
+  ): Promise<ReceivedMessage[]> {
     const tx = await this.beginTransaction();
     try {
       const now = this.time.getCurrentTime();
@@ -211,7 +214,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
             row.id,
             queueName,
           ]);
-          return sqlMessageToMessage(row, receiptHandle);
+          return sqlMessageToReceivedMessage(row, receiptHandle);
         })
       );
       await tx.commit();
@@ -222,6 +225,25 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     } finally {
       await tx.release();
     }
+  }
+
+  public async peekMessages(queueName: string, options: Required<PeekMessagesOptions>): Promise<Message[]> {
+    const now = this.time.getCurrentTime();
+    const rows = await this.sql.all<SqlMessage>(this.database, SQL_PEEK_MESSAGES, [
+      queueName,
+      options.includeNotVisible ? this.getWayInTheFutureDate(now) : now,
+      options.includeDelayed ? this.getWayInTheFutureDate(now) : now,
+      options.maxNumberOfMessages,
+    ]);
+    return rows.map(sqlMessageToMessage);
+  }
+
+  /**
+   * find a date in the future so that we don't have to write cartesian product
+   * sql statements for finding messages
+   */
+  private getWayInTheFutureDate(now: Date): Date {
+    return new Date(now.getTime() + 10 * 360 * 24 * 60 * 60 * 1000);
   }
 
   public async updateMessageVisibilityByReceiptHandle(

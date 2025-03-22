@@ -16,6 +16,7 @@ export const SQL_FIND_USERS = "findUsers";
 export const SQL_CREATE_MESSAGE = "createMessage";
 export const SQL_FIND_MESSAGES_TO_RECEIVE = "findMessagesToReceive";
 export const SQL_RECEIVE_MESSAGE = "receiveMessage";
+export const SQL_PEEK_MESSAGES = "peekMessages";
 export const SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE = "updateMessageVisibilityByReceiptHandle";
 export const SQL_DELETE_MESSAGE_BY_RECEIPT_HANDLE = "deleteMessageByReceiptHandle";
 export const SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION = "deleteExpiredMessagesOverRetention";
@@ -182,6 +183,24 @@ export abstract class Sql<TDatabase> {
 
     this.addQuery(
       SQL_FIND_MESSAGES_TO_RECEIVE,
+      `
+        SELECT
+          *
+        FROM
+          ${this.tablePrefix}_message
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NULL OR ? > expires_at)
+          AND (delay_until IS NULL OR ? >= delay_until)
+        ORDER BY
+          priority DESC,
+          sent_at
+        LIMIT ?
+      `
+    );
+
+    this.addQuery(
+      SQL_PEEK_MESSAGES,
       `
         SELECT
           *

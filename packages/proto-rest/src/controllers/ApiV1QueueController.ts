@@ -17,6 +17,8 @@ import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
 import { GetQueueResponse, queueInfoToGetQueueResponse } from "../dto/GetQueueResponse.js";
 import { GetQueuesResponse } from "../dto/GetQueuesResponse.js";
 import { MoveMessagesResponse } from "../dto/MoveMessagesResponse.js";
+import { PeekMessagesRequest } from "../dto/PeekMessagesRequest.js";
+import { PeekMessagesResponse, PeekMessagesResponseMessage } from "../dto/PeekMessagesResponse.js";
 import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
 import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
@@ -375,7 +377,46 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to receive message`, err);
+      logger.error(`failed to receive messages`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * peek messages in a queue
+   *
+   * @param queueName the name of the queue to peek messages from
+   * @example queueName "queue1"
+   */
+  @Post("{queueName}/peek")
+  @SuccessResponse("200", "messages peeked")
+  @Response<void>(404, "queue not found")
+  public async peekMessages(
+    @Path() queueName: string,
+    @Body() request: PeekMessagesRequest
+  ): Promise<PeekMessagesResponse> {
+    try {
+      const messages = await this.store.peekMessages(queueName, {
+        maxNumberOfMessages: request.maxNumberOfMessages,
+        includeDelayed: request.includeDelayed,
+        includeNotVisible: request.includeNotVisible,
+      });
+      return {
+        messages: messages.map((m) => {
+          return {
+            id: m.id,
+            priority: m.priority,
+            attributes: m.attributes,
+            sentTime: m.sentTime.toISOString(),
+            body: m.body,
+          } satisfies PeekMessagesResponseMessage;
+        }),
+      };
+    } catch (err) {
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      logger.error(`failed to peek messages`, err);
       throw err;
     }
   }

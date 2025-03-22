@@ -12,10 +12,12 @@ import {
   MessageExceededMaxMessageSizeError,
   MoveMessagesResult,
   parseDurationIntoMs,
+  PeekMessagesOptions,
   QueueAlreadyExistsError,
   QueueInfo,
   queueInfoEqualCreateQueueOptions,
   QueueNotFoundError,
+  ReceivedMessage,
   ReceiveMessageOptions,
   ReceiveMessagesOptions,
   SendMessageOptions,
@@ -28,6 +30,7 @@ import {
   topicInfoEqualCreateTopicOptions,
   TopicNotFoundError,
   TopicProtocol,
+  toRequiredPeekMessagesOptions,
   Trigger,
   UpdateMessageOptions,
   User,
@@ -259,7 +262,10 @@ export class SqlStore implements Store {
     return { id };
   }
 
-  public async receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<Message | undefined> {
+  public async receiveMessage(
+    queueName: string,
+    options?: ReceiveMessageOptions
+  ): Promise<ReceivedMessage | undefined> {
     const messages = await this.receiveMessages(queueName, { ...options, maxNumberOfMessages: 1 });
     if (messages.length > 1) {
       throw new Error(`expected 0 or 1 but found ${messages.length} when receiving messages`);
@@ -267,7 +273,7 @@ export class SqlStore implements Store {
     return messages[0];
   }
 
-  public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<Message[]> {
+  public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]> {
     const now = this.time.getCurrentTime();
     const nowMs = now.getTime();
     const queueInfo = await this.getCachedQueueInfo(queueName);
@@ -303,6 +309,11 @@ export class SqlStore implements Store {
         return messages;
       }
     }
+  }
+
+  public async peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]> {
+    const queue = await this.getCachedQueueInfo(queueName);
+    return this.dialect.peekMessages(queue.name, toRequiredPeekMessagesOptions(options));
   }
 
   private trigger(message: NewQueueMessageEvent): void {

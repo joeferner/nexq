@@ -7,8 +7,10 @@ import {
   MessageExceededMaxMessageSizeError,
   MessageNotFoundError,
   MoveMessagesResult,
+  PeekMessagesOptions,
   QueueInfo,
   ReceiptHandleIsInvalidError,
+  ReceivedMessage,
   ReceiveMessagesOptions,
   SendMessageOptions,
   SendMessageResult,
@@ -94,11 +96,13 @@ export class MemoryQueue {
     }
   }
 
-  public async receiveMessages(options?: ReceiveMessagesOptions & { maxNumberOfMessages: number }): Promise<Message[]> {
+  public async receiveMessages(
+    options?: ReceiveMessagesOptions & { maxNumberOfMessages: number }
+  ): Promise<ReceivedMessage[]> {
     const visibilityTimeoutMs = options?.visibilityTimeoutMs ?? this.visibilityTimeoutMs ?? 60;
     const waitTime = options?.waitTimeMs ?? this.receiveMessageWaitTimeMs ?? 0;
     const endTime = this.time.getCurrentTime().getTime() + waitTime;
-    const messages: Message[] = [];
+    const messages: ReceivedMessage[] = [];
     while (true) {
       const now = this.time.getCurrentTime();
 
@@ -130,6 +134,38 @@ export class MemoryQueue {
         return messages;
       }
     }
+  }
+
+  public async peekMessages(options: Required<PeekMessagesOptions>): Promise<Message[]> {
+    const messages: Message[] = [];
+
+    const now = this.time.getCurrentTime();
+    if (this.expiresMs !== undefined) {
+      this.expiresAt = new Date(now.getTime() + this.expiresMs);
+    }
+
+    this.sortMessages();
+    for (const message of this.messages) {
+      if (options.includeNotVisible === false) {
+        if (message.isNotVisible(now)) {
+          continue;
+        }
+      }
+
+      if (options.includeDelayed === false) {
+        if (message.isDelayed(now)) {
+          continue;
+        }
+      }
+
+      messages.push(message.toMessage());
+
+      if (messages.length === options.maxNumberOfMessages) {
+        return messages;
+      }
+    }
+
+    return messages;
   }
 
   private async sleepOrWaitForEvent(ms: number): Promise<void> {

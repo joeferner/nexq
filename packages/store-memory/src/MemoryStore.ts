@@ -10,10 +10,12 @@ import {
   Message,
   MoveMessagesResult,
   parseDurationIntoMs,
+  PeekMessagesOptions,
   QueueAlreadyExistsError,
   QueueInfo,
   queueInfoEqualCreateQueueOptions,
   QueueNotFoundError,
+  ReceivedMessage,
   ReceiveMessageOptions,
   ReceiveMessagesOptions,
   SendMessageOptions,
@@ -26,6 +28,7 @@ import {
   topicInfoEqualCreateTopicOptions,
   TopicNotFoundError,
   TopicProtocol,
+  toRequiredPeekMessagesOptions,
   UpdateMessageOptions,
   User,
   UserAccessKeyIdAlreadyExistsError,
@@ -121,7 +124,10 @@ export class MemoryStore implements Store {
     return queue.sendMessage(body, options);
   }
 
-  public async receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<Message | undefined> {
+  public async receiveMessage(
+    queueName: string,
+    options?: ReceiveMessageOptions
+  ): Promise<ReceivedMessage | undefined> {
     const messages = await this.receiveMessages(queueName, { ...options, maxNumberOfMessages: 1 });
     if (messages.length > 1) {
       throw new Error(`expected 0 or 1 but found ${messages.length} when receiving messages`);
@@ -129,13 +135,18 @@ export class MemoryStore implements Store {
     return messages[0];
   }
 
-  public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<Message[]> {
+  public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]> {
     const queue = this.getQueueRequired(queueName);
     const receiveOptions = { maxNumberOfMessages: DEFAULT_MAX_NUMBER_OF_MESSAGES, ...options };
     if (receiveOptions.maxNumberOfMessages === undefined) {
       receiveOptions.maxNumberOfMessages = DEFAULT_MAX_NUMBER_OF_MESSAGES;
     }
     return queue.receiveMessages(receiveOptions);
+  }
+
+  public async peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]> {
+    const queue = this.getQueueRequired(queueName);
+    return queue.peekMessages(toRequiredPeekMessagesOptions(options));
   }
 
   public async poll(): Promise<void> {

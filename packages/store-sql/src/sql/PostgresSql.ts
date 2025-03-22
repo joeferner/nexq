@@ -172,6 +172,8 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
       await database.query(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
       await database.query(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
       await database.query(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
+      await database.query(`CREATE INDEX nexq_message_expires_at_idx ON nexq_message(expires_at)`);
+      await database.query(`CREATE INDEX nexq_message_delay_until_idx ON nexq_message(delay_until)`);
 
       await database.query(`
         CREATE TABLE nexq_user(

@@ -1,6 +1,5 @@
 export interface Message {
   id: string;
-  receiptHandle: string;
   body: string;
   /**
    * Time the message was originally sent
@@ -9,4 +8,8 @@ export interface Message {
   priority: number;
   lastNakReason: string | undefined;
   attributes: Record<string, string>;
+}
+
+export interface ReceivedMessage extends Message {
+  receiptHandle: string;
 }
