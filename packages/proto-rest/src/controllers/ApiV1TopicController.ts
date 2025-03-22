@@ -1,5 +1,6 @@
 import {
   createLogger,
+  DeleteDeadLetterTopicError,
   parseOptionalDurationIntoMs,
   QueueNotFoundError,
   Store,
@@ -95,6 +96,7 @@ export class ApiV1TopicController extends Controller {
    */
   @Delete("{topicName}")
   @SuccessResponse("200", "Topic deleted")
+  @Response<void>(400, "cannot delete dead letter topic associated with a queue")
   @Response<void>(404, "topic not found")
   public async deleteTopic(@Path() topicName: string): Promise<void> {
     try {
@@ -102,6 +104,9 @@ export class ApiV1TopicController extends Controller {
     } catch (err) {
       if (err instanceof TopicNotFoundError) {
         throw createHttpError.NotFound("topic not found");
+      }
+      if (err instanceof DeleteDeadLetterTopicError) {
+        throw createHttpError.BadRequest("cannot delete dead letter topic associated with a queue");
       }
       logger.error(`failed to delete topic`, err);
       throw err;

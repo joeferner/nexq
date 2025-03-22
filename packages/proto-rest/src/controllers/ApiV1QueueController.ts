@@ -10,6 +10,7 @@ import {
   QueueNotFoundError,
   ReceiptHandleIsInvalidError,
   Store,
+  TopicNotFoundError,
 } from "@nexq/core";
 import createHttpError from "http-errors";
 import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse, Tags } from "tsoa";
@@ -49,7 +50,7 @@ export class ApiV1QueueController extends Controller {
   @SuccessResponse("204", "Queue Created")
   @Response<void>(400, "bad request")
   @Response<void>(409, "queue already exists with different parameters")
-  @Response<void>(404, "dead letter queue not found")
+  @Response<void>(404, "dead letter queue/topic not found")
   public async createQueue(@Body() request: CreateQueueRequest): Promise<void> {
     try {
       await this.store.createQueue(request.name, {
@@ -61,6 +62,7 @@ export class ApiV1QueueController extends Controller {
         receiveMessageWaitTimeMs: parseOptionalDurationIntoMs(request.receiveMessageWaitTime),
         visibilityTimeoutMs: parseOptionalDurationIntoMs(request.visibilityTimeout),
         deadLetterQueueName: request.deadLetterQueueName,
+        deadLetterTopicName: request.deadLetterTopicName,
         maxReceiveCount: request.maxReceiveCount,
         nakExpireBehavior: request.nakExpireBehavior,
         tags: request.tags,
@@ -74,6 +76,9 @@ export class ApiV1QueueController extends Controller {
       }
       if (err instanceof QueueNotFoundError && err.queueName === request.deadLetterQueueName) {
         throw createHttpError.NotFound(`dead letter queue not found`);
+      }
+      if (err instanceof TopicNotFoundError && err.topicName === request.deadLetterTopicName) {
+        throw createHttpError.NotFound(`dead letter topic not found`);
       }
       logger.error(`failed to create queue`, err);
       throw err;

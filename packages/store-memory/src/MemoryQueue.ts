@@ -35,6 +35,7 @@ export class MemoryQueue {
   public lastModified: Date;
   private delayMs?: number;
   public deadLetterQueueName: string | undefined;
+  public deadLetterTopicName: string | undefined;
   private visibilityTimeoutMs: number | undefined;
   private receiveMessageWaitTimeMs: number | undefined;
   private messageRetentionPeriodMs: number | undefined;
@@ -56,6 +57,7 @@ export class MemoryQueue {
 
     this.delayMs = options.delayMs;
     this.deadLetterQueueName = options.deadLetterQueueName;
+    this.deadLetterTopicName = options.deadLetterTopicName;
     this.visibilityTimeoutMs = options.visibilityTimeoutMs;
     this.receiveMessageWaitTimeMs = options.receiveMessageWaitTimeMs;
     this.messageRetentionPeriodMs = options.messageRetentionPeriodMs;
@@ -73,6 +75,7 @@ export class MemoryQueue {
     const now = this.time.getCurrentTime();
     this.delayMs = options.delayMs;
     this.deadLetterQueueName = options.deadLetterQueueName;
+    this.deadLetterTopicName = options.deadLetterTopicName;
     this.visibilityTimeoutMs = options.visibilityTimeoutMs;
     this.receiveMessageWaitTimeMs = options.receiveMessageWaitTimeMs;
     this.messageRetentionPeriodMs = options.messageRetentionPeriodMs;
@@ -87,9 +90,13 @@ export class MemoryQueue {
     this.lastModified = now;
   }
 
-  public sendMessage(body: string, options?: SendMessageOptions & { lastNakReason?: string }): SendMessageResult {
+  public sendMessage(
+    id: string | undefined,
+    body: string,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): SendMessageResult {
     const now = this.time.getCurrentTime();
-    const id = createId();
+    id = id ?? createId();
     const delay = options?.delayMs ?? this.delayMs;
     const delayUntil = delay === undefined ? undefined : new Date(now.getTime() + delay);
     if (this.maxMessageSize && body.length > this.maxMessageSize) {
@@ -247,6 +254,7 @@ export class MemoryQueue {
       nakExpireBehavior: R.clone(this.nakExpireBehavior),
       tags: structuredClone(this.tags),
       deadLetterQueueName: this.deadLetterQueueName,
+      deadLetterTopicName: this.deadLetterTopicName,
       maxReceiveCount: this.maxReceiveCount,
     };
   }

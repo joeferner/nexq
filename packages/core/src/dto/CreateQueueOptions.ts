@@ -21,6 +21,12 @@ export interface CreateQueueOptions {
   deadLetterQueueName?: string;
 
   /**
+   * Optional dead letter topic in which messages that either have reached
+   * their max receive count or have been nak'ed will be sent.
+   */
+  deadLetterTopicName?: string;
+
+  /**
    * The number of times a message is delivered to the source queue before
    * being moved to the dead-letter queue.
    */

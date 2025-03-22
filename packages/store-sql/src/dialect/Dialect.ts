@@ -21,6 +21,7 @@ import {
 } from "@nexq/core";
 import * as R from "radash";
 import { FindQueueNamesWithDeadLetterQueueNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterQueueNameRow.js";
+import { FindQueueNamesWithDeadLetterTopicNameRow } from "../sql/dto/FindQueueNamesWithDeadLetterTopicNameRow.js";
 import { RunResult } from "../sql/dto/RunResult.js";
 import { SqlCount } from "../sql/dto/SqlCount.js";
 import {
@@ -56,12 +57,14 @@ import {
   SQL_FIND_MESSAGES_TO_RECEIVE,
   SQL_FIND_QUEUE_BY_NAME,
   SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_QUEUE_NAME,
+  SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_TOPIC_NAME,
   SQL_FIND_QUEUES,
   SQL_FIND_TOPIC_INFO_BY_NAME,
   SQL_FIND_TOPIC_INFOS,
   SQL_FIND_USER_BY_ACCESS_KEY_ID,
   SQL_FIND_USER_BY_USERNAME,
   SQL_FIND_USERS,
+  SQL_GET_EXPIRED_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES,
@@ -119,17 +122,18 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   }
 
   public async sendMessage(
+    tx: Transaction | undefined,
     queueInfo: QueueInfo,
     id: string,
     body: string,
-    options?: SendMessageOptions
+    options?: SendMessageOptions & { lastNakReason?: string }
   ): Promise<void> {
     const now = this.time.getCurrentTime();
     const retainUntil =
       queueInfo.messageRetentionPeriodMs === undefined
         ? null
         : new Date(now.getTime() + queueInfo.messageRetentionPeriodMs);
-    await this.sql.run(this.database, SQL_CREATE_MESSAGE, [
+    await this.sql.run(tx ?? this.database, SQL_CREATE_MESSAGE, [
       id,
       queueInfo.name,
       options?.priority ?? 0,
@@ -141,6 +145,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       options?.attributes ? JSON.stringify(options.attributes) : "{}",
       null, // expires at
       options?.delayMs ? new Date(now.getTime() + options.delayMs) : null,
+      options?.lastNakReason ?? null,
     ]);
   }
 
@@ -313,7 +318,17 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     ]);
   }
 
+  public async getExpiredMessages(tx: Transaction | undefined, queueInfo: QueueInfo): Promise<SqlMessage[]> {
+    const now = this.time.getCurrentTime();
+    return this.sql.all<SqlMessage>(tx ?? this.database, SQL_GET_EXPIRED_MESSAGES, [
+      queueInfo.name,
+      now,
+      queueInfo.maxReceiveCount,
+    ]);
+  }
+
   public async moveExpiredMessagesToDeadLetter(
+    tx: Transaction | undefined,
     queueInfo: QueueInfo,
     deadLetterQueueInfo: QueueInfo
   ): Promise<RunResult> {
@@ -323,7 +338,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     const now = this.time.getCurrentTime();
     const newExpiresAt =
       deadLetterQueueInfo.expiresMs === undefined ? null : new Date(now.getTime() + deadLetterQueueInfo.expiresMs);
-    return await this.sql.run(this.database, SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER, [
+    return await this.sql.run(tx ?? this.database, SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER, [
       deadLetterQueueInfo.name,
       newExpiresAt,
       now, // sent at
@@ -420,6 +435,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     await this.sql.run(tx ?? this.database, SQL_CREATE_QUEUE, [
       queueName,
       options?.deadLetterQueueName ?? null,
+      options?.deadLetterTopicName ?? null,
       options?.delayMs ?? null,
       options?.messageRetentionPeriodMs ?? null,
       options?.visibilityTimeoutMs ?? null,
@@ -439,6 +455,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     const now = this.time.getCurrentTime();
     await this.sql.run(tx ?? this.database, SQL_UPDATE_QUEUE, [
       options?.deadLetterQueueName ?? null,
+      options?.deadLetterTopicName ?? null,
       options?.delayMs ?? null,
       options?.messageRetentionPeriodMs ?? null,
       options?.visibilityTimeoutMs ?? null,
@@ -470,8 +487,21 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     return rows.map((row) => row.name);
   }
 
-  public async deleteMessageByMessageId(queueName: string, messageId: string): Promise<void> {
-    const results = await this.sql.run(this.database, SQL_DELETE_MESSAGE_BY_MESSAGE_ID, [queueName, messageId]);
+  public async findQueueNamesWithDeadLetterTopicName(topicName: string): Promise<string[]> {
+    const rows = await this.sql.all<FindQueueNamesWithDeadLetterTopicNameRow>(
+      this.database,
+      SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_TOPIC_NAME,
+      [topicName]
+    );
+    return rows.map((row) => row.name);
+  }
+
+  public async deleteMessageByMessageId(
+    tx: Transaction | undefined,
+    queueName: string,
+    messageId: string
+  ): Promise<void> {
+    const results = await this.sql.run(tx ?? this.database, SQL_DELETE_MESSAGE_BY_MESSAGE_ID, [queueName, messageId]);
     if (results.changes !== 1) {
       throw new MessageNotFoundError(queueName, messageId);
     }

@@ -1,4 +1,5 @@
 export { DeleteDeadLetterQueueError } from "./error/DeleteDeadLetterQueueError.js";
+export { DeleteDeadLetterTopicError } from "./error/DeleteDeadLetterTopicError.js";
 export { InvalidUpdateError } from "./error/InvalidUpdateError.js";
 export { MessageExceededMaxMessageSizeError } from "./error/MessageExceededMaxMessageSizeError.js";
 export { MessageNotFoundError } from "./error/MessageNotFoundError.js";

@@ -6,6 +6,7 @@ export const SQL_DELETE_QUEUE = "deleteQueue";
 export const SQL_PURGE_QUEUE = "purgeQueue";
 export const SQL_MOVE_MESSAGES = "moveMessages";
 export const SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_QUEUE_NAME = "findQueueNamesWithDeadLetterQueueName";
+export const SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_TOPIC_NAME = "findQueueNamesWithDeadLetterTopicName";
 export const SQL_DELETE_MESSAGE_BY_MESSAGE_ID = "deleteMessageByMessageId";
 export const SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE = "deleteMessageByMessageIdAndReceiptHandle";
 export const SQL_FIND_MESSAGE_BY_ID = "findMessageById";
@@ -21,6 +22,7 @@ export const SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE = "updateMessageVis
 export const SQL_DELETE_MESSAGE_BY_RECEIPT_HANDLE = "deleteMessageByReceiptHandle";
 export const SQL_DELETE_EXPIRED_MESSAGES_OVER_RETENTION = "deleteExpiredMessagesOverRetention";
 export const SQL_DELETE_EXPIRED_MESSAGES_OVER_RECEIVE_COUNT = "deleteExpiredMessagesOverReceiveCount";
+export const SQL_GET_EXPIRED_MESSAGES = "getExpiredMessages";
 export const SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER = "moveExpiredMessagesToDeadLetter";
 export const SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE = "moveExpiredMessagesToEndOfQueue";
 export const SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES = "sqlDecreasePriorityOfExpiredMessages";
@@ -80,6 +82,18 @@ export abstract class Sql<TDatabase> {
           ${this.tablePrefix}_queue
         WHERE
           dead_letter_queue_name = ?
+      `
+    );
+
+    this.addQuery(
+      SQL_FIND_QUEUE_NAMES_WITH_DEAD_LETTER_TOPIC_NAME,
+      `
+        SELECT
+          name
+        FROM
+          ${this.tablePrefix}_queue
+        WHERE
+          dead_letter_topic_name = ?
       `
     );
 
@@ -189,8 +203,9 @@ export abstract class Sql<TDatabase> {
           receive_count,
           attributes,
           expires_at,
-          delay_until
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          delay_until,
+          last_nak_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
@@ -305,6 +320,20 @@ export abstract class Sql<TDatabase> {
           queue_name = ?
           AND (expires_at IS NOT NULL AND ? > expires_at)
           OR receive_count >= ?
+      `
+    );
+
+    this.addQuery(
+      SQL_GET_EXPIRED_MESSAGES,
+      `
+        SELECT
+          *
+        FROM
+          ${this.tablePrefix}_message
+        WHERE
+          queue_name = ?
+          AND (expires_at IS NOT NULL AND ? > expires_at)
+          AND receive_count >= ?
       `
     );
 
@@ -427,6 +456,7 @@ export abstract class Sql<TDatabase> {
         INSERT INTO ${this.tablePrefix}_queue (
           name,
           dead_letter_queue_name,
+          dead_letter_topic_name,
           delay_ms,
           message_retention_period_ms,
           visibility_timeout_ms,
@@ -439,7 +469,7 @@ export abstract class Sql<TDatabase> {
           tags,
           created_at,
           last_modified_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
@@ -450,6 +480,7 @@ export abstract class Sql<TDatabase> {
           ${this.tablePrefix}_queue
         SET
           dead_letter_queue_name = ?,
+          dead_letter_topic_name = ?,
           delay_ms = ?,
           message_retention_period_ms = ?,
           visibility_timeout_ms = ?,

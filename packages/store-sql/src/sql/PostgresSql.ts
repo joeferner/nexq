@@ -119,6 +119,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           receive_message_wait_time_ms INTEGER,
           visibility_timeout_ms INTEGER,
           dead_letter_queue_name TEXT,
+          dead_letter_topic_name TEXT,
           max_receive_count INTEGER,
           nak_expire_behavior TEXT NOT NULL,
           tags TEXT NOT NULL,

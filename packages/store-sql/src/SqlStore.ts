@@ -6,6 +6,7 @@ import {
   CreateUserOptions,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
+  DeleteDeadLetterTopicError,
   GetMessage,
   hashPassword,
   InvalidUpdateError,
@@ -44,6 +45,7 @@ import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
+import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 
 const logger = createLogger("SqlStore");
 
@@ -221,6 +223,13 @@ export class SqlStore implements Store {
         }
       }
 
+      if (options?.deadLetterTopicName) {
+        const deadLetterTopic = await this.dialect.getTopicInfo(tx, options.deadLetterTopicName);
+        if (!deadLetterTopic) {
+          throw new TopicNotFoundError(options.deadLetterTopicName);
+        }
+      }
+
       if (options?.upsert) {
         await this.dialect.updateQueue(tx, queueName, options);
       } else {
@@ -241,7 +250,7 @@ export class SqlStore implements Store {
     if (queueInfo.maxMessageSize && body.length > queueInfo.maxMessageSize) {
       throw new MessageExceededMaxMessageSizeError(body.length, queueInfo.maxMessageSize);
     }
-    await this.dialect.sendMessage(queueInfo, id, body, options);
+    await this.dialect.sendMessage(undefined, queueInfo, id, body, options);
     this.trigger({ type: "new-queue-message", queueName } satisfies NewQueueMessageEvent);
     return { id };
   }
@@ -253,6 +262,26 @@ export class SqlStore implements Store {
   ): Promise<SendMessageResult> {
     const id = createId();
     const topic = await this.getCachedTopicInfo(topicName);
+    const tx = await this.dialect.beginTransaction();
+    try {
+      await this.internalPublishMessage(tx, topic, id, body, options);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
+    return { id };
+  }
+
+  private async internalPublishMessage(
+    tx: Transaction,
+    topic: TopicInfo,
+    id: string,
+    body: string,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): Promise<void> {
     const queueInfos = await Promise.all(topic.subscriptions.map((sub) => this.getCachedQueueInfo(sub.queueName)));
     for (const queueInfo of queueInfos) {
       if (queueInfo.maxMessageSize && body.length > queueInfo.maxMessageSize) {
@@ -261,11 +290,9 @@ export class SqlStore implements Store {
     }
 
     for (const queueInfo of queueInfos) {
-      await this.dialect.sendMessage(queueInfo, id, body, options);
+      await this.dialect.sendMessage(tx, queueInfo, id, body, options);
       this.trigger({ type: "new-queue-message", queueName: queueInfo.name } satisfies NewQueueMessageEvent);
     }
-
-    return { id };
   }
 
   public async receiveMessage(
@@ -419,9 +446,53 @@ export class SqlStore implements Store {
   }
 
   private async pollQueue(queueInfo: QueueInfo): Promise<void> {
-    if (queueInfo.deadLetterQueueName) {
+    if (queueInfo.deadLetterTopicName) {
+      const tx = await this.dialect.beginTransaction();
+      try {
+        const expiredSqlMessages = await this.dialect.getExpiredMessages(tx, queueInfo);
+
+        for (const sqlMessage of expiredSqlMessages) {
+          const message = sqlMessageToMessage(sqlMessage);
+          const options: SendMessageOptions & { lastNakReason?: string } = {
+            priority: message.priority,
+            delayMs: 0,
+            attributes: message.attributes,
+            lastNakReason: message.lastNakReason,
+          };
+
+          if (queueInfo.deadLetterTopicName) {
+            const deadLetterTopicInfo = await this.getCachedTopicInfo(queueInfo.deadLetterTopicName);
+            await this.internalPublishMessage(tx, deadLetterTopicInfo, sqlMessage.id, message.body, options);
+          }
+
+          if (queueInfo.deadLetterQueueName) {
+            const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
+            await this.dialect.sendMessage(tx, deadLetterQueueInfo, sqlMessage.id, message.body, options);
+          }
+
+          await this.dialect.deleteMessageByMessageId(tx, queueInfo.name, sqlMessage.id);
+        }
+
+        const to: string[] = [];
+        if (queueInfo.deadLetterTopicName) {
+          to.push(`dead letter topic "${queueInfo.deadLetterTopicName}"`);
+        }
+        if (queueInfo.deadLetterQueueName) {
+          to.push(`dead letter queue "${queueInfo.deadLetterQueueName}"`);
+        }
+        logger.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
+
+        await tx.commit();
+      } catch (err) {
+        await tx.rollback();
+        throw err;
+      } finally {
+        await tx.release();
+      }
+    } else if (queueInfo.deadLetterQueueName) {
+      // we can avoid a transaction here since we are executing a single sql statement
       const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
-      const results = await this.dialect.moveExpiredMessagesToDeadLetter(queueInfo, deadLetterQueueInfo);
+      const results = await this.dialect.moveExpiredMessagesToDeadLetter(undefined, queueInfo, deadLetterQueueInfo);
       if (results.changes > 0) {
         logger.debug(
           `moved ${results.changes} messages from "${queueInfo.name}" to dead letter "${queueInfo.deadLetterQueueName}"`
@@ -517,7 +588,7 @@ export class SqlStore implements Store {
     if (receiptHandle) {
       await this.dialect.deleteMessageByMessageIdAndReceiptHandle(queue.name, messageId, receiptHandle);
     } else {
-      await this.dialect.deleteMessageByMessageId(queue.name, messageId);
+      await this.dialect.deleteMessageByMessageId(undefined, queue.name, messageId);
     }
   }
 
@@ -625,6 +696,10 @@ export class SqlStore implements Store {
 
   public async deleteTopic(topicName: string): Promise<void> {
     const topic = await this.getTopicRequired(topicName);
+    const dependentQueues = await this.dialect.findQueueNamesWithDeadLetterTopicName(topicName);
+    if (dependentQueues.length > 0) {
+      throw new DeleteDeadLetterTopicError(dependentQueues[0], topic.name);
+    }
     await this.dialect.deleteTopic(topic.name);
     delete this.cachedTopicInfo[topicName];
   }

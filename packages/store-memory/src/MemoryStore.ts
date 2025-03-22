@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
+  DeleteDeadLetterTopicError,
   GetMessage,
   Message,
   MoveMessagesResult,
@@ -111,6 +112,12 @@ export class MemoryStore implements Store {
       }
     }
 
+    if (options?.deadLetterTopicName) {
+      if (!(options.deadLetterTopicName in this.topics)) {
+        throw new TopicNotFoundError(options.deadLetterTopicName);
+      }
+    }
+
     if (options?.upsert && existingQueue) {
       existingQueue.update(options);
     } else {
@@ -128,7 +135,7 @@ export class MemoryStore implements Store {
 
   public async sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult> {
     const queue = this.getQueueRequired(queueName);
-    return queue.sendMessage(body, options);
+    return queue.sendMessage(undefined, body, options);
   }
 
   public async receiveMessage(
@@ -188,15 +195,35 @@ export class MemoryStore implements Store {
   private pollQueues(now: Date): void {
     for (const queue of Object.values(this.queues)) {
       const expiredMessages = queue.poll(now);
-      if (queue.deadLetterQueueName) {
-        const deadLetterQueue = this.getQueueRequired(queue.deadLetterQueueName);
+      if (queue.deadLetterQueueName || queue.deadLetterTopicName) {
+        const deadLetterQueue = queue.deadLetterQueueName
+          ? this.getQueueRequired(queue.deadLetterQueueName)
+          : undefined;
+        const deadLetterTopic = queue.deadLetterTopicName
+          ? this.getTopicRequired(queue.deadLetterTopicName)
+          : undefined;
         for (const expiredMessage of expiredMessages) {
-          logger.debug(`moving message ${expiredMessage.id} to dead letter queue "${deadLetterQueue.name}"`);
-          deadLetterQueue.sendMessage(expiredMessage.body, {
-            priority: expiredMessage.priority,
-            attributes: expiredMessage.attributes,
-            lastNakReason: expiredMessage.lastNakReason,
-          });
+          if (deadLetterQueue) {
+            logger.debug(`moving message ${expiredMessage.id} to dead letter queue "${deadLetterQueue.name}"`);
+            deadLetterQueue.sendMessage(expiredMessage.id, expiredMessage.body, {
+              priority: expiredMessage.priority,
+              attributes: expiredMessage.attributes,
+              lastNakReason: expiredMessage.lastNakReason,
+            });
+          }
+          if (deadLetterTopic) {
+            logger.debug(`moving message ${expiredMessage.id} to dead letter topic "${deadLetterTopic.name}"`);
+            deadLetterTopic.publishMessage(
+              expiredMessage.id,
+              expiredMessage.body,
+              (queueName) => this.getQueueRequired(queueName),
+              {
+                priority: expiredMessage.priority,
+                attributes: expiredMessage.attributes,
+                lastNakReason: expiredMessage.lastNakReason,
+              }
+            );
+          }
         }
       } else {
         if (logger.isDebugEnabled()) {
@@ -365,16 +392,20 @@ export class MemoryStore implements Store {
     options?: SendMessageOptions
   ): Promise<SendMessageResult> {
     const topic = this.getTopicRequired(topicName);
-    const queues = topic.queueSubscriptions.map((s) => this.getQueueRequired(s.queueName));
     const id = createId();
-    for (const queue of queues) {
-      queue.sendMessage(body, options);
-    }
+    topic.publishMessage(id, body, (queueName) => this.getQueueRequired(queueName), options);
     return { id };
   }
 
   public async deleteTopic(topicName: string): Promise<void> {
     const topic = this.getTopicRequired(topicName);
+
+    for (const queue of Object.values(this.queues)) {
+      if (queue.deadLetterTopicName === topicName) {
+        throw new DeleteDeadLetterTopicError(queue.name, topicName);
+      }
+    }
+
     delete this.topics[topic.name];
   }
 }

@@ -13,6 +13,7 @@ export interface SqlQueue {
   receive_message_wait_time_ms: number | null;
   visibility_timeout_ms: number | null;
   dead_letter_queue_name: string | null;
+  dead_letter_topic_name: string | null;
   max_receive_count: number | null;
   nak_expire_behavior: string;
   tags: string;
@@ -34,6 +35,7 @@ export function sqlQueueToQueueInfo(
     visibilityTimeoutMs: row.visibility_timeout_ms ?? undefined,
     tags: JSON.parse(row.tags) as Record<string, string>,
     deadLetterQueueName: row.dead_letter_queue_name ?? undefined,
+    deadLetterTopicName: row.dead_letter_topic_name ?? undefined,
     maxReceiveCount: row.max_receive_count ?? undefined,
     nakExpireBehavior: JSON.parse(row.nak_expire_behavior) as NakExpireBehaviorOptions,
   };

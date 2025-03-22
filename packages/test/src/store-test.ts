@@ -14,6 +14,7 @@ const QUEUE1_NAME = "queue1";
 const QUEUE2_NAME = "queue2";
 const QUEUE3_NAME = "queue3";
 const DEAD_LETTER_QUEUE1_NAME = "dataLetterQueue1";
+const DEAD_LETTER_QUEUE2_NAME = "dataLetterQueue2";
 const TOPIC1_NAME = "topic1";
 const TOPIC2_NAME = "topic2";
 const MESSAGE1_BODY = "message1";
@@ -439,7 +440,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
     });
 
-    test("max receive count, no dead letter", async () => {
+    test("max receive count, no dead letter queue", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 1 });
 
@@ -602,6 +603,33 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak reason
       const deadLetterMessage1 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
       expect(deadLetterMessage1!.lastNakReason).toBe("test message");
+    });
+
+    test("nak message dead letter topic", async () => {
+      // create the queue
+      await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
+      await store.createQueue(DEAD_LETTER_QUEUE2_NAME);
+      await store.createTopic(TOPIC1_NAME);
+      await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, DEAD_LETTER_QUEUE1_NAME);
+      await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, DEAD_LETTER_QUEUE2_NAME);
+      await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 1, deadLetterTopicName: TOPIC1_NAME });
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+
+      // validate nak message
+      const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
+      await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle, "test message");
+      await store.poll();
+      await assertQueueEmpty(store, QUEUE1_NAME);
+
+      // validate nak reason (queue1)
+      const deadLetterMessage1 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
+      expect(deadLetterMessage1!.lastNakReason).toBe("test message");
+
+      // validate nak reason (queue2)
+      const deadLetterMessage2 = await store.receiveMessage(DEAD_LETTER_QUEUE2_NAME);
+      expect(deadLetterMessage2!.lastNakReason).toBe("test message");
     });
 
     test("nak/expire behavior: default", async () => {
@@ -802,6 +830,38 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(deadLetterMessage?.attributes).toEqual(attributes);
     });
 
+    test("dead letter topic", async () => {
+      // create the queue
+      await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
+      await store.createQueue(DEAD_LETTER_QUEUE2_NAME);
+      await store.createTopic(TOPIC1_NAME);
+      await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, DEAD_LETTER_QUEUE1_NAME);
+      await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, DEAD_LETTER_QUEUE2_NAME);
+      await store.createQueue(QUEUE1_NAME, { deadLetterTopicName: TOPIC1_NAME, maxReceiveCount: 1 });
+
+      // send a message
+      const attributes = { attr1: "attr1Value", attr2: "attr2Value" };
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY, { attributes, priority: 5 });
+
+      // receive message
+      await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1 });
+      await time.advance(2);
+      await store.poll();
+      await assertQueueSize(store, QUEUE1_NAME, 0, 0, 0);
+
+      // message in dead letter 1
+      await assertQueueSize(store, DEAD_LETTER_QUEUE1_NAME, 1, 0, 0);
+      let deadLetterMessage = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
+      expect(deadLetterMessage?.priority).toBe(5);
+      expect(deadLetterMessage?.attributes).toEqual(attributes);
+
+      // message in dead letter 1
+      await assertQueueSize(store, DEAD_LETTER_QUEUE2_NAME, 1, 0, 0);
+      deadLetterMessage = await store.receiveMessage(DEAD_LETTER_QUEUE2_NAME);
+      expect(deadLetterMessage?.priority).toBe(5);
+      expect(deadLetterMessage?.attributes).toEqual(attributes);
+    });
+
     test("create queue missing dead letter queue", async () => {
       // create the queue
       await expect(async () => {
@@ -810,7 +870,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     });
 
     test("duplicate queues", async () => {
-      const createOptions: Required<CreateQueueOptions> = {
+      const createOptions: Required<Omit<CreateQueueOptions, "deadLetterTopicName">> = {
         upsert: false,
         deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
         delayMs: 1,
@@ -1126,6 +1186,17 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // verify topic deleted
       const topics = await store.getTopicInfos();
       expect(topics.length).toBe(0);
+    });
+
+    test("delete dead letter topic", async () => {
+      // create the queue
+      await store.createTopic(TOPIC1_NAME);
+      await store.createQueue(QUEUE1_NAME, { deadLetterTopicName: TOPIC1_NAME });
+
+      // verify cannot delete dead letter queue associated with queue
+      await expect(async () => await store.deleteTopic(TOPIC1_NAME)).rejects.toThrowError(
+        `cannot delete dead letter topic "${TOPIC1_NAME}", associated with queue "${QUEUE1_NAME}"`
+      );
     });
 
     test("publish", async () => {

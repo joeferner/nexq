@@ -2,10 +2,12 @@ import {
   createId,
   CreateTopicOptions,
   QueueAlreadySubscribedToTopicError,
+  SendMessageOptions,
   TopicInfo,
   TopicInfoQueueSubscription,
   TopicProtocol,
 } from "@nexq/core";
+import { MemoryQueue } from "./MemoryQueue.js";
 
 interface QueueSubscription {
   id: string;
@@ -43,5 +45,17 @@ export class MemoryTopic {
     const id = createId();
     this.queueSubscriptions.push({ id, queueName });
     return id;
+  }
+
+  public publishMessage(
+    id: string,
+    body: string,
+    getQueueRequired: (queueName: string) => MemoryQueue,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): void {
+    const queues = this.queueSubscriptions.map((s) => getQueueRequired(s.queueName));
+    for (const queue of queues) {
+      queue.sendMessage(id, body, options);
+    }
   }
 }

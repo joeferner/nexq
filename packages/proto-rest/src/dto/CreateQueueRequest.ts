@@ -64,6 +64,13 @@ export interface CreateQueueRequest {
   deadLetterQueueName?: string;
 
   /**
+   * name of the dead letter topic
+   *
+   * @example "my-topic-dlq"
+   */
+  deadLetterTopicName?: string;
+
+  /**
    * max number of time to receive a message before moving it to the dlq
    *
    * @example "10"

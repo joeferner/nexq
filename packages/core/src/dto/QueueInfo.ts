@@ -18,6 +18,7 @@ export interface QueueInfo {
   visibilityTimeoutMs?: number;
   tags: Record<string, string>;
   deadLetterQueueName?: string;
+  deadLetterTopicName?: string;
   maxReceiveCount?: number;
   nakExpireBehavior: NakExpireBehaviorOptions;
 }
@@ -28,6 +29,9 @@ export function queueInfoEqualCreateQueueOptions(
 ): true | { reason: string } {
   if (queueInfo.deadLetterQueueName !== options.deadLetterQueueName) {
     return { reason: "deadLetterQueueName is different" };
+  }
+  if (queueInfo.deadLetterTopicName !== options.deadLetterTopicName) {
+    return { reason: "deadLetterTopicName is different" };
   }
   if (queueInfo.delayMs !== options.delayMs) {
     return { reason: "delayMs is different" };

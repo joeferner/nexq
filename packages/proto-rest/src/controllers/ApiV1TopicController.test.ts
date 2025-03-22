@@ -68,6 +68,12 @@ describe("ApiV1TopicController", async () => {
     test("topic not found", async () => {
       await expectHttpError(async () => await controller.deleteTopic("bad-topic-name"), 404);
     });
+
+    test("topic associated with dead letter topic", async () => {
+      await store.createTopic(TOPIC_NAME);
+      await store.createQueue(QUEUE_NAME, { deadLetterTopicName: TOPIC_NAME });
+      await expectHttpError(async () => await controller.deleteTopic(TOPIC_NAME), 400);
+    });
   });
 
   describe("publish", async () => {

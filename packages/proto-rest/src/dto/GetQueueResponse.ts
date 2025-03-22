@@ -16,6 +16,7 @@ export interface GetQueueResponse {
   visibilityTimeoutMs?: number;
   tags: Record<string, string>;
   deadLetterQueueName?: string;
+  deadLetterTopicName?: string;
   maxReceiveCount?: number;
 }
 
@@ -36,6 +37,7 @@ export function queueInfoToGetQueueResponse(q: QueueInfo): GetQueueResponse {
     visibilityTimeoutMs: q.visibilityTimeoutMs,
     tags: q.tags,
     deadLetterQueueName: q.deadLetterQueueName,
+    deadLetterTopicName: q.deadLetterTopicName,
     maxReceiveCount: q.maxReceiveCount,
   } satisfies GetQueueResponse;
 }
