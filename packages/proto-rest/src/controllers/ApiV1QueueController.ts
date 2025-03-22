@@ -53,6 +53,7 @@ export class ApiV1QueueController extends Controller {
   public async createQueue(@Body() request: CreateQueueRequest): Promise<void> {
     try {
       await this.store.createQueue(request.name, {
+        upsert: request.upsert ?? false,
         delayMs: parseOptionalDurationIntoMs(request.delay),
         expiresMs: parseOptionalDurationIntoMs(request.expires),
         maxMessageSize: parseOptionalBytesSize(request.maximumMessageSize),

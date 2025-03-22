@@ -30,6 +30,7 @@ export const SQL_GET_QUEUE_NUMBER_OF_MESSAGES = "getQueueNumberOfMessages";
 export const SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES = "getQueueNumberOfDelayedMessage";
 export const SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES = "getNumberOfNotVisibleMessages";
 export const SQL_CREATE_QUEUE = "createQueue";
+export const SQL_UPDATE_QUEUE = "updateQueue";
 export const SQL_FIND_TOPIC_INFOS = "findTopicInfos";
 export const SQL_FIND_TOPIC_INFO_BY_NAME = "findTopicInfoByName";
 export const SQL_CREATE_TOPIC = "createTopic";
@@ -430,6 +431,29 @@ export abstract class Sql<TDatabase> {
           created_at,
           last_modified_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    );
+
+    this.addQuery(
+      SQL_UPDATE_QUEUE,
+      `
+        UPDATE
+          ${this.tablePrefix}_queue
+        SET
+          dead_letter_queue_name = ?,
+          delay_ms = ?,
+          message_retention_period_ms = ?,
+          visibility_timeout_ms = ?,
+          receive_message_wait_time_ms = ?,
+          expires_ms = ?,
+          expires_at = ?,
+          max_receive_count = ?,
+          max_message_size = ?,
+          nak_expire_behavior = ?,
+          tags = ?,
+          last_modified_at = ?
+        WHERE
+          name = ?
       `
     );
 

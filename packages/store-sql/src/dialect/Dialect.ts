@@ -66,6 +66,7 @@ import {
   SQL_PURGE_QUEUE,
   SQL_RECEIVE_MESSAGE,
   SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE,
+  SQL_UPDATE_QUEUE,
   SQL_UPDATE_QUEUE_EXPIRES_AT,
 } from "../sql/Sql.js";
 import { parseOptionalDate } from "../utils.js";
@@ -406,8 +407,27 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       options?.maxMessageSize ?? null,
       JSON.stringify(options?.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR),
       options?.tags ? JSON.stringify(options.tags) : "{}",
-      now,
-      now,
+      now, // created at
+      now, // last modified
+    ]);
+  }
+
+  public async updateQueue(tx: Transaction, queueName: string, options?: CreateQueueOptions): Promise<void> {
+    const now = this.time.getCurrentTime();
+    await this.sql.run(tx ?? this.database, SQL_UPDATE_QUEUE, [
+      options?.deadLetterQueueName ?? null,
+      options?.delayMs ?? null,
+      options?.messageRetentionPeriodMs ?? null,
+      options?.visibilityTimeoutMs ?? null,
+      options?.receiveMessageWaitTimeMs ?? null,
+      options?.expiresMs ?? null,
+      options?.expiresMs !== undefined ? new Date(now.getTime() + options.expiresMs) : null,
+      options?.maxReceiveCount ?? null,
+      options?.maxMessageSize ?? null,
+      JSON.stringify(options?.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR),
+      options?.tags ? JSON.stringify(options.tags) : "{}",
+      now, // last modified
+      queueName,
     ]);
   }
 

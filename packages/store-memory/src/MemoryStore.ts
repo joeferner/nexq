@@ -95,10 +95,12 @@ export class MemoryStore implements Store {
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
     const existingQueue = this.queues[queueName];
-    if (existingQueue) {
-      const match = queueInfoEqualCreateQueueOptions(existingQueue.getInfo(), options ?? {});
-      if (match !== true) {
-        throw new QueueAlreadyExistsError(queueName, match.reason);
+    if (options?.upsert !== true) {
+      if (existingQueue) {
+        const match = queueInfoEqualCreateQueueOptions(existingQueue.getInfo(), options ?? {});
+        if (match !== true) {
+          throw new QueueAlreadyExistsError(queueName, match.reason);
+        }
       }
     }
 
@@ -108,9 +110,13 @@ export class MemoryStore implements Store {
       }
     }
 
-    const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
-    this.queues[queueName] = queue;
-    logger.info(`created new queue "${queueName}"`);
+    if (options?.upsert && existingQueue) {
+      existingQueue.update(options);
+    } else {
+      const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
+      this.queues[queueName] = queue;
+      logger.info(`created new queue "${queueName}"`);
+    }
   }
 
   public async moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult> {

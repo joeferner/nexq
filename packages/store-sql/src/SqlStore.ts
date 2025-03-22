@@ -205,7 +205,7 @@ export class SqlStore implements Store {
     const tx = await this.dialect.beginTransaction();
     try {
       const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
-      if (existingQueue) {
+      if (existingQueue && options?.upsert !== true) {
         const match = queueInfoEqualCreateQueueOptions(existingQueue, options ?? {});
         if (match === true) {
           return;
@@ -220,7 +220,11 @@ export class SqlStore implements Store {
         }
       }
 
-      await this.dialect.createQueue(tx, queueName, options);
+      if (options?.upsert) {
+        await this.dialect.updateQueue(tx, queueName, options);
+      } else {
+        await this.dialect.createQueue(tx, queueName, options);
+      }
       await tx.commit();
     } catch (err) {
       await tx.rollback();

@@ -10,6 +10,11 @@ export function isDecreasePriorityByNakExpireBehavior(option: unknown): option i
 
 export interface CreateQueueOptions {
   /**
+   * If true the queue will either be updated or created (default: false)
+   */
+  upsert?: boolean;
+
+  /**
    * Optional dead letter queue in which messages that either have reached
    * their max receive count or have been nak'ed will be sent.
    */

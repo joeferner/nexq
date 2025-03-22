@@ -761,6 +761,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
     test("duplicate queues", async () => {
       const createOptions: Required<CreateQueueOptions> = {
+        upsert: false,
         deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
         delayMs: 1,
         messageRetentionPeriodMs: 2,
@@ -829,6 +830,22 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
           tag2: "tag2ValueNew",
         },
       });
+    });
+
+    test("upsert queues", async () => {
+      const timeBeforeUpdate = time.getCurrentTime();
+      await store.createQueue(QUEUE1_NAME, { maxReceiveCount: 5 });
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      const queueBeforeUpdate = await store.getQueueInfo(QUEUE1_NAME);
+      expect(queueBeforeUpdate.lastModified).toEqual(timeBeforeUpdate);
+      await time.advance(100);
+
+      const timeUpdate = time.getCurrentTime();
+      await store.createQueue(QUEUE1_NAME, { upsert: true, maxReceiveCount: 6 });
+      const queue = await store.getQueueInfo(QUEUE1_NAME);
+      expect(queue.maxReceiveCount).toBe(6);
+      expect(queue.lastModified).toEqual(timeUpdate);
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
     });
 
     test("duplicate queues (without tags)", async () => {

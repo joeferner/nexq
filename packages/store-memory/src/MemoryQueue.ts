@@ -32,21 +32,21 @@ const logger = createLogger("MemoryQueue");
 export class MemoryQueue {
   public readonly name: string;
   public readonly created: Date;
-  public readonly lastModified: Date;
   private readonly time: Time;
-  private readonly delayMs?: number;
-  public readonly deadLetterQueueName: string | undefined;
-  private readonly visibilityTimeoutMs: number | undefined;
-  private readonly receiveMessageWaitTimeMs: number | undefined;
-  private readonly messageRetentionPeriodMs: number | undefined;
-  private readonly expiresMs: number | undefined;
-  private readonly messages: MemoryQueueMessage[] = [];
-  private readonly maxReceiveCount?: number;
-  private readonly maxMessageSize?: number;
-  private readonly tags: Record<string, string>;
-  private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
-  private readonly nakExpireBehavior: NakExpireBehaviorOptions;
+  public lastModified: Date;
+  private delayMs?: number;
+  public deadLetterQueueName: string | undefined;
+  private visibilityTimeoutMs: number | undefined;
+  private receiveMessageWaitTimeMs: number | undefined;
+  private messageRetentionPeriodMs: number | undefined;
+  private expiresMs: number | undefined;
+  private maxReceiveCount?: number;
+  private maxMessageSize?: number;
+  private tags: Record<string, string>;
+  private nakExpireBehavior: NakExpireBehaviorOptions;
   private expiresAt: Date | undefined;
+  private readonly messages: MemoryQueueMessage[] = [];
+  private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
 
   public constructor(options: { name: string; time: Time } & CreateQueueOptions) {
     const now = options.time.getCurrentTime();
@@ -54,6 +54,7 @@ export class MemoryQueue {
     this.time = options.time;
     this.created = now;
     this.lastModified = now;
+
     this.delayMs = options.delayMs;
     this.deadLetterQueueName = options.deadLetterQueueName;
     this.visibilityTimeoutMs = options.visibilityTimeoutMs;
@@ -65,8 +66,26 @@ export class MemoryQueue {
     this.nakExpireBehavior = options.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR;
     if (options.expiresMs !== undefined) {
       this.expiresMs = options.expiresMs;
-      this.expiresAt = new Date(options.time.getCurrentTime().getTime() + options.expiresMs);
+      this.expiresAt = new Date(this.time.getCurrentTime().getTime() + options.expiresMs);
     }
+  }
+
+  public update(options: CreateQueueOptions): void {
+    const now = this.time.getCurrentTime();
+    this.delayMs = options.delayMs;
+    this.deadLetterQueueName = options.deadLetterQueueName;
+    this.visibilityTimeoutMs = options.visibilityTimeoutMs;
+    this.receiveMessageWaitTimeMs = options.receiveMessageWaitTimeMs;
+    this.messageRetentionPeriodMs = options.messageRetentionPeriodMs;
+    this.maxReceiveCount = options.maxReceiveCount;
+    this.maxMessageSize = options.maxMessageSize;
+    this.tags = options.tags ? structuredClone(options.tags) : {};
+    this.nakExpireBehavior = options.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR;
+    if (options.expiresMs !== undefined) {
+      this.expiresMs = options.expiresMs;
+      this.expiresAt = new Date(now.getTime() + options.expiresMs);
+    }
+    this.lastModified = now;
   }
 
   public sendMessage(body: string, options?: SendMessageOptions & { lastNakReason?: string }): SendMessageResult {

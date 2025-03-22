@@ -2,6 +2,11 @@ import { NakExpireBehaviorOptions } from "@nexq/core";
 
 export interface CreateQueueRequest {
   /**
+   * If true the queue will either be updated or created (default: false)
+   */
+  upsert?: boolean;
+
+  /**
    * The name of the queue
    *
    * @example "my-queue"
