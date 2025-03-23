@@ -3,6 +3,7 @@ import {
   createLogger,
   CreateQueueOptions,
   DEFAULT_NAK_EXPIRE_BEHAVIOR,
+  DEFAULT_VISIBILITY_TIMEOUT_MS,
   GetMessage,
   InvalidUpdateError,
   isDecreasePriorityByNakExpireBehavior,
@@ -137,7 +138,8 @@ export class MemoryQueue {
   public async receiveMessages(
     options?: ReceiveMessagesOptions & { maxNumberOfMessages: number }
   ): Promise<ReceivedMessage[]> {
-    const visibilityTimeoutMs = options?.visibilityTimeoutMs ?? this.visibilityTimeoutMs ?? 60;
+    const visibilityTimeoutMs =
+      options?.visibilityTimeoutMs ?? this.visibilityTimeoutMs ?? DEFAULT_VISIBILITY_TIMEOUT_MS;
     const waitTime = options?.waitTimeMs ?? this.receiveMessageWaitTimeMs ?? 0;
     const endTime = this.time.getCurrentTime().getTime() + waitTime;
     const messages: ReceivedMessage[] = [];

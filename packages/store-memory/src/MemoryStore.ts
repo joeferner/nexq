@@ -293,6 +293,7 @@ export class MemoryStore implements Store {
   }
 
   public async deleteQueue(queueName: string): Promise<void> {
+    logger.info(`deleting queue: ${queueName}`);
     this.getQueueRequired(queueName);
 
     for (const queue of Object.values(this.queues)) {
@@ -305,6 +306,7 @@ export class MemoryStore implements Store {
   }
 
   public async purgeQueue(queueName: string): Promise<void> {
+    logger.info(`purging queue: ${queueName}`);
     const queue = this.getQueueRequired(queueName);
     queue.purge();
   }

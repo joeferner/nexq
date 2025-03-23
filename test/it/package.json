@@ -1,0 +1,33 @@
+{
+  "name": "@nexq/test-it",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write",
+    "generate": "swagger-typescript-api  --path http://localhost:7887/swagger.json --axios --output ./generated/client --api-class-name NexqApi",
+    "start": "node build/src/index.js"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "radash": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.11",
+    "swagger-typescript-api": "^12.0.4",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "~5.8.2",
+    "typescript-eslint": "^8.26.0"
+  }
+}

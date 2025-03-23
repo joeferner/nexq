@@ -17,6 +17,7 @@ import { User } from "./User.js";
 export const DEFAULT_PASSWORD_HASH_ROUNDS = 10;
 export const DEFAULT_MAX_NUMBER_OF_MESSAGES = 10;
 export const DEFAULT_NAK_EXPIRE_BEHAVIOR: NakExpireBehaviorOptions = "retry";
+export const DEFAULT_VISIBILITY_TIMEOUT_MS = 60 * 1000;
 
 export interface Store {
   shutdown(): Promise<void>;

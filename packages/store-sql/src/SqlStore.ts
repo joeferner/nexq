@@ -5,6 +5,7 @@ import {
   CreateTopicOptions,
   CreateUserOptions,
   DEFAULT_PASSWORD_HASH_ROUNDS,
+  DEFAULT_VISIBILITY_TIMEOUT_MS,
   DeleteDeadLetterQueueError,
   DeleteDeadLetterTopicError,
   GetMessage,
@@ -304,7 +305,8 @@ export class SqlStore implements Store {
     const now = this.time.getCurrentTime();
     const nowMs = now.getTime();
     const queueInfo = await this.getCachedQueueInfo(queueName);
-    const visibilityTimeoutMs = options?.visibilityTimeoutMs ?? queueInfo.visibilityTimeoutMs ?? 60;
+    const visibilityTimeoutMs =
+      options?.visibilityTimeoutMs ?? queueInfo.visibilityTimeoutMs ?? DEFAULT_VISIBILITY_TIMEOUT_MS;
     const waitTime = options?.waitTimeMs ?? queueInfo.receiveMessageWaitTimeMs ?? 0;
     const endTime = nowMs + waitTime;
     if (queueInfo.expiresMs) {
@@ -611,6 +613,7 @@ export class SqlStore implements Store {
   }
 
   public async deleteQueue(queueName: string): Promise<void> {
+    logger.info(`deleting queue: ${queueName}`);
     const queue = await this.getCachedQueueInfo(queueName);
     const dependentQueues = await this.dialect.findQueueNamesWithDeadLetterQueueName(queueName);
     if (dependentQueues.length > 0) {
@@ -621,6 +624,7 @@ export class SqlStore implements Store {
   }
 
   public async purgeQueue(queueName: string): Promise<void> {
+    logger.info(`purging queue: ${queueName}`);
     await this.dialect.purgeQueue(queueName);
   }
 
