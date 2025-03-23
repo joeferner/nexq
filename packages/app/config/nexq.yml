@@ -7,8 +7,8 @@ initialUsers:
     accessKeyId: key
     secretAccessKey: secret
 
-store:
-  type: memory
+# store:
+#   type: memory
 
 ##
 ## SQLite configuration
@@ -23,14 +23,17 @@ store:
 ##     data.db	         Open the file data.db in the current directory.
 #   connectionString: ":memory:"
 
-##
-## Postgres configuration
-##
-# store:
-#   type: sql
-#   dialect: postgres
-#   pollInterval: 30s
-#   connectionString: "postgres://nexq-postgres/nexq"
+#
+# Postgres configuration
+#
+store:
+  type: sql
+  dialect: postgres
+  pollInterval: 30s
+  connectionString: "postgres://nexq-postgres/nexq"
+  options:
+    user: nexq
+    password: password
 
 ##
 ## REST protocol configuration

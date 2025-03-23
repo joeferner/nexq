@@ -209,7 +209,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     const tx = await this.beginTransaction();
     try {
       const now = this.time.getCurrentTime();
-      const rows = await this.sql.all<SqlMessage>(this.database, SQL_FIND_MESSAGES_TO_RECEIVE, [
+      const rows = await this.sql.all<SqlMessage>(tx, SQL_FIND_MESSAGES_TO_RECEIVE, [
         queueName,
         now,
         now,
@@ -222,7 +222,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
           const newExpireTime = new Date(now.getTime() + options.visibilityTimeoutMs);
           const firstReceivedAt = parseOptionalDate(row.first_received_at) ?? now;
           const receiveCount = row.receive_count + 1;
-          await this.sql.run(this.database, SQL_RECEIVE_MESSAGE, [
+          await this.sql.run(tx, SQL_RECEIVE_MESSAGE, [
             newExpireTime,
             receiptHandle,
             firstReceivedAt,

@@ -7,6 +7,11 @@ async function run(): Promise<void> {
   const client = new NexqApi({
     baseURL: "http://localhost:7887",
   });
+  try {
+    await client.api.deleteQueue(QUEUE1_NAME);
+  } catch (_err) {
+    // ok
+  }
   await testSendPerformance(client);
   await testReceivePerformance(client);
 }
@@ -40,11 +45,12 @@ async function testSendPerformance(client: NexqApi<unknown>): Promise<void> {
 
 async function testReceivePerformance(client: NexqApi<unknown>): Promise<void> {
   console.log("test receive performance");
-  await client.api.createQueue({ name: QUEUE1_NAME });
+  await client.api.createQueue({ name: QUEUE1_NAME, visibilityTimeout: "240s" });
   try {
     const messageCount = 1000;
 
     // populate queue with messages
+    console.log("sending messages...");
     const messageArr = [];
     for (let i = 0; i < messageCount; i++) {
       messageArr.push(`test message ${i}`);
@@ -57,6 +63,7 @@ async function testReceivePerformance(client: NexqApi<unknown>): Promise<void> {
       })
     );
 
+    console.log("receiving messages...");
     const startTime = new Date();
     const seenMessages: Record<string, boolean> = {};
     await Promise.all(

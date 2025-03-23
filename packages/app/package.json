@@ -10,7 +10,7 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier src --write",
     "prepare": "ts-patch install",
-    "start": "node build/main.js",
+    "start": "node --enable-source-maps build/main.js",
     "test": "vitest run",
     "test:watch": "vitest watch"
   },
