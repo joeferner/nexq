@@ -220,6 +220,7 @@ export abstract class Sql<TDatabase> {
           queue_name = ?
           AND (expires_at IS NULL OR ? > expires_at)
           AND (delay_until IS NULL OR ? >= delay_until)
+          AND (receive_count < ?)
         ORDER BY
           priority DESC,
           order_by

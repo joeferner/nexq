@@ -44,6 +44,14 @@ export async function assertQueueEmpty(store: Store, queueName: string): Promise
   await assertQueueSize(store, queueName, 0, 0, 0);
 }
 
+export async function poll(store: Store): Promise<void> {
+  // run simultaneous polls to simulate a multiple server environment
+  await Promise.all([
+    store.poll(),
+    store.poll()
+  ]);
+}
+
 export async function runStoreTest(createStore: (options: CreateStoreOptions) => Promise<Store>): Promise<void> {
   describe("queue", async () => {
     let time!: MockTime;
@@ -179,7 +187,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // nak
       await store.nakMessage(QUEUE1_NAME, m.id, recvMessage!.receiptHandle, "testing");
       await time.advance(1);
-      await store.poll();
+      await poll(store);
 
       m = await store.getMessage(QUEUE1_NAME, originalMessage.id);
       expect(m.id).toBe(originalMessage.id);
@@ -215,27 +223,27 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // advance before visibility timeout
       await time.advance(4000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // change visibility timeout
       await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // advance time to past visibility timeout
       await time.advance(6000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // since no one picked up the message still allow update visibility timeout
       await store.updateMessageVisibilityByReceiptHandle(QUEUE1_NAME, messageReceiptHandle, 5000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       // advance time to past visibility timeout allow others to pick up message
       await time.advance(6000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       const messageAgain = await store.receiveMessage(QUEUE1_NAME);
@@ -267,7 +275,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       const recvPromise = store.receiveMessage(QUEUE1_NAME, { waitTimeMs: 1000 });
       await time.advance(999);
-      await store.poll();
+      await poll(store);
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
       const message = await recvPromise;
       expect(message!.body).toBe(MESSAGE1_BODY);
@@ -346,7 +354,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // let the message timeout
       await time.advance(2);
-      await store.poll();
+      await poll(store);
 
       // at this point we should have message2, message3, message1 in the dead letter queue in that order
       const message2 = await store.receiveMessage(DEAD_LETTER_QUEUE1_NAME);
@@ -359,24 +367,28 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
     test("queue with expires", async () => {
       // create the queue
-      await store.createQueue(QUEUE1_NAME, { expiresMs: 60 });
-      await time.advance(59);
-      await store.poll();
+      await store.createQueue(QUEUE1_NAME, { expiresMs: 60 * 1000 });
+      await time.advance(59 * 1000);
+      await poll(store);
 
       // verify receive_messages resets expire
+      console.log('a', time.getCurrentTime().toISOString());
       await store.receiveMessage(QUEUE1_NAME);
-      await time.advance(59);
-      await store.poll();
+      console.log('b', time.getCurrentTime().toISOString());
+      await time.advance(59 * 1000);
+      console.log('c', time.getCurrentTime().toISOString());
+      await poll(store);
+      console.log('d', time.getCurrentTime().toISOString());
       expect(await store.getQueueInfo(QUEUE1_NAME)).toBeTruthy();
 
       // verify queue gets deleted, first reset the clock
       await store.receiveMessage(QUEUE1_NAME);
-      await time.advance(59);
-      await store.poll();
+      await time.advance(59 * 1000);
+      await poll(store);
       expect(await store.getQueueInfo(QUEUE1_NAME)).toBeTruthy();
 
-      await time.advance(2);
-      await store.poll();
+      await time.advance(2 * 1000);
+      await poll(store);
       await expect(async () => await store.getQueueInfo(QUEUE1_NAME)).rejects.toThrowError(/not found/);
     });
 
@@ -410,7 +422,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY, { delayMs: 10 });
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 1, 0);
 
       const messageTry1 = await store.receiveMessage(QUEUE1_NAME);
@@ -418,7 +430,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       await time.advance(11);
 
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       const messageTry2 = await store.receiveMessage(QUEUE1_NAME);
@@ -446,13 +458,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // receive once
       await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1000 });
       await time.advance(1001);
-      await store.poll();
+      await poll(store);
 
       // message should now be removed
       await assertQueueEmpty(store, QUEUE1_NAME);
@@ -464,14 +476,14 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
-      await store.poll();
+      await poll(store);
 
       for (let i = 0; i < 10; i++) {
         await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
         await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 10 });
         await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
         await time.advance(11);
-        await store.poll();
+        await poll(store);
       }
     });
 
@@ -481,12 +493,12 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // let the message expire
       await time.advance(6000);
-      await store.poll();
+      await poll(store);
 
       // message should now be removed
       await assertQueueEmpty(store, QUEUE1_NAME);
@@ -498,12 +510,12 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // let the message expire
       await time.advance(6000);
-      await store.poll();
+      await poll(store);
 
       // message should now be removed
       await assertQueueEmpty(store, QUEUE1_NAME);
@@ -546,7 +558,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(recvMessage1?.attributes["oldAttr"]).toBeUndefined();
       expect(recvMessage1?.attributes["newAttr"]).toBe("newAttrValue");
       await time.advance(4000);
-      await store.poll();
+      await poll(store);
 
       // update message with receipt handle
       await store.updateMessage(QUEUE1_NAME, message1.id, recvMessage1?.receiptHandle, {
@@ -554,11 +566,11 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
         visibilityTimeoutMs: 5000,
       });
       await time.advance(4000);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 1);
 
       await time.advance(1001);
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
@@ -582,7 +594,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak message
       const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
       await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle);
-      await store.poll();
+
+      // validate message can't be received
+      const m = await store.receiveMessage(QUEUE1_NAME, { waitTimeMs: 0 });
+      expect(m).toBeUndefined();
+
+      // validate queue is empty
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
@@ -597,7 +615,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak message
       const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
       await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle, "test message");
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
 
       // validate nak reason
@@ -620,7 +638,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak message
       const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
       await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle, "test message");
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
 
       // validate nak reason (queue1)
@@ -646,7 +664,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // send a message
       await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
       await time.advance(1);
-      await store.poll();
+      await poll(store);
 
       // receive message
       const message = await store.receiveMessage(QUEUE1_NAME);
@@ -654,7 +672,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // nak message
       await store.nakMessage(QUEUE1_NAME, message!.id, message!.receiptHandle);
       await time.advance(1);
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
 
       // verify dead letter queue has message
@@ -677,7 +695,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       let recvMessage = await store.receiveMessage(QUEUE1_NAME);
       expect(recvMessage?.body).toBe(MESSAGE1_BODY);
       await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
-      await store.poll();
+      await poll(store);
 
       // validate message 1 received again
       recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
@@ -685,7 +703,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // expire messages
       await time.advance(101);
-      await store.poll();
+      await poll(store);
 
       // validate message 1 received again
       recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
@@ -708,7 +726,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       let recvMessage = await store.receiveMessage(QUEUE1_NAME);
       expect(recvMessage?.body).toBe(MESSAGE1_BODY);
       await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
-      await store.poll();
+      await poll(store);
 
       // validate message 1 received again
       recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
@@ -716,7 +734,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // expire messages
       await time.advance(101);
-      await store.poll();
+      await poll(store);
 
       // validate message 3 received
       recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
@@ -740,7 +758,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(recvMessage?.body).toBe(MESSAGE1_BODY);
       expect(recvMessage?.priority).toBe(20);
       await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
-      await store.poll(); // message 1 should be at 10 now
+      await poll(store); // message 1 should be at 10 now
 
       // validate message 1 received again: at this point it should have the same
       // priority as message 2 but the ordering time should be sooner
@@ -748,7 +766,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(recvMessage?.body).toBe(MESSAGE1_BODY);
       expect(recvMessage?.priority).toBe(10);
       await store.nakMessage(QUEUE1_NAME, recvMessage!.id, recvMessage!.receiptHandle);
-      await store.poll(); // message 1 should be at 0 now
+      await poll(store); // message 1 should be at 0 now
 
       // validate message 2 received
       recvMessage = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
@@ -757,7 +775,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // expire messages
       await time.advance(101);
-      await store.poll();
+      await poll(store);
 
       // validate message 3 received, both 1 and 2 should have priority 0 at this point
       recvMessage = await store.receiveMessage(QUEUE1_NAME);
@@ -784,7 +802,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak message
       const recvMessage1 = await store.receiveMessage(QUEUE1_NAME);
       await store.nakMessage(QUEUE1_NAME, message1.id, recvMessage1!.receiptHandle);
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
 
       // validate message on dead letter
@@ -792,7 +810,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // validate message is deleted after message retention period
       await time.advance(1001);
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
     });
 
@@ -843,13 +861,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // receive message once
       await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1 });
       await time.advance(2);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
 
       // receive message again
       await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1 });
       await time.advance(2);
-      await store.poll();
+      await poll(store);
       await assertQueueEmpty(store, QUEUE1_NAME);
 
       // message in dead letter
@@ -875,7 +893,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // receive message
       await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 1 });
       await time.advance(2);
-      await store.poll();
+      await poll(store);
       await assertQueueSize(store, QUEUE1_NAME, 0, 0, 0);
 
       // message in dead letter 1
@@ -1112,7 +1130,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
 
       // validate retention period set
       await time.advance(1001);
-      await store.poll();
+      await poll(store);
 
       await assertQueueEmpty(store, QUEUE2_NAME);
     });

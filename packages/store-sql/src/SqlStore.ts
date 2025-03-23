@@ -321,6 +321,7 @@ export class SqlStore implements Store {
       const messages = await this.dialect.receiveMessages(queueName, {
         visibilityTimeoutMs,
         count: options?.maxNumberOfMessages ?? 10,
+        maxReceiveCount: queueInfo.maxReceiveCount
       });
       if (messages.length > 0) {
         return messages;
@@ -385,24 +386,29 @@ export class SqlStore implements Store {
   public async poll(): Promise<void> {
     const reloadQueueInfosCache = async (): Promise<QueueInfo[]> => {
       const queueInfos = await this.dialect.getQueueInfos();
-      const queueExpiresToUpdate: { queueName: string; newExpires: Date }[] = [];
+
+      // need to update the cachedQueueInfo synchronously to avoid conflicts
       clearRecord(this.cachedQueueInfo);
       for (const queueInfo of queueInfos) {
         this.cachedQueueInfo[queueInfo.name] = queueInfo;
+      }
+
+      // update expires at using queueTouched
+      for (const queueInfo of queueInfos) {
         if (queueInfo.expiresMs && this.queueTouched[queueInfo.name]) {
           const lastTouched = this.queueTouched[queueInfo.name];
           const newExpires = new Date(lastTouched.getTime() + queueInfo.expiresMs);
           queueInfo.expiresAt = newExpires;
-          queueExpiresToUpdate.push({ queueName: queueInfo.name, newExpires });
+          logger.debug(`updating queue expires at "${queueInfo.name}" = ${newExpires.toISOString()}`);
+          await this.dialect.updateQueueExpiresAt(queueInfo.name, newExpires);
+
+          // check that queueTouched didn't update while we were updating the expires at
+          if (lastTouched === this.queueTouched[queueInfo.name]) {
+            delete this.queueTouched[queueInfo.name];
+          }
         }
       }
-      clearRecord(this.queueTouched);
-      await Promise.all(
-        queueExpiresToUpdate.map((update) => {
-          logger.debug(`updating queue expires at "${update.queueName}" = ${update.newExpires.toISOString()}`);
-          return this.dialect.updateQueueExpiresAt(update.queueName, update.newExpires);
-        })
-      );
+
       return queueInfos;
     };
 
@@ -422,11 +428,14 @@ export class SqlStore implements Store {
 
       for (const queueInfo of queueInfos) {
         if (queueInfo.expiresAt && queueInfo.expiresAt < now) {
-          logger.info(`deleting expired queue "${queueInfo.name}"`);
+          logger.info(`deleting expired queue "${queueInfo.name}" (queue expired at: ${queueInfo.expiresAt.toISOString()}, now: ${now.toISOString()})`);
           try {
             await this.deleteQueue(queueInfo.name);
             queueInfos = queueInfos.filter((qi) => qi !== queueInfo);
           } catch (err) {
+            if (err instanceof QueueNotFoundError) {
+              continue;
+            }
             logger.error(`failed to delete queue: ${queueInfo.name}`, err);
           }
         }
@@ -613,7 +622,7 @@ export class SqlStore implements Store {
   }
 
   public async deleteQueue(queueName: string): Promise<void> {
-    logger.info(`deleting queue: ${queueName}`);
+    logger.info(`deleting queue: "${queueName}"`);
     const queue = await this.getCachedQueueInfo(queueName);
     const dependentQueues = await this.dialect.findQueueNamesWithDeadLetterQueueName(queueName);
     if (dependentQueues.length > 0) {

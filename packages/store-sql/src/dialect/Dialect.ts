@@ -88,7 +88,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     protected readonly sql: TSql,
     protected readonly database: TDatabase,
     protected readonly time: Time
-  ) {}
+  ) { }
 
   public abstract beginTransaction(): Promise<Transaction>;
 
@@ -204,7 +204,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
 
   public async receiveMessages(
     queueName: string,
-    options: { visibilityTimeoutMs: number; count: number }
+    options: { visibilityTimeoutMs: number; count: number, maxReceiveCount?: number }
   ): Promise<ReceivedMessage[]> {
     const tx = await this.beginTransaction();
     try {
@@ -213,6 +213,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
         queueName,
         now,
         now,
+        options.maxReceiveCount ?? 1000000, // choose a large number if not set
         options.count,
       ]);
 

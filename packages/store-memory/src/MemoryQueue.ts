@@ -152,6 +152,10 @@ export class MemoryQueue {
 
       this.sortMessages();
       for (const message of this.messages) {
+        if (this.maxReceiveCount !== undefined && message.receiveCount >= this.maxReceiveCount) {
+          continue;
+        }
+
         if (!message.isAvailable(now)) {
           continue;
         }
