@@ -13,7 +13,7 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
 
   public async beginTransaction(): Promise<PostgresTransaction> {
     const client = await this.database.connect();
-    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    await client.query("BEGIN");
 
     return {
       client,

@@ -18,6 +18,10 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     super();
   }
 
+  protected get supportsForUpdate(): boolean {
+    return true;
+  }
+
   protected override getQuery(queryName: string): string {
     const query = super.getQuery(queryName);
     return this.transformSql(query);

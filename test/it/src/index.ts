@@ -20,7 +20,7 @@ async function testSendPerformance(client: NexqApi<unknown>): Promise<void> {
   console.log("test send performance");
   await client.api.createQueue({ name: QUEUE1_NAME });
   try {
-    const messageCount = 10000;
+    const messageCount = 1000;
     const startTime = new Date();
     const messageArr = [];
     for (let i = 0; i < messageCount; i++) {

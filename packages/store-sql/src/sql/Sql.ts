@@ -224,6 +224,7 @@ export abstract class Sql<TDatabase> {
           priority DESC,
           order_by
         LIMIT ?
+        ${this.supportsForUpdate ? "FOR UPDATE SKIP LOCKED" : ""}
       `
     );
 
@@ -334,6 +335,7 @@ export abstract class Sql<TDatabase> {
           queue_name = ?
           AND (expires_at IS NOT NULL AND ? > expires_at)
           AND receive_count >= ?
+        ${this.supportsForUpdate ? "FOR UPDATE SKIP LOCKED" : ""}
       `
     );
 
@@ -590,6 +592,10 @@ export abstract class Sql<TDatabase> {
     this.addQuery(SQL_DELETE_ALL_TOPICS, `DELETE FROM ${this.tablePrefix}_topic`);
     this.addQuery(SQL_DELETE_ALL_QUEUES, `DELETE FROM ${this.tablePrefix}_queue`);
     this.addQuery(SQL_DELETE_ALL_USERS, `DELETE FROM ${this.tablePrefix}_user`);
+  }
+
+  protected get supportsForUpdate(): boolean {
+    return false;
   }
 
   protected addQuery(queryName: string, sql: string): void {
