@@ -48,13 +48,13 @@ export class MemoryTopic {
   }
 
   public publishMessage(
-    id: string,
     body: string,
     getQueueRequired: (queueName: string) => MemoryQueue,
     options?: SendMessageOptions & { lastNakReason?: string }
   ): void {
     const queues = this.queueSubscriptions.map((s) => getQueueRequired(s.queueName));
     for (const queue of queues) {
+      const id = createId();
       queue.sendMessage(id, body, options);
     }
   }

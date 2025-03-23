@@ -97,6 +97,11 @@ export class MemoryQueue {
   ): SendMessageResult {
     const now = this.time.getCurrentTime();
     id = id ?? createId();
+
+    if (this.messages.some((m) => m.id === id)) {
+      throw new Error(`duplicate message with id "${id}" in queue "${this.name}"`);
+    }
+
     const delay = options?.delayMs ?? this.delayMs;
     const delayUntil = delay === undefined ? undefined : new Date(now.getTime() + delay);
     if (this.maxMessageSize && body.length > this.maxMessageSize) {

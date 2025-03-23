@@ -255,16 +255,11 @@ export class SqlStore implements Store {
     return { id };
   }
 
-  public async publishMessage(
-    topicName: string,
-    body: string,
-    options?: SendMessageOptions
-  ): Promise<SendMessageResult> {
-    const id = createId();
+  public async publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void> {
     const topic = await this.getCachedTopicInfo(topicName);
     const tx = await this.dialect.beginTransaction();
     try {
-      await this.internalPublishMessage(tx, topic, id, body, options);
+      await this.internalPublishMessage(tx, topic, body, options);
       await tx.commit();
     } catch (err) {
       await tx.rollback();
@@ -272,13 +267,11 @@ export class SqlStore implements Store {
     } finally {
       await tx.release();
     }
-    return { id };
   }
 
   private async internalPublishMessage(
     tx: Transaction,
     topic: TopicInfo,
-    id: string,
     body: string,
     options?: SendMessageOptions & { lastNakReason?: string }
   ): Promise<void> {
@@ -290,6 +283,7 @@ export class SqlStore implements Store {
     }
 
     for (const queueInfo of queueInfos) {
+      const id = createId();
       await this.dialect.sendMessage(tx, queueInfo, id, body, options);
       this.trigger({ type: "new-queue-message", queueName: queueInfo.name } satisfies NewQueueMessageEvent);
     }
@@ -427,13 +421,21 @@ export class SqlStore implements Store {
       for (const queueInfo of queueInfos) {
         if (queueInfo.expiresAt && queueInfo.expiresAt < now) {
           logger.info(`deleting expired queue "${queueInfo.name}"`);
-          await this.deleteQueue(queueInfo.name);
-          queueInfos = queueInfos.filter((qi) => qi !== queueInfo);
+          try {
+            await this.deleteQueue(queueInfo.name);
+            queueInfos = queueInfos.filter((qi) => qi !== queueInfo);
+          } catch (err) {
+            logger.error(`failed to delete queue: ${queueInfo.name}`, err);
+          }
         }
       }
 
       for (const queueInfo of queueInfos) {
-        await this.pollQueue(queueInfo);
+        try {
+          await this.pollQueue(queueInfo);
+        } catch (err) {
+          logger.error(`failed to poll queue: ${queueInfo.name}`, err);
+        }
       }
     } finally {
       if (!this.pollHandle && this.pollIntervalMs > 0) {
@@ -447,97 +449,113 @@ export class SqlStore implements Store {
 
   private async pollQueue(queueInfo: QueueInfo): Promise<void> {
     if (queueInfo.deadLetterTopicName) {
-      const tx = await this.dialect.beginTransaction();
-      try {
-        const expiredSqlMessages = await this.dialect.getExpiredMessages(tx, queueInfo);
-
-        for (const sqlMessage of expiredSqlMessages) {
-          const message = sqlMessageToMessage(sqlMessage);
-          const options: SendMessageOptions & { lastNakReason?: string } = {
-            priority: message.priority,
-            delayMs: 0,
-            attributes: message.attributes,
-            lastNakReason: message.lastNakReason,
-          };
-
-          if (queueInfo.deadLetterTopicName) {
-            const deadLetterTopicInfo = await this.getCachedTopicInfo(queueInfo.deadLetterTopicName);
-            await this.internalPublishMessage(tx, deadLetterTopicInfo, sqlMessage.id, message.body, options);
-          }
-
-          if (queueInfo.deadLetterQueueName) {
-            const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
-            await this.dialect.sendMessage(tx, deadLetterQueueInfo, sqlMessage.id, message.body, options);
-          }
-
-          await this.dialect.deleteMessageByMessageId(tx, queueInfo.name, sqlMessage.id);
-        }
-
-        const to: string[] = [];
-        if (queueInfo.deadLetterTopicName) {
-          to.push(`dead letter topic "${queueInfo.deadLetterTopicName}"`);
-        }
-        if (queueInfo.deadLetterQueueName) {
-          to.push(`dead letter queue "${queueInfo.deadLetterQueueName}"`);
-        }
-        logger.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
-
-        await tx.commit();
-      } catch (err) {
-        await tx.rollback();
-        throw err;
-      } finally {
-        await tx.release();
-      }
+      await this.pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo);
     } else if (queueInfo.deadLetterQueueName) {
-      // we can avoid a transaction here since we are executing a single sql statement
-      const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
-      const results = await this.dialect.moveExpiredMessagesToDeadLetter(undefined, queueInfo, deadLetterQueueInfo);
+      await this.pollQueueWithOnlyDeadLetterQueue(queueInfo);
+    } else {
+      await this.pollQueueWithoutDeadLetter(queueInfo);
+    }
+  }
+
+  private async pollQueueWithoutDeadLetter(queueInfo: QueueInfo): Promise<void> {
+    const now = this.time.getCurrentTime();
+    if (queueInfo.messageRetentionPeriodMs !== undefined) {
+      const results = await this.dialect.deleteExpiredMessagesOverRetention(queueInfo.name, now);
+      if (results.changes > 0) {
+        logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded message retention`);
+      }
+    }
+
+    if (queueInfo.maxReceiveCount !== undefined) {
+      const results = await this.dialect.deleteExpiredMessagesOverReceiveCount(
+        queueInfo.name,
+        queueInfo.maxReceiveCount,
+        now
+      );
+      if (results.changes > 0) {
+        logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded receive count`);
+      }
+    }
+
+    if (queueInfo.nakExpireBehavior === "retry") {
+      // do nothing
+    } else if (queueInfo.nakExpireBehavior === "moveToEnd") {
+      const results = await this.dialect.moveExpiredMessagesToEndOfQueue(queueInfo);
+      if (results.changes > 0) {
+        logger.debug(`moved ${results.changes} messages from "${queueInfo.name}" to end of queue`);
+      }
+    } else if (isDecreasePriorityByNakExpireBehavior(queueInfo.nakExpireBehavior)) {
+      const results = await this.dialect.decreasePriorityOfExpiredMessages(
+        queueInfo,
+        queueInfo.nakExpireBehavior.decreasePriorityBy
+      );
       if (results.changes > 0) {
         logger.debug(
-          `moved ${results.changes} messages from "${queueInfo.name}" to dead letter "${queueInfo.deadLetterQueueName}"`
+          `decrease the priority of ${results.changes} messages in "${queueInfo.name}" by ${queueInfo.nakExpireBehavior.decreasePriorityBy}`
         );
       }
     } else {
-      const now = this.time.getCurrentTime();
-      if (queueInfo.messageRetentionPeriodMs !== undefined) {
-        const results = await this.dialect.deleteExpiredMessagesOverRetention(queueInfo.name, now);
-        if (results.changes > 0) {
-          logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded message retention`);
+      throw new Error(`unhandled nakExpireBehavior "${JSON.stringify(queueInfo.nakExpireBehavior)}"`);
+    }
+  }
+
+  private async pollQueueWithOnlyDeadLetterQueue(queueInfo: QueueInfo): Promise<void> {
+    if (!queueInfo.deadLetterQueueName) {
+      throw new Error(`missing dead letter queue name`);
+    }
+
+    // we can avoid a transaction here since we are executing a single sql statement
+    const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
+    const results = await this.dialect.moveExpiredMessagesToDeadLetter(undefined, queueInfo, deadLetterQueueInfo);
+    if (results.changes > 0) {
+      logger.debug(
+        `moved ${results.changes} messages from "${queueInfo.name}" to dead letter "${queueInfo.deadLetterQueueName}"`
+      );
+    }
+  }
+
+  private async pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo: QueueInfo): Promise<void> {
+    const tx = await this.dialect.beginTransaction();
+    try {
+      const expiredSqlMessages = await this.dialect.getExpiredMessages(tx, queueInfo);
+
+      for (const sqlMessage of expiredSqlMessages) {
+        const message = sqlMessageToMessage(sqlMessage);
+        const options: SendMessageOptions & { lastNakReason?: string } = {
+          priority: message.priority,
+          delayMs: 0,
+          attributes: message.attributes,
+          lastNakReason: message.lastNakReason,
+        };
+
+        if (queueInfo.deadLetterTopicName) {
+          const deadLetterTopicInfo = await this.getCachedTopicInfo(queueInfo.deadLetterTopicName);
+          await this.internalPublishMessage(tx, deadLetterTopicInfo, message.body, options);
         }
+
+        if (queueInfo.deadLetterQueueName) {
+          const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
+          await this.dialect.sendMessage(tx, deadLetterQueueInfo, sqlMessage.id, message.body, options);
+        }
+
+        await this.dialect.deleteMessageByMessageId(tx, queueInfo.name, sqlMessage.id);
       }
 
-      if (queueInfo.maxReceiveCount !== undefined) {
-        const results = await this.dialect.deleteExpiredMessagesOverReceiveCount(
-          queueInfo.name,
-          queueInfo.maxReceiveCount,
-          now
-        );
-        if (results.changes > 0) {
-          logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded receive count`);
-        }
+      const to: string[] = [];
+      if (queueInfo.deadLetterTopicName) {
+        to.push(`dead letter topic "${queueInfo.deadLetterTopicName}"`);
       }
+      if (queueInfo.deadLetterQueueName) {
+        to.push(`dead letter queue "${queueInfo.deadLetterQueueName}"`);
+      }
+      logger.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
 
-      if (queueInfo.nakExpireBehavior === "retry") {
-        // do nothing
-      } else if (queueInfo.nakExpireBehavior === "moveToEnd") {
-        const results = await this.dialect.moveExpiredMessagesToEndOfQueue(queueInfo);
-        if (results.changes > 0) {
-          logger.debug(`moved ${results.changes} messages from "${queueInfo.name}" to end of queue`);
-        }
-      } else if (isDecreasePriorityByNakExpireBehavior(queueInfo.nakExpireBehavior)) {
-        const results = await this.dialect.decreasePriorityOfExpiredMessages(
-          queueInfo,
-          queueInfo.nakExpireBehavior.decreasePriorityBy
-        );
-        if (results.changes > 0) {
-          logger.debug(
-            `decrease the priority of ${results.changes} messages in "${queueInfo.name}" by ${queueInfo.nakExpireBehavior.decreasePriorityBy}`
-          );
-        }
-      } else {
-        throw new Error(`unhandled nakExpireBehavior "${JSON.stringify(queueInfo.nakExpireBehavior)}"`);
-      }
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
     }
   }
 

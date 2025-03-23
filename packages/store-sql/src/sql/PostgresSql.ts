@@ -172,7 +172,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           FOREIGN KEY(queue_name) REFERENCES nexq_queue(name) ON DELETE CASCADE
         )
       `);
-      await database.query(`CREATE INDEX nexq_message_id_idx ON nexq_message(id)`);
+      await database.query(`CREATE UNIQUE INDEX nexq_message_id_queue_name_idx ON nexq_message(id, queue_name)`);
       await database.query(`CREATE INDEX nexq_message_queue_name_idx ON nexq_message(queue_name)`);
       await database.query(`CREATE INDEX nexq_message_receipt_handle_idx ON nexq_message(receipt_handle)`);
       await database.query(`CREATE INDEX nexq_message_order_by_idx ON nexq_message(order_by)`);

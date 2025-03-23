@@ -1,5 +1,4 @@
 import {
-  createId,
   createLogger,
   CreateQueueOptions,
   CreateTopicOptions,
@@ -213,16 +212,11 @@ export class MemoryStore implements Store {
           }
           if (deadLetterTopic) {
             logger.debug(`moving message ${expiredMessage.id} to dead letter topic "${deadLetterTopic.name}"`);
-            deadLetterTopic.publishMessage(
-              expiredMessage.id,
-              expiredMessage.body,
-              (queueName) => this.getQueueRequired(queueName),
-              {
-                priority: expiredMessage.priority,
-                attributes: expiredMessage.attributes,
-                lastNakReason: expiredMessage.lastNakReason,
-              }
-            );
+            deadLetterTopic.publishMessage(expiredMessage.body, (queueName) => this.getQueueRequired(queueName), {
+              priority: expiredMessage.priority,
+              attributes: expiredMessage.attributes,
+              lastNakReason: expiredMessage.lastNakReason,
+            });
           }
         }
       } else {
@@ -386,15 +380,9 @@ export class MemoryStore implements Store {
     return topic.subscribeQueue(queue.name);
   }
 
-  public async publishMessage(
-    topicName: string,
-    body: string,
-    options?: SendMessageOptions
-  ): Promise<SendMessageResult> {
+  public async publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void> {
     const topic = this.getTopicRequired(topicName);
-    const id = createId();
-    topic.publishMessage(id, body, (queueName) => this.getQueueRequired(queueName), options);
-    return { id };
+    topic.publishMessage(body, (queueName) => this.getQueueRequired(queueName), options);
   }
 
   public async deleteTopic(topicName: string): Promise<void> {

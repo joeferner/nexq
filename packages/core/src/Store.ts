@@ -54,5 +54,5 @@ export interface Store {
   createTopic(topicName: string, options?: CreateTopicOptions): Promise<void>;
   subscribe(topicName: string, protocol: TopicProtocol, target: string): Promise<string>;
   deleteTopic(topicName: string): Promise<void>;
-  publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult>;
+  publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void>;
 }

@@ -606,7 +606,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
     });
 
     test("nak message dead letter topic", async () => {
-      // create the queue
+      // create the queues/topics
       await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
       await store.createQueue(DEAD_LETTER_QUEUE2_NAME);
       await store.createTopic(TOPIC1_NAME);
@@ -630,6 +630,35 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // validate nak reason (queue2)
       const deadLetterMessage2 = await store.receiveMessage(DEAD_LETTER_QUEUE2_NAME);
       expect(deadLetterMessage2!.lastNakReason).toBe("test message");
+    });
+
+    test("nak message to same dead letter queue", async () => {
+      // create the queues/topics which end up in same queue
+      await store.createQueue(DEAD_LETTER_QUEUE1_NAME);
+      await store.createTopic(TOPIC1_NAME);
+      await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, DEAD_LETTER_QUEUE1_NAME);
+      await store.createQueue(QUEUE1_NAME, {
+        maxReceiveCount: 1,
+        deadLetterTopicName: TOPIC1_NAME,
+        deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
+      });
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await time.advance(1);
+      await store.poll();
+
+      // receive message
+      const message = await store.receiveMessage(QUEUE1_NAME);
+
+      // nak message
+      await store.nakMessage(QUEUE1_NAME, message!.id, message!.receiptHandle);
+      await time.advance(1);
+      await store.poll();
+      await assertQueueEmpty(store, QUEUE1_NAME);
+
+      // verify dead letter queue has message
+      await assertQueueSize(store, DEAD_LETTER_QUEUE1_NAME, 2, 0, 0);
     });
 
     test("nak/expire behavior: default", async () => {

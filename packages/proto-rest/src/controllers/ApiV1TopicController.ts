@@ -14,7 +14,6 @@ import { CreateTopicRequest } from "../dto/CreateTopicRequest.js";
 import { GetTopicResponse, topicInfoToGetTopicResponse } from "../dto/GetTopicResponse.js";
 import { GetTopicsResponse } from "../dto/GetTopicsResponse.js";
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
-import { SendMessageResponse } from "../dto/SendMessageResponse.js";
 import { SubscribeQueueRequest } from "../dto/SubscribeQueueRequest.js";
 import { SubscribeResponse } from "../dto/SubscribeResponse.js";
 import { isHttpError } from "../utils.js";
@@ -124,14 +123,13 @@ export class ApiV1TopicController extends Controller {
   @SuccessResponse("200", "Message sent")
   @Response<void>(400, "invalid body")
   @Response<void>(404, "topic not found")
-  public async publish(@Path() topicName: string, @Body() request: SendMessageRequest): Promise<SendMessageResponse> {
+  public async publish(@Path() topicName: string, @Body() request: SendMessageRequest): Promise<void> {
     try {
-      const m = await this.store.publishMessage(topicName, request.body, {
+      await this.store.publishMessage(topicName, request.body, {
         attributes: request.attributes,
         delayMs: parseOptionalDurationIntoMs(request.delay),
         priority: request.priority,
       });
-      return { id: m.id };
     } catch (err) {
       if (isHttpError(err)) {
         throw err;
