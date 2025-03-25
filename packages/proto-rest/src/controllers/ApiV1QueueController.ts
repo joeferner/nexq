@@ -183,6 +183,54 @@ export class ApiV1QueueController extends Controller {
   }
 
   /**
+   * pauses the queue, all new receive message calls will return 0 messages until the queue is resumed
+   *
+   * @param queueName the name of the queue to pause
+   * @example queueName "queue1"
+   */
+  @Post("{queueName}/pause")
+  @SuccessResponse("200", "Queue paused")
+  @Response<void>(404, "queue not found")
+  public async pause(@Path() queueName: string): Promise<void> {
+    try {
+      await this.store.pause(queueName);
+    } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      logger.error(`failed to pause queue`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * resumes the queue
+   *
+   * @param queueName the name of the queue to resume
+   * @example queueName "queue1"
+   */
+  @Post("{queueName}/resume")
+  @SuccessResponse("200", "Queue resumed")
+  @Response<void>(404, "queue not found")
+  public async resume(@Path() queueName: string): Promise<void> {
+    try {
+      await this.store.resume(queueName);
+    } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      logger.error(`failed to resume queue`, err);
+      throw err;
+    }
+  }
+
+  /**
    * move all visible messages from this queue to a new queue
    *
    * @param sourceQueueName the name of the queue to move messages from

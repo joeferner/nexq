@@ -49,6 +49,8 @@ export interface Store {
   deleteQueue(queueName: string): Promise<void>;
   purgeQueue(queueName: string): Promise<void>;
   moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult>;
+  pause(queueName: string): Promise<void>;
+  resume(queueName: string): Promise<void>;
 
   getTopicInfo(topicName: string): Promise<TopicInfo>;
   getTopicInfos(): Promise<TopicInfo[]>;

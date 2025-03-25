@@ -167,6 +167,16 @@ export class MemoryStore implements Store {
     return queue.getMessage(messageId);
   }
 
+  public async pause(queueName: string): Promise<void> {
+    const queue = this.getQueueRequired(queueName);
+    queue.pause();
+  }
+
+  public async resume(queueName: string): Promise<void> {
+    const queue = this.getQueueRequired(queueName);
+    queue.resume();
+  }
+
   public async poll(): Promise<void> {
     try {
       const now = this.time.getCurrentTime();

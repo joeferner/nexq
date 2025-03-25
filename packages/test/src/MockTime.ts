@@ -1,4 +1,5 @@
 import { Time, Timeout } from "@nexq/core";
+import * as R from "radash";
 
 interface MockTimeout {
   timeoutTime: Date;
@@ -47,5 +48,6 @@ export class MockTime implements Time {
         timeout.fn();
       }
     }
+    await R.sleep(0);
   }
 }

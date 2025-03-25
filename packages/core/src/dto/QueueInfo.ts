@@ -21,6 +21,7 @@ export interface QueueInfo {
   deadLetterTopicName?: string;
   maxReceiveCount?: number;
   nakExpireBehavior: NakExpireBehaviorOptions;
+  paused: boolean;
 }
 
 export function queueInfoEqualCreateQueueOptions(

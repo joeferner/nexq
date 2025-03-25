@@ -56,4 +56,8 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
   public async shutdown(): Promise<void> {
     await this.database.end();
   }
+
+  protected toSqlBoolean(v: boolean): unknown {
+    return v;
+  }
 }

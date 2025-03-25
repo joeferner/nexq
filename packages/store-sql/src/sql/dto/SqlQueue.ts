@@ -16,6 +16,7 @@ export interface SqlQueue {
   dead_letter_topic_name: string | null;
   max_receive_count: number | null;
   nak_expire_behavior: string;
+  paused: boolean;
   tags: string;
 }
 
@@ -38,5 +39,6 @@ export function sqlQueueToQueueInfo(
     deadLetterTopicName: row.dead_letter_topic_name ?? undefined,
     maxReceiveCount: row.max_receive_count ?? undefined,
     nakExpireBehavior: JSON.parse(row.nak_expire_behavior) as NakExpireBehaviorOptions,
+    paused: row.paused ? true : false,
   };
 }

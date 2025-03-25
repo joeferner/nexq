@@ -72,9 +72,11 @@ import {
   SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE,
   SQL_MOVE_MESSAGES,
   SQL_NAK_MESSAGE,
+  SQL_PAUSE_QUEUE,
   SQL_PEEK_MESSAGES,
   SQL_PURGE_QUEUE,
   SQL_RECEIVE_MESSAGE,
+  SQL_RESUME_QUEUE,
   SQL_UPDATE_MESSAGE_VISIBILITY_BY_RECEIPT_HANDLE,
   SQL_UPDATE_QUEUE,
   SQL_UPDATE_QUEUE_EXPIRES_AT,
@@ -88,7 +90,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     protected readonly sql: TSql,
     protected readonly database: TDatabase,
     protected readonly time: Time
-  ) { }
+  ) {}
 
   public abstract beginTransaction(): Promise<Transaction>;
 
@@ -204,7 +206,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
 
   public async receiveMessages(
     queueName: string,
-    options: { visibilityTimeoutMs: number; count: number, maxReceiveCount?: number }
+    options: { visibilityTimeoutMs: number; count: number; maxReceiveCount?: number }
   ): Promise<ReceivedMessage[]> {
     const tx = await this.beginTransaction();
     try {
@@ -446,11 +448,14 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       options?.maxReceiveCount ?? null,
       options?.maxMessageSize ?? null,
       JSON.stringify(options?.nakExpireBehavior ?? DEFAULT_NAK_EXPIRE_BEHAVIOR),
+      this.toSqlBoolean(false), // paused
       options?.tags ? JSON.stringify(options.tags) : "{}",
       now, // created at
       now, // last modified
     ]);
   }
+
+  protected abstract toSqlBoolean(v: boolean): unknown;
 
   public async updateQueue(tx: Transaction, queueName: string, options?: CreateQueueOptions): Promise<void> {
     const now = this.time.getCurrentTime();
@@ -470,6 +475,14 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
       now, // last modified
       queueName,
     ]);
+  }
+
+  public async pause(queueName: string): Promise<void> {
+    await this.sql.run(this.database, SQL_PAUSE_QUEUE, [queueName]);
+  }
+
+  public async resume(queueName: string): Promise<void> {
+    await this.sql.run(this.database, SQL_RESUME_QUEUE, [queueName]);
   }
 
   public async deleteQueue(queueName: string): Promise<void> {

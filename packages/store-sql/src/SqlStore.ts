@@ -44,7 +44,7 @@ import {
 import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { Transaction } from "./dialect/Transaction.js";
-import { NewQueueMessageEvent } from "./events.js";
+import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 import { clearRecord } from "./utils.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 
@@ -110,7 +110,7 @@ export class SqlStore implements Store {
   private readonly passwordHashRounds: number;
   private readonly pollIntervalMs: number;
   private readonly dialect: SqliteDialect | PostgresDialect;
-  private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
+  private readonly triggers: Trigger<NewQueueMessageEvent | ResumeEvent>[] = [];
   private readonly cachedQueueInfo: Record<string, QueueInfo> = {};
   private readonly cachedTopicInfo: Record<string, TopicInfo> = {};
   private readonly queueTouched: Record<string, Date> = {};
@@ -304,7 +304,7 @@ export class SqlStore implements Store {
   public async receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]> {
     const now = this.time.getCurrentTime();
     const nowMs = now.getTime();
-    const queueInfo = await this.getCachedQueueInfo(queueName);
+    let queueInfo = await this.getCachedQueueInfo(queueName);
     const visibilityTimeoutMs =
       options?.visibilityTimeoutMs ?? queueInfo.visibilityTimeoutMs ?? DEFAULT_VISIBILITY_TIMEOUT_MS;
     const waitTime = options?.waitTimeMs ?? queueInfo.receiveMessageWaitTimeMs ?? 0;
@@ -318,25 +318,30 @@ export class SqlStore implements Store {
       const trigger = new Trigger<NewQueueMessageEvent>(this.time);
       this.triggers.push(trigger);
 
-      const messages = await this.dialect.receiveMessages(queueName, {
-        visibilityTimeoutMs,
-        count: options?.maxNumberOfMessages ?? 10,
-        maxReceiveCount: queueInfo.maxReceiveCount
-      });
-      if (messages.length > 0) {
-        return messages;
+      if (!queueInfo.paused) {
+        const messages = await this.dialect.receiveMessages(queueName, {
+          visibilityTimeoutMs,
+          count: options?.maxNumberOfMessages ?? 10,
+          maxReceiveCount: queueInfo.maxReceiveCount,
+        });
+        if (messages.length > 0) {
+          return messages;
+        }
       }
 
       const now = this.time.getCurrentTime();
       if (now.getTime() > endTime) {
-        return messages;
+        return [];
       }
 
       const timeLeft = endTime - now.getTime();
       if (timeLeft > 0) {
-        await trigger.waitUntil(new Date(endTime));
+        const waitResult = await trigger.waitUntil(new Date(endTime));
+        if (waitResult !== "timeout" && queueInfo.paused) {
+          queueInfo = await this.getQueueInfo(queueName);
+        }
       } else {
-        return messages;
+        return [];
       }
     }
   }
@@ -351,7 +356,7 @@ export class SqlStore implements Store {
     return this.dialect.getMessage(queue.name, messageId);
   }
 
-  private trigger(message: NewQueueMessageEvent): void {
+  private trigger(message: NewQueueMessageEvent | ResumeEvent): void {
     const triggers = [...this.triggers];
     this.triggers.length = 0;
     for (const trigger of triggers) {
@@ -381,6 +386,19 @@ export class SqlStore implements Store {
       return topicInfo;
     }
     throw new TopicNotFoundError(topicName);
+  }
+
+  public async pause(queueName: string): Promise<void> {
+    const queue = await this.getCachedQueueInfo(queueName);
+    queue.paused = true;
+    await this.dialect.pause(queueName);
+  }
+
+  public async resume(queueName: string): Promise<void> {
+    await this.dialect.resume(queueName);
+    const queue = await this.getCachedQueueInfo(queueName);
+    queue.paused = false;
+    this.trigger({ type: "resume" } satisfies ResumeEvent);
   }
 
   public async poll(): Promise<void> {
@@ -428,7 +446,9 @@ export class SqlStore implements Store {
 
       for (const queueInfo of queueInfos) {
         if (queueInfo.expiresAt && queueInfo.expiresAt < now) {
-          logger.info(`deleting expired queue "${queueInfo.name}" (queue expired at: ${queueInfo.expiresAt.toISOString()}, now: ${now.toISOString()})`);
+          logger.info(
+            `deleting expired queue "${queueInfo.name}" (queue expired at: ${queueInfo.expiresAt.toISOString()}, now: ${now.toISOString()})`
+          );
           try {
             await this.deleteQueue(queueInfo.name);
             queueInfos = queueInfos.filter((qi) => qi !== queueInfo);
@@ -710,9 +730,10 @@ export class SqlStore implements Store {
   }
 
   private async getQueueRequired(queueName: string, tx?: Transaction): Promise<QueueInfo> {
-    const topic = await this.dialect.getQueueInfo(tx, queueName);
-    if (topic) {
-      return topic;
+    const queue = await this.dialect.getQueueInfo(tx, queueName);
+    if (queue) {
+      this.cachedQueueInfo[queueName] = queue;
+      return queue;
     }
     throw new QueueNotFoundError(queueName);
   }

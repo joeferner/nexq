@@ -25,7 +25,7 @@ import {
 } from "@nexq/core";
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
-import { NewQueueMessageEvent } from "./events.js";
+import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 
 const logger = createLogger("MemoryQueue");
 
@@ -46,8 +46,9 @@ export class MemoryQueue {
   private tags: Record<string, string>;
   private nakExpireBehavior: NakExpireBehaviorOptions;
   private expiresAt: Date | undefined;
+  private paused = false;
   private readonly messages: MemoryQueueMessage[] = [];
-  private readonly triggers: Trigger<NewQueueMessageEvent>[] = [];
+  private readonly triggers: Trigger<NewQueueMessageEvent | ResumeEvent>[] = [];
 
   public constructor(options: { name: string; time: Time } & CreateQueueOptions) {
     const now = options.time.getCurrentTime();
@@ -127,7 +128,16 @@ export class MemoryQueue {
     return { id };
   }
 
-  private trigger(message: NewQueueMessageEvent): void {
+  public pause(): void {
+    this.paused = true;
+  }
+
+  public resume(): void {
+    this.paused = false;
+    this.trigger({ type: "resume" } satisfies ResumeEvent);
+  }
+
+  private trigger(message: NewQueueMessageEvent | ResumeEvent): void {
     const triggers = [...this.triggers];
     this.triggers.length = 0;
     for (const trigger of triggers) {
@@ -150,20 +160,22 @@ export class MemoryQueue {
         this.expiresAt = new Date(now.getTime() + this.expiresMs);
       }
 
-      this.sortMessages();
-      for (const message of this.messages) {
-        if (this.maxReceiveCount !== undefined && message.receiveCount >= this.maxReceiveCount) {
-          continue;
-        }
+      if (!this.paused) {
+        this.sortMessages();
+        for (const message of this.messages) {
+          if (this.maxReceiveCount !== undefined && message.receiveCount >= this.maxReceiveCount) {
+            continue;
+          }
 
-        if (!message.isAvailable(now)) {
-          continue;
-        }
+          if (!message.isAvailable(now)) {
+            continue;
+          }
 
-        const newExpiresAt = new Date(now.getTime() + visibilityTimeoutMs);
-        messages.push(message.markReceived(newExpiresAt, now));
-        if (messages.length === options?.maxNumberOfMessages) {
-          return messages;
+          const newExpiresAt = new Date(now.getTime() + visibilityTimeoutMs);
+          messages.push(message.markReceived(newExpiresAt, now));
+          if (messages.length === options?.maxNumberOfMessages) {
+            return messages;
+          }
         }
       }
 
@@ -267,6 +279,7 @@ export class MemoryQueue {
       deadLetterQueueName: this.deadLetterQueueName,
       deadLetterTopicName: this.deadLetterTopicName,
       maxReceiveCount: this.maxReceiveCount,
+      paused: this.paused,
     };
   }
 

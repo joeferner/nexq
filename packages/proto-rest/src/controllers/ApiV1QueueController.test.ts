@@ -390,5 +390,31 @@ describe("ApiV1QueueController", async () => {
       const message2 = resp.messages[1];
       expect(message2.body).toBe("test2");
     });
+
+    test("queue not found", async () => {
+      await expectHttpError(async () => await controller.peekMessages("bad-queue-name"), 404);
+    });
+  });
+
+  describe("pause/resume", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE1_NAME);
+
+      await controller.pause(QUEUE1_NAME);
+      const queueAfterPause = await store.getQueueInfo(QUEUE1_NAME);
+      expect(queueAfterPause.paused).toBeTruthy();
+
+      await controller.resume(QUEUE1_NAME);
+      const queueAfterResume = await store.getQueueInfo(QUEUE1_NAME);
+      expect(queueAfterResume.paused).toBeFalsy();
+    });
+
+    test("queue not found (pause)", async () => {
+      await expectHttpError(async () => await controller.pause("bad-queue-name"), 404);
+    });
+
+    test("queue not found (resume)", async () => {
+      await expectHttpError(async () => await controller.resume("bad-queue-name"), 404);
+    });
   });
 });

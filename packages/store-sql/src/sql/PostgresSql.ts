@@ -126,6 +126,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
           dead_letter_topic_name TEXT,
           max_receive_count INTEGER,
           nak_expire_behavior TEXT NOT NULL,
+          paused BOOLEAN NOT NULL,
           tags TEXT NOT NULL,
           FOREIGN KEY(dead_letter_queue_name) REFERENCES nexq_queue(name)
         )

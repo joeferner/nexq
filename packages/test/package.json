@@ -18,7 +18,8 @@
     "type": "git"
   },
   "dependencies": {
-    "@nexq/core": "file:../core"
+    "@nexq/core": "file:../core",
+    "radash": "^12.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",

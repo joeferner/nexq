@@ -18,6 +18,7 @@ export interface GetQueueResponse {
   deadLetterQueueName?: string;
   deadLetterTopicName?: string;
   maxReceiveCount?: number;
+  paused: boolean;
 }
 
 export function queueInfoToGetQueueResponse(q: QueueInfo): GetQueueResponse {
@@ -39,5 +40,6 @@ export function queueInfoToGetQueueResponse(q: QueueInfo): GetQueueResponse {
     deadLetterQueueName: q.deadLetterQueueName,
     deadLetterTopicName: q.deadLetterTopicName,
     maxReceiveCount: q.maxReceiveCount,
+    paused: q.paused,
   } satisfies GetQueueResponse;
 }

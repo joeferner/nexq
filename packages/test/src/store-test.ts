@@ -9,6 +9,7 @@ import {
 } from "@nexq/core";
 import { afterEach, assert, beforeEach, describe, expect, test } from "vitest";
 import { MockTime } from "./MockTime.js";
+import * as R from "radash";
 
 const QUEUE1_NAME = "queue1";
 const QUEUE2_NAME = "queue2";
@@ -46,10 +47,7 @@ export async function assertQueueEmpty(store: Store, queueName: string): Promise
 
 export async function poll(store: Store): Promise<void> {
   // run simultaneous polls to simulate a multiple server environment
-  await Promise.all([
-    store.poll(),
-    store.poll()
-  ]);
+  await Promise.all([store.poll(), store.poll()]);
 }
 
 export async function runStoreTest(createStore: (options: CreateStoreOptions) => Promise<Store>): Promise<void> {
@@ -372,13 +370,13 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await poll(store);
 
       // verify receive_messages resets expire
-      console.log('a', time.getCurrentTime().toISOString());
+      console.log("a", time.getCurrentTime().toISOString());
       await store.receiveMessage(QUEUE1_NAME);
-      console.log('b', time.getCurrentTime().toISOString());
+      console.log("b", time.getCurrentTime().toISOString());
       await time.advance(59 * 1000);
-      console.log('c', time.getCurrentTime().toISOString());
+      console.log("c", time.getCurrentTime().toISOString());
       await poll(store);
-      console.log('d', time.getCurrentTime().toISOString());
+      console.log("d", time.getCurrentTime().toISOString());
       expect(await store.getQueueInfo(QUEUE1_NAME)).toBeTruthy();
 
       // verify queue gets deleted, first reset the clock
@@ -959,6 +957,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
         },
         deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
         maxReceiveCount: 6,
+        paused: false,
       } satisfies QueueInfo);
 
       // create queue again with same parameters
@@ -1133,6 +1132,45 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await poll(store);
 
       await assertQueueEmpty(store, QUEUE2_NAME);
+    });
+
+    test("pause/resume", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send message then pause
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await time.advance(10);
+      await store.pause(QUEUE1_NAME);
+      expect((await store.getQueueInfo(QUEUE1_NAME)).paused).toBeTruthy();
+      await time.advance(10);
+
+      // receive without resume
+      const p1 = store.receiveMessages(QUEUE1_NAME, { waitTimeMs: 1000 }).then((messages) => {
+        return { time: time.getCurrentTime(), messages };
+      });
+      await time.advance(999);
+      await time.advance(1);
+      const expectedTime1 = time.getCurrentTime();
+      await time.advance(1);
+      const results1 = await p1;
+      expect(results1.time.toISOString()).toBe(expectedTime1.toISOString());
+      expect(results1.messages.length).toBe(0);
+
+      // receive with resume
+      const p2 = store.receiveMessages(QUEUE1_NAME, { waitTimeMs: 1000, maxNumberOfMessages: 1 }).then((messages) => {
+        return { time: time.getCurrentTime(), messages };
+      });
+      await time.advance(999);
+      await store.resume(QUEUE1_NAME);
+      expect((await store.getQueueInfo(QUEUE1_NAME)).paused).toBeFalsy();
+      await time.advance(0);
+      await R.sleep(100); // need to wait for sql to execute
+      const expectedTime2 = time.getCurrentTime();
+      await time.advance(2);
+      const results2 = await p2;
+      expect(results2.time.toISOString()).toBe(expectedTime2.toISOString());
+      expect(results2.messages.length).toBe(1);
     });
   });
 

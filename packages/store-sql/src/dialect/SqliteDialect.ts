@@ -64,4 +64,8 @@ export class SqliteDialect extends Dialect<sqlite.Database, SqliteSql> {
   public async shutdown(): Promise<void> {
     this.database.close();
   }
+
+  protected toSqlBoolean(v: boolean): unknown {
+    return v ? 1 : 0;
+  }
 }
