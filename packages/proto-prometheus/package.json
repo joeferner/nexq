@@ -20,13 +20,13 @@
     "type": "git"
   },
   "dependencies": {
-    "@nexq/core": "file:../core",
+    "@nexq/core": "1.0.0",
     "express": "^4.21.2",
     "http-errors": "^2.0.0"
   },
   "devDependencies": {
-    "@nexq/store-memory": "file:../store-memory",
-    "@nexq/test": "file:../test",
+    "@nexq/store-memory": "1.0.0",
+    "@nexq/test": "1.0.0",
     "@types/express": "^5.0.0",
     "@types/http-errors": "^2.0.4",
     "@types/node": "^22.13.9",

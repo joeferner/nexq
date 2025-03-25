@@ -1,0 +1,14 @@
+{
+  "name": "@nexq/root",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/test",
+    "packages/store-memory",
+    "packages/store-sql",
+    "packages/proto-rest",
+    "packages/proto-prometheus",
+    "packages/app",
+    "test/it"
+  ]
+}

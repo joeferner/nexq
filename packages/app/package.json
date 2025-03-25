@@ -1,5 +1,5 @@
 {
-  "name": "@nexq/store-memory",
+  "name": "@nexq/app",
   "version": "1.0.0",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -22,11 +22,11 @@
     "type": "git"
   },
   "dependencies": {
-    "@nexq/core": "file:../core",
-    "@nexq/proto-prometheus": "file:../proto-prometheus",
-    "@nexq/proto-rest": "file:../proto-rest",
-    "@nexq/store-memory": "file:../store-memory",
-    "@nexq/store-sql": "file:../store-sql",
+    "@nexq/core": "1.0.0",
+    "@nexq/proto-prometheus": "1.0.0",
+    "@nexq/proto-rest": "1.0.0",
+    "@nexq/store-memory": "1.0.0",
+    "@nexq/store-sql": "1.0.0",
     "cmd-ts": "^0.13.0",
     "find-root": "^1.1.0",
     "radash": "^12.1.0",

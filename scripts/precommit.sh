@@ -7,13 +7,17 @@ cd "${SCRIPT_DIR}/.."
 
 source ./scripts/_utils.sh
 
-banner "Formatting..."
-./scripts/format.sh
+banner "Installing..."
+npm install --workspaces --no-save
 
 banner "Building..."
-./scripts/build.sh
+npm run build --workspaces
+
+banner "Formatting..."
+npm run format --workspaces
+npm run lint --workspaces
 
 banner "Testing..."
-./scripts/test.sh
+npm run test --workspaces --if-present
 
 echo "complete!"

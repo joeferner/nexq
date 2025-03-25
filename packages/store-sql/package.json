@@ -20,7 +20,7 @@
     "type": "git"
   },
   "dependencies": {
-    "@nexq/core": "file:../core",
+    "@nexq/core": "1.0.0",
     "async-mutex": "^0.5.0",
     "better-sqlite3": "^11.8.1",
     "pg": "^8.14.1",
@@ -28,7 +28,7 @@
     "radash": "^12.1.0"
   },
   "devDependencies": {
-    "@nexq/test": "file:../test",
+    "@nexq/test": "1.0.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.9",
     "@types/pg": "^8.11.11",

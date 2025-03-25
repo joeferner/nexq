@@ -20,11 +20,11 @@
     "type": "git"
   },
   "dependencies": {
-    "@nexq/core": "file:../core",
+    "@nexq/core": "1.0.0",
     "radash": "^12.1.0"
   },
   "devDependencies": {
-    "@nexq/test": "file:../test",
+    "@nexq/test": "1.0.0",
     "@types/node": "^22.13.9",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
