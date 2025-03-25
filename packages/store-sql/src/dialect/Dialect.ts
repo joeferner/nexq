@@ -94,6 +94,20 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
 
   public abstract beginTransaction(): Promise<Transaction>;
 
+  public async withTransaction<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
+    const tx = await this.beginTransaction();
+    try {
+      const result = await fn(tx);
+      await tx.commit();
+      return result;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      await tx.release();
+    }
+  }
+
   public async findUserByAccessKeyId(tx: Transaction | undefined, accessKeyId: string): Promise<User | undefined> {
     const rows = await this.sql.all<SqlUser>(tx ?? this.database, SQL_FIND_USER_BY_ACCESS_KEY_ID, [accessKeyId]);
     return expect0or1Row(rows, sqlUserToUser);
@@ -208,8 +222,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     queueName: string,
     options: { visibilityTimeoutMs: number; count: number; maxReceiveCount?: number }
   ): Promise<ReceivedMessage[]> {
-    const tx = await this.beginTransaction();
-    try {
+    return await this.withTransaction(async (tx) => {
       const now = this.time.getCurrentTime();
       const rows = await this.sql.all<SqlMessage>(tx, SQL_FIND_MESSAGES_TO_RECEIVE, [
         queueName,
@@ -236,14 +249,8 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
           return sqlMessageToReceivedMessage(row, receiptHandle);
         })
       );
-      await tx.commit();
       return results;
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   public async peekMessages(queueName: string, options: Required<PeekMessagesOptions>): Promise<Message[]> {

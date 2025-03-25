@@ -45,8 +45,8 @@ import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
-import { clearRecord } from "./utils.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
+import { clearRecord } from "./utils.js";
 
 const logger = createLogger("SqlStore");
 
@@ -162,8 +162,7 @@ export class SqlStore implements Store {
   }
 
   public async createUser(options: CreateUserOptions): Promise<void> {
-    const tx = await this.dialect.beginTransaction();
-    try {
+    await this.dialect.withTransaction(async (tx) => {
       const existingUser = await this.dialect.findUserByUsername(tx, options.username);
       if (existingUser) {
         throw new UsernameAlreadyExistsError(options.username);
@@ -183,14 +182,7 @@ export class SqlStore implements Store {
         accessKeyId: options.accessKeyId ?? null,
         secretAccessKey: options.secretAccessKey ?? null,
       });
-
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   public getUserByUsername(username: string): Promise<User | undefined> {
@@ -206,8 +198,7 @@ export class SqlStore implements Store {
   }
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
-    const tx = await this.dialect.beginTransaction();
-    try {
+    await this.dialect.withTransaction(async (tx) => {
       const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
       if (existingQueue && options?.upsert !== true) {
         const match = queueInfoEqualCreateQueueOptions(existingQueue, options ?? {});
@@ -236,13 +227,7 @@ export class SqlStore implements Store {
       } else {
         await this.dialect.createQueue(tx, queueName, options);
       }
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   public async sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult> {
@@ -258,16 +243,9 @@ export class SqlStore implements Store {
 
   public async publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void> {
     const topic = await this.getCachedTopicInfo(topicName);
-    const tx = await this.dialect.beginTransaction();
-    try {
+    await this.dialect.withTransaction(async (tx) => {
       await this.internalPublishMessage(tx, topic, body, options);
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   private async internalPublishMessage(
@@ -546,8 +524,7 @@ export class SqlStore implements Store {
   }
 
   private async pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo: QueueInfo): Promise<void> {
-    const tx = await this.dialect.beginTransaction();
-    try {
+    await this.dialect.withTransaction(async (tx) => {
       const expiredSqlMessages = await this.dialect.getExpiredMessages(tx, queueInfo);
 
       for (const sqlMessage of expiredSqlMessages) {
@@ -580,14 +557,7 @@ export class SqlStore implements Store {
         to.push(`dead letter queue "${queueInfo.deadLetterQueueName}"`);
       }
       logger.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
-
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   public async updateMessageVisibilityByReceiptHandle(
@@ -677,8 +647,7 @@ export class SqlStore implements Store {
   }
 
   public async createTopic(topicName: string, options?: CreateTopicOptions): Promise<void> {
-    const tx = await this.dialect.beginTransaction();
-    try {
+    await this.dialect.withTransaction(async (tx) => {
       const requiredOptions: CreateTopicOptions = { ...options };
       if (requiredOptions.tags === undefined) {
         requiredOptions.tags = {};
@@ -694,13 +663,7 @@ export class SqlStore implements Store {
       }
 
       await this.dialect.createTopic(tx, topicName, options);
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   public subscribe(topicName: string, protocol: TopicProtocol, target: string): Promise<string> {
@@ -713,20 +676,13 @@ export class SqlStore implements Store {
   }
 
   public async subscribeQueue(topicName: string, queueName: string): Promise<string> {
-    const tx = await this.dialect.beginTransaction();
-    try {
+    return await this.dialect.withTransaction(async (tx) => {
       const id = createId();
       const topic = await this.getTopicRequired(topicName, tx);
       const queue = await this.getQueueRequired(queueName, tx);
       await this.dialect.subscribe(tx, id, topic.name, queue.name);
-      await tx.commit();
       return id;
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      await tx.release();
-    }
+    });
   }
 
   private async getQueueRequired(queueName: string, tx?: Transaction): Promise<QueueInfo> {
