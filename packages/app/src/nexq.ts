@@ -1,6 +1,7 @@
 /* eslint no-console: "off" */
 
 import { createLogger, DEFAULT_LOGGER_CONFIG, Logger, RealTime, Store, Time } from "@nexq/core";
+import { KedaServer } from "@nexq/proto-keda";
 import { PrometheusServer } from "@nexq/proto-prometheus";
 import { RestServer } from "@nexq/proto-rest";
 import { MemoryStore } from "@nexq/store-memory";
@@ -34,6 +35,11 @@ export async function start(options: StartOptions): Promise<void> {
   if (config.prometheus) {
     const prometheus = new PrometheusServer(store, config.prometheus);
     await prometheus.start();
+  }
+
+  if (config.keda) {
+    const keda = new KedaServer(store, config.keda);
+    await keda.start();
   }
 }
 

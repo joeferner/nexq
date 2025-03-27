@@ -54,4 +54,5 @@ export {
   parseOptionalBytesSize,
   parseOptionalDurationIntoMs,
   verifyPassword,
+  getErrorMessage,
 } from "./utils.js";

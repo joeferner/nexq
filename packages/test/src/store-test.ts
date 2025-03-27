@@ -31,14 +31,17 @@ export interface CreateStoreOptions {
 export async function assertQueueSize(
   store: Store,
   queueName: string,
-  numberOfMessages: number,
+  numberOfMessagesVisible: number,
   numberOfMessagesDelayed: number,
   numberOfMessagesNotVisible: number
 ): Promise<void> {
   const queueInfo = await store.getQueueInfo(queueName);
-  expect(queueInfo.numberOfMessages, "numberOfMessages").toBe(numberOfMessages);
+  expect(queueInfo.numberOfMessagesVisible, "numberOfMessagesVisible").toBe(numberOfMessagesVisible);
   expect(queueInfo.numberOfMessagesDelayed, "numberOfMessagesDelayed").toBe(numberOfMessagesDelayed);
   expect(queueInfo.numberOfMessagesNotVisible, "numberOfMessagesNotVisible").toBe(numberOfMessagesNotVisible);
+  expect(queueInfo.numberOfMessages, "numberOfMessages").toBe(
+    numberOfMessagesVisible + numberOfMessagesDelayed + numberOfMessagesNotVisible
+  );
 }
 
 export async function assertQueueEmpty(store: Store, queueName: string): Promise<void> {
@@ -939,6 +942,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(info).toEqual({
         name: QUEUE1_NAME,
         numberOfMessages: 0,
+        numberOfMessagesVisible: 0,
         numberOfMessagesDelayed: 0,
         numberOfMessagesNotVisible: 0,
         created: time.getCurrentTime(),
@@ -956,6 +960,7 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
           tag2: "tag2Value",
         },
         deadLetterQueueName: DEAD_LETTER_QUEUE1_NAME,
+        deadLetterTopicName: undefined,
         maxReceiveCount: 6,
         paused: false,
       } satisfies QueueInfo);
@@ -1052,12 +1057,12 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(queueInfos.length).toBe(2);
 
       expect(queueInfos[0].name).toBe(QUEUE1_NAME);
-      expect(queueInfos[0].numberOfMessages).toBe(0);
+      expect(queueInfos[0].numberOfMessagesVisible).toBe(0);
       expect(queueInfos[0].numberOfMessagesNotVisible).toBe(0);
       expect(queueInfos[0].numberOfMessagesDelayed).toBe(0);
 
       expect(queueInfos[1].name).toBe(QUEUE2_NAME);
-      expect(queueInfos[1].numberOfMessages).toBe(3); // test3, test4, test5
+      expect(queueInfos[1].numberOfMessagesVisible).toBe(3); // test3, test4, test5
       expect(queueInfos[1].numberOfMessagesNotVisible).toBe(2); // test1, test2
       expect(queueInfos[1].numberOfMessagesDelayed).toBe(1); // test-delayed
     });

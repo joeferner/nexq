@@ -28,7 +28,7 @@ export const SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE = "moveExpiredMessagesToE
 export const SQL_DECREASE_PRIORITY_OF_EXPIRED_MESSAGES = "sqlDecreasePriorityOfExpiredMessages";
 export const SQL_FIND_QUEUES = "findQueues";
 export const SQL_FIND_QUEUE_BY_NAME = "findQueueByName";
-export const SQL_GET_QUEUE_NUMBER_OF_MESSAGES = "getQueueNumberOfMessages";
+export const SQL_GET_QUEUE_NUMBER_OF_VISIBLE_MESSAGES = "getQueueNumberOfVisibleMessages";
 export const SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES = "getQueueNumberOfDelayedMessage";
 export const SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES = "getNumberOfNotVisibleMessages";
 export const SQL_CREATE_QUEUE = "createQueue";
@@ -414,7 +414,7 @@ export abstract class Sql<TDatabase> {
     );
 
     this.addQuery(
-      SQL_GET_QUEUE_NUMBER_OF_MESSAGES,
+      SQL_GET_QUEUE_NUMBER_OF_VISIBLE_MESSAGES,
       `
         SELECT
           COUNT(*) as count

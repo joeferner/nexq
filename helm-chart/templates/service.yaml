@@ -19,5 +19,11 @@ spec:
       protocol: TCP
       name: prometheus
     {{- end }}
+    {{- if .Values.kedaService.enabled }}
+    - port: {{ .Values.kedaService.port }}
+      targetPort: http
+      protocol: TCP
+      name: keda
+    {{- end }}
   selector:
     {{- include "nexq.selectorLabels" . | nindent 4 }}

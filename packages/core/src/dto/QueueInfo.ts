@@ -5,6 +5,7 @@ import { DEFAULT_NAK_EXPIRE_BEHAVIOR } from "../Store.js";
 export interface QueueInfo {
   name: string;
   numberOfMessages: number;
+  numberOfMessagesVisible: number;
   numberOfMessagesDelayed: number;
   numberOfMessagesNotVisible: number;
   created: Date;

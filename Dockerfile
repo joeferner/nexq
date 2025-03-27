@@ -30,6 +30,13 @@ RUN \
     --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev
 
+WORKDIR /opt/nexq/proto-keda
+RUN \
+    --mount=type=bind,source=packages/proto-keda/package.json,target=package.json \
+    --mount=type=bind,source=packages/proto-keda/package-lock.json,target=package-lock.json \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
+
 WORKDIR /opt/nexq/proto-prometheus
 RUN \
     --mount=type=bind,source=packages/proto-prometheus/package.json,target=package.json \

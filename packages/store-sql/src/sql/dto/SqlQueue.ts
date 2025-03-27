@@ -22,7 +22,10 @@ export interface SqlQueue {
 
 export function sqlQueueToQueueInfo(
   row: SqlQueue
-): Omit<QueueInfo, "numberOfMessages" | "numberOfMessagesDelayed" | "numberOfMessagesNotVisible"> {
+): Omit<
+  QueueInfo,
+  "numberOfMessages" | "numberOfMessagesVisible" | "numberOfMessagesDelayed" | "numberOfMessagesNotVisible"
+> {
   return {
     name: row.name,
     created: parseDate(row.created_at),

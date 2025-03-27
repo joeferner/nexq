@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@nexq/core": "1.0.0",
+    "@nexq/proto-keda": "1.0.0",
     "@nexq/proto-prometheus": "1.0.0",
     "@nexq/proto-rest": "1.0.0",
     "@nexq/store-memory": "1.0.0",

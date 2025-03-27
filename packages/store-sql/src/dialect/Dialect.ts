@@ -66,8 +66,8 @@ import {
   SQL_FIND_USERS,
   SQL_GET_EXPIRED_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES,
-  SQL_GET_QUEUE_NUMBER_OF_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES,
+  SQL_GET_QUEUE_NUMBER_OF_VISIBLE_MESSAGES,
   SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER,
   SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE,
   SQL_MOVE_MESSAGES,
@@ -383,11 +383,18 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     // TODO optimize this to find all stats with 1 query
     const queueInfos = await Promise.all(
       rows.map(async (row) => {
+        const [numberOfMessagesVisible, numberOfMessagesDelayed, numberOfMessagesNotVisible] = await Promise.all([
+          this.getNumberOfVisibleMessages(undefined, row.name, now),
+          this.getNumberOfDelayedMessages(undefined, row.name, now),
+          this.getNumberOfNotVisibleMessages(undefined, row.name, now),
+        ]);
+
         return {
           ...sqlQueueToQueueInfo(row),
-          numberOfMessages: await this.getNumberOfMessages(undefined, row.name, now),
-          numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(undefined, row.name, now),
-          numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(undefined, row.name, now),
+          numberOfMessages: numberOfMessagesVisible + numberOfMessagesDelayed + numberOfMessagesNotVisible,
+          numberOfMessagesVisible,
+          numberOfMessagesDelayed,
+          numberOfMessagesNotVisible,
         } satisfies QueueInfo;
       })
     );
@@ -403,16 +410,24 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     if (rows.length > 1) {
       throw new Error(`expected 1 row but found ${rows.length} while getting queue info for "${queueName}"`);
     }
+
+    const [numberOfMessagesVisible, numberOfMessagesDelayed, numberOfMessagesNotVisible] = await Promise.all([
+      this.getNumberOfVisibleMessages(tx, queueName, now),
+      this.getNumberOfDelayedMessages(tx, queueName, now),
+      this.getNumberOfNotVisibleMessages(tx, queueName, now),
+    ]);
+
     return {
       ...sqlQueueToQueueInfo(rows[0]),
-      numberOfMessages: await this.getNumberOfMessages(tx, queueName, now),
-      numberOfMessagesDelayed: await this.getNumberOfDelayedMessages(tx, queueName, now),
-      numberOfMessagesNotVisible: await this.getNumberOfNotVisibleMessages(tx, queueName, now),
+      numberOfMessages: numberOfMessagesVisible + numberOfMessagesDelayed + numberOfMessagesNotVisible,
+      numberOfMessagesVisible,
+      numberOfMessagesDelayed,
+      numberOfMessagesNotVisible,
     };
   }
 
-  private async getNumberOfMessages(tx: Transaction | undefined, queueName: string, now: Date): Promise<number> {
-    const rows = await this.sql.all<SqlCount>(tx ?? this.database, SQL_GET_QUEUE_NUMBER_OF_MESSAGES, [
+  private async getNumberOfVisibleMessages(tx: Transaction | undefined, queueName: string, now: Date): Promise<number> {
+    const rows = await this.sql.all<SqlCount>(tx ?? this.database, SQL_GET_QUEUE_NUMBER_OF_VISIBLE_MESSAGES, [
       queueName,
       now,
       now,

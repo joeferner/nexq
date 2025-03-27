@@ -8,8 +8,10 @@
 
 ## Protocols
 
-- :scroll: [AWS (SQS/SNS)](https://aws.amazon.com/pm/sqs/)
 - :white_check_mark: [REST](packages/proto-rest/README.md)
+- :white_check_mark: [Prometheus](packages/proto-prometheus/README.md)
+- :white_check_mark: [Keda](packages/proto-keda/README.md)
+- :scroll: [AWS (SQS/SNS)](https://aws.amazon.com/pm/sqs/)
 - :scroll: AMQP [:link:](https://en.wikipedia.org/wiki/Advanced_Message_Queuing_Protocol)
 - :scroll: MQTT [:link:](https://en.wikipedia.org/wiki/MQTT)
 - :scroll: OpenWire [:link:](https://en.wikipedia.org/wiki/OpenWire_(binary_protocol))

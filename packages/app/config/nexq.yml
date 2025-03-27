@@ -60,3 +60,12 @@ prometheus:
   #   ca: ./certs/nexq-rootca.crt
   #   cert: ./certs/nexq.local.crt
   #   key: ./certs/nexq.local.key
+
+##
+## Keda metrics protocol configuration
+##
+keda:
+  bind: 0.0.0.0:7890
+  # ca: ./certs/nexq-rootca.crt
+  # cert: ./certs/nexq.local.crt
+  # key: ./certs/nexq.local.key

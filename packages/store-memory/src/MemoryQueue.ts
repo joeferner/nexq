@@ -248,12 +248,12 @@ export class MemoryQueue {
 
   public getInfo(): QueueInfo {
     const now = this.time.getCurrentTime();
-    let numberOfMessages = 0;
+    let numberOfMessagesVisible = 0;
     let numberOfMessagesDelayed = 0;
     let numberOfMessagesNotVisible = 0;
     for (const message of this.messages) {
       if (message.isAvailable(now)) {
-        numberOfMessages++;
+        numberOfMessagesVisible++;
       } else if (message.isDelayed(now)) {
         numberOfMessagesDelayed++;
       } else if (message.isNotVisible(now)) {
@@ -262,7 +262,8 @@ export class MemoryQueue {
     }
     return {
       name: this.name,
-      numberOfMessages,
+      numberOfMessages: numberOfMessagesVisible + numberOfMessagesDelayed + numberOfMessagesNotVisible,
+      numberOfMessagesVisible,
       numberOfMessagesDelayed,
       numberOfMessagesNotVisible,
       created: this.created,

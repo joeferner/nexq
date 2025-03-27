@@ -1,0 +1,41 @@
+{
+  "name": "@nexq/proto-keda",
+  "version": "1.0.0",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write",
+    "generate": "./scripts/generate.sh"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ REST Protocol",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.13.2",
+    "@grpc/proto-loader": "^0.7.13",
+    "@nexq/core": "1.0.0",
+    "ts-proto": "^2.7.0"
+  },
+  "devDependencies": {
+    "@nexq/store-memory": "^1.0.0",
+    "@nexq/test": "1.0.0",
+    "@types/node": "^22.13.9",
+    "eslint": "^9.22.0",
+    "grpc_tools_node_protoc_ts": "^5.3.3",
+    "grpc-tools": "^1.13.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.8"
+  }
+}

@@ -140,3 +140,8 @@ export class SizeParseError extends Error {
     Error.captureStackTrace(this, this.constructor);
   }
 }
+
+export function getErrorMessage(err: unknown): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return `${err as any}`;
+}
