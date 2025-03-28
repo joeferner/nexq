@@ -40,7 +40,7 @@ export class ExternalScalerImpl implements ExternalScalerServer {
     void run().catch((err) => handleError(err, callback));
   }
 
-  public streamIsActive(call: grpc.ServerWritableStream<ScaledObjectRef, IsActiveResponse>): void {
+  public streamIsActive(_call: grpc.ServerWritableStream<ScaledObjectRef, IsActiveResponse>): void {
     throw new Error();
   }
 

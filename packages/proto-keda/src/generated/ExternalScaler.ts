@@ -132,9 +132,9 @@ export const ScaledObjectRef: MessageFns<ScaledObjectRef> = {
       namespace: isSet(object.namespace) ? globalThis.String(object.namespace) : "",
       scalerMetadata: isObject(object.scalerMetadata)
         ? Object.entries(object.scalerMetadata).reduce<{ [key: string]: string }>((acc, [key, value]) => {
-          acc[key] = String(value);
-          return acc;
-        }, {})
+            acc[key] = String(value);
+            return acc;
+          }, {})
         : {},
     };
   },
@@ -173,7 +173,7 @@ export const ScaledObjectRef: MessageFns<ScaledObjectRef> = {
         }
         return acc;
       },
-      {},
+      {}
     );
     return message;
   },
@@ -245,12 +245,12 @@ export const ScaledObjectRef_ScalerMetadataEntry: MessageFns<ScaledObjectRef_Sca
   },
 
   create<I extends Exact<DeepPartial<ScaledObjectRef_ScalerMetadataEntry>, I>>(
-    base?: I,
+    base?: I
   ): ScaledObjectRef_ScalerMetadataEntry {
     return ScaledObjectRef_ScalerMetadataEntry.fromPartial(base ?? ({} as any));
   },
   fromPartial<I extends Exact<DeepPartial<ScaledObjectRef_ScalerMetadataEntry>, I>>(
-    object: I,
+    object: I
   ): ScaledObjectRef_ScalerMetadataEntry {
     const message = createBaseScaledObjectRef_ScalerMetadataEntry();
     message.key = object.key ?? "";
@@ -541,9 +541,10 @@ export const GetMetricsRequest: MessageFns<GetMetricsRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<GetMetricsRequest>, I>>(object: I): GetMetricsRequest {
     const message = createBaseGetMetricsRequest();
-    message.scaledObjectRef = (object.scaledObjectRef !== undefined && object.scaledObjectRef !== null)
-      ? ScaledObjectRef.fromPartial(object.scaledObjectRef)
-      : undefined;
+    message.scaledObjectRef =
+      object.scaledObjectRef !== undefined && object.scaledObjectRef !== null
+        ? ScaledObjectRef.fromPartial(object.scaledObjectRef)
+        : undefined;
     message.metricName = object.metricName ?? "";
     return message;
   },
@@ -753,60 +754,60 @@ export interface ExternalScalerServer extends UntypedServiceImplementation {
 export interface ExternalScalerClient extends Client {
   isActive(
     request: ScaledObjectRef,
-    callback: (error: ServiceError | null, response: IsActiveResponse) => void,
+    callback: (error: ServiceError | null, response: IsActiveResponse) => void
   ): ClientUnaryCall;
   isActive(
     request: ScaledObjectRef,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: IsActiveResponse) => void,
+    callback: (error: ServiceError | null, response: IsActiveResponse) => void
   ): ClientUnaryCall;
   isActive(
     request: ScaledObjectRef,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: IsActiveResponse) => void,
+    callback: (error: ServiceError | null, response: IsActiveResponse) => void
   ): ClientUnaryCall;
   streamIsActive(request: ScaledObjectRef, options?: Partial<CallOptions>): ClientReadableStream<IsActiveResponse>;
   streamIsActive(
     request: ScaledObjectRef,
     metadata?: Metadata,
-    options?: Partial<CallOptions>,
+    options?: Partial<CallOptions>
   ): ClientReadableStream<IsActiveResponse>;
   getMetricSpec(
     request: ScaledObjectRef,
-    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void
   ): ClientUnaryCall;
   getMetricSpec(
     request: ScaledObjectRef,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void
   ): ClientUnaryCall;
   getMetricSpec(
     request: ScaledObjectRef,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricSpecResponse) => void
   ): ClientUnaryCall;
   getMetrics(
     request: GetMetricsRequest,
-    callback: (error: ServiceError | null, response: GetMetricsResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricsResponse) => void
   ): ClientUnaryCall;
   getMetrics(
     request: GetMetricsRequest,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetMetricsResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricsResponse) => void
   ): ClientUnaryCall;
   getMetrics(
     request: GetMetricsRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetMetricsResponse) => void,
+    callback: (error: ServiceError | null, response: GetMetricsResponse) => void
   ): ClientUnaryCall;
 }
 
 export const ExternalScalerClient = makeGenericClientConstructor(
   ExternalScalerService,
-  "externalscaler.ExternalScaler",
+  "externalscaler.ExternalScaler"
 ) as unknown as {
   new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): ExternalScalerClient;
   service: typeof ExternalScalerService;
@@ -815,14 +816,19 @@ export const ExternalScalerClient = makeGenericClientConstructor(
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
-export type DeepPartial<T> = T extends Builtin ? T
-  : T extends globalThis.Array<infer U> ? globalThis.Array<DeepPartial<U>>
-  : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
-  : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
-  : Partial<T>;
+export type DeepPartial<T> = T extends Builtin
+  ? T
+  : T extends globalThis.Array<infer U>
+    ? globalThis.Array<DeepPartial<U>>
+    : T extends ReadonlyArray<infer U>
+      ? ReadonlyArray<DeepPartial<U>>
+      : T extends {}
+        ? { [K in keyof T]?: DeepPartial<T[K]> }
+        : Partial<T>;
 
 type KeysOfUnion<T> = T extends T ? keyof T : never;
-export type Exact<P, I extends P> = P extends Builtin ? P
+export type Exact<P, I extends P> = P extends Builtin
+  ? P
   : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
 
 function longToNumber(int64: { toString(): string }): number {

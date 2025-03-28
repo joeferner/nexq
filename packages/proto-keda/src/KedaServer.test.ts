@@ -3,16 +3,15 @@ import { MemoryStore } from "@nexq/store-memory";
 import { MockTime } from "@nexq/test";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { KedaConfig } from "./config.js";
+import { MESSAGES_METRIC_NAME } from "./ExternalScalerImpl.js";
 import {
   ExternalScalerClient,
   GetMetricSpecResponse,
-  GetMetricsRequest,
   GetMetricsResponse,
   IsActiveResponse,
   ScaledObjectRef,
 } from "./generated/ExternalScaler.js";
 import { KedaServer } from "./KedaServer.js";
-import { MESSAGES_METRIC_NAME } from "./ExternalScalerImpl.js";
 
 const QUEUE1_NAME = "queue1";
 const PORT = 9999;
