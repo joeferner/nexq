@@ -24,6 +24,7 @@ export async function start(options: StartOptions): Promise<void> {
   Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);
   const logger = createLogger("NexQ");
   logger.info(`using config "${fullConfigFilename}"`);
+  console.log('zzzzzzzzzz', config);
   const time = new RealTime();
   const store = await createStore(config, time);
 
