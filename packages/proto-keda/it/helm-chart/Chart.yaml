@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nexq-proto-keda-it
+description: A Helm chart for test NexQ Keda
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

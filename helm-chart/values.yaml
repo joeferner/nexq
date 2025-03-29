@@ -6,7 +6,7 @@ replicaCount: 1
 
 image:
   repository: nexq
-  pullPolicy: Never
+  pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
 
@@ -48,8 +48,7 @@ configYaml: |
       bind: 0.0.0.0:7889
 
   keda:
-    http:
-      bind: 0.0.0.0:7890
+    bind: 0.0.0.0:7890
 
 restService:
   enabled: true

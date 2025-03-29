@@ -2,63 +2,28 @@ FROM node:22-alpine
 
 ENV NODE_ENV=production
 
-WORKDIR /opt/nexq/core
+WORKDIR /opt/nexq
 RUN \
-    --mount=type=bind,source=packages/core/package.json,target=package.json \
-    --mount=type=bind,source=packages/core/package-lock.json,target=package-lock.json \
+    --mount=type=bind,source=packages/app/package.json,target=packages/app/package.json \
+    --mount=type=bind,source=packages/core/package.json,target=packages/core/package.json \
+    --mount=type=bind,source=packages/proto-keda/package.json,target=packages/proto-keda/package.json \
+    --mount=type=bind,source=packages/proto-prometheus/package.json,target=packages/proto-prometheus/package.json \
+    --mount=type=bind,source=packages/proto-rest/package.json,target=packages/proto-rest/package.json \
+    --mount=type=bind,source=packages/store-memory/package.json,target=packages/store-memory/package.json \
+    --mount=type=bind,source=packages/store-sql/package.json,target=packages/store-sql/package.json \
+    --mount=type=bind,source=package.json,target=package.json \
+    --mount=type=bind,source=package-lock.json,target=package-lock.json \
     --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+    npm install --workspaces --no-save
 
-WORKDIR /opt/nexq/store-memory
-RUN \
-    --mount=type=bind,source=packages/store-memory/package.json,target=package.json \
-    --mount=type=bind,source=packages/store-memory/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
+COPY packages/core /opt/nexq/packages/core
+COPY packages/store-memory /opt/nexq/packages/store-memory
+COPY packages/store-sql /opt/nexq/packages/store-sql
+COPY packages/proto-rest /opt/nexq/packages/proto-rest
+COPY packages/proto-keda /opt/nexq/packages/proto-keda
+COPY packages/proto-prometheus /opt/nexq/packages/proto-prometheus
+COPY packages/app /opt/nexq/packages/app
 
-WORKDIR /opt/nexq/store-sql
-RUN \
-    --mount=type=bind,source=packages/store-sql/package.json,target=package.json \
-    --mount=type=bind,source=packages/store-sql/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-WORKDIR /opt/nexq/proto-rest
-RUN \
-    --mount=type=bind,source=packages/proto-rest/package.json,target=package.json \
-    --mount=type=bind,source=packages/proto-rest/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-WORKDIR /opt/nexq/proto-keda
-RUN \
-    --mount=type=bind,source=packages/proto-keda/package.json,target=package.json \
-    --mount=type=bind,source=packages/proto-keda/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-WORKDIR /opt/nexq/proto-prometheus
-RUN \
-    --mount=type=bind,source=packages/proto-prometheus/package.json,target=package.json \
-    --mount=type=bind,source=packages/proto-prometheus/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-WORKDIR /opt/nexq/app
-RUN \
-    --mount=type=bind,source=packages/app/package.json,target=package.json \
-    --mount=type=bind,source=packages/app/package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-COPY packages/core /opt/nexq/core
-COPY packages/store-memory /opt/nexq/store-memory
-COPY packages/store-sql /opt/nexq/store-sql
-COPY packages/proto-rest /opt/nexq/proto-rest
-COPY packages/proto-prometheus /opt/nexq/proto-prometheus
-COPY packages/app /opt/nexq/app
-
-COPY packages/app/config/nexq.yml /opt/nexq/config/nexq.yml
 COPY docker-files/start.sh /opt/nexq/start
 
 WORKDIR /opt/nexq/

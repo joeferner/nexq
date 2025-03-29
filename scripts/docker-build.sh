@@ -7,4 +7,4 @@ cd "${SCRIPT_DIR}/.."
 
 source ./scripts/_utils.sh
 
-docker build --tag nexq .
+docker build --tag nexq:1.0.0 --tag nexq:latest .

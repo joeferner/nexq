@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config-map
+data:
+  test.sh: |
+    curl -XPOST http://nexq:7887/api/v1/queue -H 'Content-type: application/json' -d'{"name":"queue1"}'
+    curl -XPOST http://nexq:7887/api/v1/queue/queue1/message -H 'Content-type: application/json' -d'{"body":"test"}'
+    # curl -XPOST http://nexq:7887/api/v1/queue/queue1/purge
+    # curl http://nexq:7887/api/v1/queue/queue1 | jq
+    sleep 10000

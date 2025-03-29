@@ -1,5 +1,6 @@
 import * as grpc from "@grpc/grpc-js";
 import { getErrorMessage, QueueInfo, QueueNotFoundError, Store } from "@nexq/core";
+import { InvalidArgumentError } from "./error/InvalidArgumentError.js";
 import { ExternalScalerMetadata, parseExternalScalerMetadata } from "./ExternalScalerMetadata.js";
 import {
   ExternalScalerServer,
@@ -9,7 +10,6 @@ import {
   IsActiveResponse,
   ScaledObjectRef,
 } from "./generated/ExternalScaler.js";
-import { InvalidArgumentError } from "./error/InvalidArgumentError.js";
 
 export const MESSAGES_METRIC_NAME = "messages";
 

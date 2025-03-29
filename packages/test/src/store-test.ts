@@ -67,6 +67,19 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await store.shutdown();
     });
 
+    test("create queue multiple times", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send a message
+      await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+
+      // call create queue again
+      await store.createQueue(QUEUE1_NAME);
+      await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+    });
+
     test("peek messages", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);

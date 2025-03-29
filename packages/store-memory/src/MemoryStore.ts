@@ -117,8 +117,8 @@ export class MemoryStore implements Store {
       }
     }
 
-    if (options?.upsert && existingQueue) {
-      existingQueue.update(options);
+    if (existingQueue) {
+      existingQueue.update(options ?? {});
     } else {
       const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
       this.queues[queueName] = queue;

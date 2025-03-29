@@ -9,19 +9,19 @@ spec:
   ports:
     {{- if .Values.restService.enabled }}
     - port: {{ .Values.restService.port }}
-      targetPort: http
+      targetPort: {{ .Values.restService.port }}
       protocol: TCP
       name: rest
     {{- end }}
     {{- if .Values.prometheusService.enabled }}
     - port: {{ .Values.prometheusService.port }}
-      targetPort: http
+      targetPort: {{ .Values.prometheusService.port }}
       protocol: TCP
       name: prometheus
     {{- end }}
     {{- if .Values.kedaService.enabled }}
     - port: {{ .Values.kedaService.port }}
-      targetPort: http
+      targetPort: {{ .Values.kedaService.port }}
       protocol: TCP
       name: keda
     {{- end }}

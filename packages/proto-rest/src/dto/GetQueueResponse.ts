@@ -3,6 +3,7 @@ import { QueueInfo } from "@nexq/core";
 export interface GetQueueResponse {
   name: string;
   numberOfMessage: number;
+  numberOfMessagesVisible: number;
   numberOfMessagesNotVisible: number;
   numberOfMessagesDelayed: number;
   created: Date;
@@ -25,6 +26,7 @@ export function queueInfoToGetQueueResponse(q: QueueInfo): GetQueueResponse {
   return {
     name: q.name,
     numberOfMessage: q.numberOfMessages,
+    numberOfMessagesVisible: q.numberOfMessagesVisible,
     numberOfMessagesNotVisible: q.numberOfMessagesNotVisible,
     numberOfMessagesDelayed: q.numberOfMessagesDelayed,
     created: q.created,

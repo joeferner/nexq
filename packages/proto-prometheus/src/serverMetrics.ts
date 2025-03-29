@@ -33,6 +33,12 @@ export async function createMetrics(store: Store): Promise<string> {
       results.push(`nexq_queue_messages_delayed{queue="${queueInfo.name}"} ${queueInfo.numberOfMessagesDelayed}`);
     }
 
+    results.push(`# TYPE nexq_queue_messages_visible gauge`);
+    results.push(`# HELP nexq_queue_messages_visible Messages available to receive`);
+    for (const queueInfo of queueInfos) {
+      results.push(`nexq_queue_messages_visible{queue="${queueInfo.name}"} ${queueInfo.numberOfMessagesVisible}`);
+    }
+
     results.push(`# TYPE nexq_queue_messages_not_visible gauge`);
     results.push(`# HELP nexq_queue_messages_not_visible Messages currently being processed`);
     for (const queueInfo of queueInfos) {

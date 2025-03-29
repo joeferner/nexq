@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: test-container
+        image: nexq-proto-keta-it:latest
+        imagePullPolicy: IfNotPresent
+        command:
+          - bash
+          - /test.sh
+        volumeMounts:
+          - name: script-volume
+            mountPath: /test.sh
+            subPath: test.sh
+            readOnly: true
+      volumes:
+        - name: script-volume
+          configMap:
+            name: test-config-map
