@@ -23,6 +23,10 @@
 - :white_check_mark: [SQL](packages/store-sql/README.md)
 - :scroll: - Raft [:link:](https://en.wikipedia.org/wiki/Raft_(algorithm))
 
+## Interfaces
+
+- :white_check_mark: [TUI](packages/tui/README.md)
+
 # Links
 
 - [Development](docs/developtment.md)
