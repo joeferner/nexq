@@ -11,6 +11,7 @@
     "packages/proto-keda",
     "packages/proto-prometheus",
     "packages/app",
+    "packages/tui",
     "test/it"
   ]
 }

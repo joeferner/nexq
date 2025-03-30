@@ -191,7 +191,7 @@ export class ApiV1QueueController extends Controller {
   @Post("{queueName}/pause")
   @SuccessResponse("200", "Queue paused")
   @Response<void>(404, "queue not found")
-  public async pause(@Path() queueName: string): Promise<void> {
+  public async pauseQueue(@Path() queueName: string): Promise<void> {
     try {
       await this.store.pause(queueName);
     } catch (err) {
@@ -215,7 +215,7 @@ export class ApiV1QueueController extends Controller {
   @Post("{queueName}/resume")
   @SuccessResponse("200", "Queue resumed")
   @Response<void>(404, "queue not found")
-  public async resume(@Path() queueName: string): Promise<void> {
+  public async resumeQueue(@Path() queueName: string): Promise<void> {
     try {
       await this.store.resume(queueName);
     } catch (err) {

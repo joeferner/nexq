@@ -5,7 +5,7 @@ import {
   Store,
   Time,
   TopicProtocol,
-  verifyPassword
+  verifyPassword,
 } from "@nexq/core";
 import * as R from "radash";
 import { afterEach, assert, beforeEach, describe, expect, test } from "vitest";

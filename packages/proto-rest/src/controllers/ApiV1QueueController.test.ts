@@ -400,21 +400,21 @@ describe("ApiV1QueueController", async () => {
     test("good", async () => {
       await store.createQueue(QUEUE1_NAME);
 
-      await controller.pause(QUEUE1_NAME);
+      await controller.pauseQueue(QUEUE1_NAME);
       const queueAfterPause = await store.getQueueInfo(QUEUE1_NAME);
       expect(queueAfterPause.paused).toBeTruthy();
 
-      await controller.resume(QUEUE1_NAME);
+      await controller.resumeQueue(QUEUE1_NAME);
       const queueAfterResume = await store.getQueueInfo(QUEUE1_NAME);
       expect(queueAfterResume.paused).toBeFalsy();
     });
 
     test("queue not found (pause)", async () => {
-      await expectHttpError(async () => await controller.pause("bad-queue-name"), 404);
+      await expectHttpError(async () => await controller.pauseQueue("bad-queue-name"), 404);
     });
 
     test("queue not found (resume)", async () => {
-      await expectHttpError(async () => await controller.resume("bad-queue-name"), 404);
+      await expectHttpError(async () => await controller.resumeQueue("bad-queue-name"), 404);
     });
   });
 });

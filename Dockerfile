@@ -5,6 +5,7 @@ ENV NODE_ENV=production
 WORKDIR /opt/nexq
 RUN \
     --mount=type=bind,source=packages/app/package.json,target=packages/app/package.json \
+    --mount=type=bind,source=packages/tui/package.json,target=packages/tui/package.json \
     --mount=type=bind,source=packages/core/package.json,target=packages/core/package.json \
     --mount=type=bind,source=packages/proto-keda/package.json,target=packages/proto-keda/package.json \
     --mount=type=bind,source=packages/proto-prometheus/package.json,target=packages/proto-prometheus/package.json \
@@ -24,6 +25,7 @@ COPY packages/store-sql /opt/nexq/packages/store-sql
 COPY packages/proto-rest /opt/nexq/packages/proto-rest
 COPY packages/proto-keda /opt/nexq/packages/proto-keda
 COPY packages/proto-prometheus /opt/nexq/packages/proto-prometheus
+COPY packages/tui /opt/nexq/packages/tui
 COPY packages/app /opt/nexq/packages/app
 
 RUN find /opt/nexq/packages -type d -not -path "*/node_modules/*" -exec chmod 555 {} \; \

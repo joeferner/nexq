@@ -1,0 +1,44 @@
+{
+  "name": "@nexq/tui",
+  "version": "1.0.0",
+  "main": "build/main.js",
+  "types": "build/main.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "format": "prettier src --write",
+    "start": "node --enable-source-maps build/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "generate": "swagger-typescript-api generate --axios -o src/client -n NexqClientApi -p http://localhost:7887/swagger.json"
+  },
+  "author": "Joe Ferner <joe@fernsroth.com>",
+  "license": "MIT",
+  "description": "NexQ",
+  "repository": {
+    "url": "https://github.com/joeferner/nexq",
+    "type": "git"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "cmd-ts": "^0.13.0",
+    "find-root": "^1.1.0",
+    "ink": "^5.2.0",
+    "radash": "^12.1.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/find-root": "^1.1.4",
+    "@types/ink": "^0.5.2",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.12",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "swagger-typescript-api": "^13.0.28",
+    "typescript": "~5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.9"
+  }
+}
