@@ -680,7 +680,13 @@ export class SqlStore implements Store {
       const id = createId();
       const topic = await this.getTopicRequired(topicName, tx);
       const queue = await this.getQueueRequired(queueName, tx);
-      await this.dialect.subscribe(tx, id, topic.name, queue.name);
+      const result = await this.dialect.subscribe(tx, id, topic.name, queue.name);
+      if (result.changes === 0) {
+        const existingSubscription = await this.dialect.getSubscription(tx, topicName, queueName);
+        if (existingSubscription) {
+          return existingSubscription.id;
+        }
+      }
       return id;
     });
   }
@@ -714,5 +720,11 @@ export class SqlStore implements Store {
 
   public async deleteAllData(): Promise<void> {
     await this.dialect.deleteAllData();
+  }
+
+  public static maskPasswordInConnectionString(connectionString: string): string {
+    connectionString = connectionString.replace(/\/\/([^/:]+?):(.+?)@/, (_m, a) => `//${a}:***@`);
+    connectionString = connectionString.replace(/(password)=([^&;]+)/i, (_m, a, _password) => `${a}=***`);
+    return connectionString;
   }
 }

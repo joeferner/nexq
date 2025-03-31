@@ -39,6 +39,7 @@ export const SQL_FIND_TOPIC_INFOS = "findTopicInfos";
 export const SQL_FIND_TOPIC_INFO_BY_NAME = "findTopicInfoByName";
 export const SQL_CREATE_TOPIC = "createTopic";
 export const SQL_CREATE_SUBSCRIPTION = "createSubscription";
+export const SQL_GET_SUBSCRIPTION = "getSubscription";
 export const SQL_DELETE_TOPIC = "deleteTopic";
 export const SQL_NAK_MESSAGE = "nakMessage";
 export const SQL_UPDATE_QUEUE_EXPIRES_AT = "updateQueueExpiresAt";
@@ -575,6 +576,19 @@ export abstract class Sql<TDatabase> {
           topic_name,
           queue_name
         ) VALUES (?, ?, ?)
+        ON CONFLICT DO NOTHING
+      `
+    );
+
+    this.addQuery(
+      SQL_GET_SUBSCRIPTION,
+      `
+        SELECT
+          *
+        FROM ${this.tablePrefix}_subscription
+        WHERE
+          topic_name = ?
+          AND queue_name = ?
       `
     );
 

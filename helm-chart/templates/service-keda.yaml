@@ -1,0 +1,17 @@
+{{- if .Values.kedaService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexq.fullname" . }}-keda
+  labels:
+    {{- include "nexq.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.kedaService.type }}
+  ports:
+    - port: {{ .Values.kedaService.port }}
+      targetPort: {{ .Values.kedaService.port }}
+      protocol: TCP
+      name: keda
+  selector:
+    {{- include "nexq.selectorLabels" . | nindent 4 }}
+{{- end }}

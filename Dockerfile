@@ -24,7 +24,10 @@ COPY packages/proto-keda /opt/nexq/packages/proto-keda
 COPY packages/proto-prometheus /opt/nexq/packages/proto-prometheus
 COPY packages/app /opt/nexq/packages/app
 
-COPY docker-files/start.sh /opt/nexq/start
+RUN find /opt/nexq/packages -type d -exec chmod 555 {} \; \
+    && find /opt/nexq/packages -type f -exec chmod 444 {} \;
+
+COPY --chmod=555 docker-files/start.sh /opt/nexq/start
 
 WORKDIR /opt/nexq/
 USER node

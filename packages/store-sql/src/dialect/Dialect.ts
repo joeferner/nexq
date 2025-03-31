@@ -68,6 +68,7 @@ import {
   SQL_GET_QUEUE_NUMBER_OF_DELAYED_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_NOT_VISIBLE_MESSAGES,
   SQL_GET_QUEUE_NUMBER_OF_VISIBLE_MESSAGES,
+  SQL_GET_SUBSCRIPTION,
   SQL_MOVE_EXPIRED_MESSAGES_TO_DEAD_LETTER,
   SQL_MOVE_EXPIRED_MESSAGES_TO_END_OF_QUEUE,
   SQL_MOVE_MESSAGES,
@@ -84,6 +85,7 @@ import {
 import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
 import { Transaction } from "./Transaction.js";
+import { SqlSubscription } from "../sql/dto/SqlSubscription.js";
 
 export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   protected constructor(
@@ -629,8 +631,31 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
     ]);
   }
 
-  public async subscribe(tx: Transaction | undefined, id: string, topicName: string, queueName: string): Promise<void> {
-    await this.sql.run(tx ?? this.database, SQL_CREATE_SUBSCRIPTION, [id, topicName, queueName]);
+  public async subscribe(
+    tx: Transaction | undefined,
+    id: string,
+    topicName: string,
+    queueName: string
+  ): Promise<RunResult> {
+    return await this.sql.run(tx ?? this.database, SQL_CREATE_SUBSCRIPTION, [id, topicName, queueName]);
+  }
+
+  public async getSubscription(
+    tx: Transaction | undefined,
+    topicName: string,
+    queueName: string
+  ): Promise<SqlSubscription | undefined> {
+    const results = await this.sql.all<SqlSubscription>(tx ?? this.database, SQL_GET_SUBSCRIPTION, [
+      topicName,
+      queueName,
+    ]);
+    if (results.length === 0) {
+      return undefined;
+    }
+    if (results.length === 1) {
+      return results[0];
+    }
+    throw new Error(`expected 0 or 1 rows but found ${results.length}`);
   }
 
   public async deleteTopic(topicName: string): Promise<void> {

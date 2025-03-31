@@ -93,6 +93,9 @@ export class RestServer {
       // eslint-disable-next-line @typescript-eslint/no-misused-promises
       this.httpServer = http.createServer(this.app).listen(port, hostname);
       logger.info(`http server started http://${this.config.http.bind}`);
+      for (const auth of this.config.auth ?? []) {
+        logger.info(`  using auth: ${auth.type}`);
+      }
     }
     if (this.config.https) {
       const { port, hostname } = parseBind(this.config.https.bind, "0.0.0.0", 7888);

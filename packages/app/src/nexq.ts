@@ -13,6 +13,8 @@ import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
 import { applyConfigOverrides, envSubstitution } from "./utils.js";
 
+const logger = createLogger("App");
+
 export interface StartOptions {
   configFilename: string;
   configOverrides?: string[];
@@ -79,10 +81,14 @@ async function createStore(config: NexqConfig, time: Time): Promise<Store> {
   switch (config.store.type) {
     case "memory": {
       const storeConfig: MemoryStoreConfig = config.store;
+      logger.info("Using memory store");
       return await MemoryStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });
     }
     case "sql": {
       const storeConfig: SqlStoreConfig = config.store;
+      logger.info(
+        `Using sql store: ${storeConfig.type}: ${SqlStore.maskPasswordInConnectionString(storeConfig.connectionString)}`
+      );
       return await SqlStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });
     }
     default:

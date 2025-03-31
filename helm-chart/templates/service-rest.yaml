@@ -1,0 +1,17 @@
+{{- if .Values.restService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexq.fullname" . }}-rest
+  labels:
+    {{- include "nexq.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.restService.type }}
+  ports:
+    - port: {{ .Values.restService.port }}
+      targetPort: {{ .Values.restService.port }}
+      protocol: TCP
+      name: rest
+  selector:
+    {{- include "nexq.selectorLabels" . | nindent 4 }}
+{{- end }}

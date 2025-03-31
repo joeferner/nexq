@@ -1214,6 +1214,9 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(topics.length).toBe(1);
       expect(topics[0].name).toBe(TOPIC1_NAME);
 
+      // verify we can create a topic with same name and same options
+      await store.createTopic(TOPIC1_NAME);
+
       // verify we can't create a topic with same name and different options
       await expect(async () => store.createTopic(TOPIC1_NAME, { tags: { tag1: "tag1Value" } })).rejects.toThrowError(
         /topic.*already exists/
@@ -1237,6 +1240,9 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await store.createQueue(QUEUE1_NAME);
       await store.createTopic(TOPIC1_NAME);
       const subscriptionId = await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, QUEUE1_NAME);
+
+      // verify calling subscribe with same options is allowed
+      expect(await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, QUEUE1_NAME)).toBe(subscriptionId);
 
       // verify topic created
       const topics = await store.getTopicInfos();

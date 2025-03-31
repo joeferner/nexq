@@ -1,7 +1,6 @@
 import {
   createId,
   CreateTopicOptions,
-  QueueAlreadySubscribedToTopicError,
   SendMessageOptions,
   TopicInfo,
   TopicInfoQueueSubscription,
@@ -39,8 +38,9 @@ export class MemoryTopic {
   }
 
   public subscribeQueue(queueName: string): string {
-    if (this.queueSubscriptions.some((s) => s.queueName === queueName)) {
-      throw new QueueAlreadySubscribedToTopicError(this.name, queueName);
+    const existing = this.queueSubscriptions.find((s) => s.queueName === queueName);
+    if (existing) {
+      return existing.id;
     }
     const id = createId();
     this.queueSubscriptions.push({ id, queueName });

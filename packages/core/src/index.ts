@@ -4,7 +4,6 @@ export { InvalidUpdateError } from "./error/InvalidUpdateError.js";
 export { MessageExceededMaxMessageSizeError } from "./error/MessageExceededMaxMessageSizeError.js";
 export { MessageNotFoundError } from "./error/MessageNotFoundError.js";
 export { QueueAlreadyExistsError } from "./error/QueueAlreadyExistsError.js";
-export { QueueAlreadySubscribedToTopicError } from "./error/QueueAlreadySubscribedToTopicError.js";
 export { QueueNotFoundError } from "./error/QueueNotFoundError.js";
 export { ReceiptHandleIsInvalidError } from "./error/ReceiptHandleIsInvalidError.js";
 export { TopicAlreadyExistsError } from "./error/TopicAlreadyExistsError.js";
