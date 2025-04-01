@@ -74,6 +74,7 @@ export interface CreateQueueRequest {
    * max number of time to receive a message before moving it to the dlq
    *
    * @example "10"
+   * @isInt
    */
   maxReceiveCount?: number;
 

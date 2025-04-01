@@ -3,6 +3,7 @@ export interface UpdateMessageRequest {
    * New priority for the message
    *
    * @example 5
+   * @isInt
    */
   priority?: number;
 

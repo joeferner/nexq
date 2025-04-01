@@ -5,6 +5,9 @@ export interface PeekMessagesResponse {
 export interface PeekMessagesResponseMessage {
   id: string;
   body: string;
+  /**
+   * @isInt
+   */
   priority: number;
   attributes: Record<string, string>;
 

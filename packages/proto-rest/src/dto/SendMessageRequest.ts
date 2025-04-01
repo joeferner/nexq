@@ -17,6 +17,7 @@ export interface SendMessageRequest {
    * priority to give the message, higher priority messages will be delivered first
    *
    * @example "5"
+   * @isInt
    */
   priority?: number;
 

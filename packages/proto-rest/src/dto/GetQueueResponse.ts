@@ -2,22 +2,55 @@ import { QueueInfo } from "@nexq/core";
 
 export interface GetQueueResponse {
   name: string;
-  numberOfMessage: number;
+  /**
+   * @isInt
+   */
+  numberOfMessages: number;
+  /**
+   * @isInt
+   */
   numberOfMessagesVisible: number;
+  /**
+   * @isInt
+   */
   numberOfMessagesNotVisible: number;
+  /**
+   * @isInt
+   */
   numberOfMessagesDelayed: number;
   created: Date;
   lastModified: Date;
+  /**
+   * @isInt
+   */
   delayMs?: number;
+  /**
+   * @isInt
+   */
   expiresMs?: number;
   expiresAt?: Date;
+  /**
+   * @isInt
+   */
   maxMessageSize?: number;
+  /**
+   * @isInt
+   */
   messageRetentionPeriodMs?: number;
+  /**
+   * @isInt
+   */
   receiveMessageWaitTimeMs?: number;
+  /**
+   * @isInt
+   */
   visibilityTimeoutMs?: number;
   tags: Record<string, string>;
   deadLetterQueueName?: string;
   deadLetterTopicName?: string;
+  /**
+   * @isInt
+   */
   maxReceiveCount?: number;
   paused: boolean;
 }
@@ -25,7 +58,7 @@ export interface GetQueueResponse {
 export function queueInfoToGetQueueResponse(q: QueueInfo): GetQueueResponse {
   return {
     name: q.name,
-    numberOfMessage: q.numberOfMessages,
+    numberOfMessages: q.numberOfMessages,
     numberOfMessagesVisible: q.numberOfMessagesVisible,
     numberOfMessagesNotVisible: q.numberOfMessagesNotVisible,
     numberOfMessagesDelayed: q.numberOfMessagesDelayed,

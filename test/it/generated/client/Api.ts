@@ -165,6 +165,8 @@ export interface GetQueueResponse {
   /** @format double */
   numberOfMessage: number;
   /** @format double */
+  numberOfMessagesVisible: number;
+  /** @format double */
   numberOfMessagesNotVisible: number;
   /** @format double */
   numberOfMessagesDelayed: number;
@@ -192,6 +194,7 @@ export interface GetQueueResponse {
   deadLetterTopicName?: string;
   /** @format double */
   maxReceiveCount?: number;
+  paused: boolean;
 }
 
 export interface GetQueuesResponse {
@@ -595,6 +598,34 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         body: data,
         type: ContentType.Json,
         format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description pauses the queue, all new receive message calls will return 0 messages until the queue is resumed
+     *
+     * @tags queue
+     * @name Pause
+     * @request POST:/api/v1/queue/{queueName}/pause
+     */
+    pause: (queueName: string, params: RequestParams = {}) =>
+      this.request<void, void>({
+        path: `/api/v1/queue/${queueName}/pause`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description resumes the queue
+     *
+     * @tags queue
+     * @name Resume
+     * @request POST:/api/v1/queue/{queueName}/resume
+     */
+    resume: (queueName: string, params: RequestParams = {}) =>
+      this.request<void, void>({
+        path: `/api/v1/queue/${queueName}/resume`,
+        method: "POST",
         ...params,
       }),
 

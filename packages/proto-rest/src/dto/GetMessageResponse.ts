@@ -1,6 +1,9 @@
 export interface GetMessageResponse {
   id: string;
   body: string;
+  /**
+   * @isInt
+   */
   priority: number;
   attributes: Record<string, string>;
 
@@ -9,9 +12,15 @@ export interface GetMessageResponse {
    */
   sentTime: string;
 
+  /**
+   * @isInt
+   */
   positionInQueue: number;
   delayUntil: string | undefined;
   isAvailable: boolean;
+  /**
+   * @isInt
+   */
   receiveCount: number;
   expiresAt: string | undefined;
   receiptHandle: string | undefined;

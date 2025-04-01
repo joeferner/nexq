@@ -444,6 +444,7 @@ export class ApiV1QueueController extends Controller {
    * @param maxNumberOfMessages maximum number of message to peek
    * @param includeDelayed true, to include delayed messages
    * @param includeNotVisible true, to include not visible (received messages)
+   * @isInt maxNumberOfMessages
    * @example queueName "queue1"
    */
   @Get("{queueName}/peek")

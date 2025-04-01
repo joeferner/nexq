@@ -6,6 +6,9 @@ export interface ReceiveMessagesResponseMessage {
   id: string;
   receiptHandle: string;
   body: string;
+  /**
+   * @isInt
+   */
   priority: number;
   attributes: Record<string, string>;
 

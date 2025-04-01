@@ -1,4 +1,10 @@
-export type DecreasePriorityByNakExpireBehavior = { decreasePriorityBy: number };
+export type DecreasePriorityByNakExpireBehavior = { 
+  /**
+   * Amount to decrease the priority by
+   * @isInt
+   */
+  decreasePriorityBy: number
+};
 export type NakExpireBehaviorOptions = "retry" | "moveToEnd" | DecreasePriorityByNakExpireBehavior;
 
 export function isDecreasePriorityByNakExpireBehavior(option: unknown): option is DecreasePriorityByNakExpireBehavior {
