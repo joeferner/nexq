@@ -14,7 +14,9 @@ RUN \
     --mount=type=bind,source=package.json,target=package.json \
     --mount=type=bind,source=package-lock.json,target=package-lock.json \
     --mount=type=cache,target=/root/.npm \
-    npm install --workspaces --no-save
+    npm install --workspaces --no-save \
+    && find /opt/nexq/packages -type d -exec chmod 555 {} \; \
+    && find /opt/nexq/packages -type f -exec chmod 444 {} \;
 
 COPY packages/core /opt/nexq/packages/core
 COPY packages/store-memory /opt/nexq/packages/store-memory
@@ -24,8 +26,8 @@ COPY packages/proto-keda /opt/nexq/packages/proto-keda
 COPY packages/proto-prometheus /opt/nexq/packages/proto-prometheus
 COPY packages/app /opt/nexq/packages/app
 
-RUN find /opt/nexq/packages -type d -exec chmod 555 {} \; \
-    && find /opt/nexq/packages -type f -exec chmod 444 {} \;
+RUN find /opt/nexq/packages -type d -not -path "*/node_modules/*" -exec chmod 555 {} \; \
+    && find /opt/nexq/packages -type f -not -path "*/node_modules/*" -exec chmod 444 {} \;
 
 COPY --chmod=555 docker-files/start.sh /opt/nexq/start
 
