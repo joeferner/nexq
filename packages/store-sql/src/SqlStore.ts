@@ -120,7 +120,13 @@ export class SqlStore implements Store {
     this.time = options.time;
     this.dialect = options._dialect;
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
-    this.pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
+
+    let pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
+    if (pollIntervalMs < 1000) {
+      logger.warn(`minimum poll interval is 1s but found ${pollIntervalMs}ms`);
+      pollIntervalMs = 1000;
+    }
+    this.pollIntervalMs = pollIntervalMs;
   }
 
   public static async create(options: SqlStoreCreateOptions): Promise<SqlStore> {
