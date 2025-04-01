@@ -1,9 +1,9 @@
-export type DecreasePriorityByNakExpireBehavior = { 
+export type DecreasePriorityByNakExpireBehavior = {
   /**
    * Amount to decrease the priority by
    * @isInt
    */
-  decreasePriorityBy: number
+  decreasePriorityBy: number;
 };
 export type NakExpireBehaviorOptions = "retry" | "moveToEnd" | DecreasePriorityByNakExpireBehavior;
 

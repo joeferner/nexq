@@ -58,7 +58,7 @@ export interface SendMessageRequest {
   delay?: string;
   /**
    * priority to give the message, higher priority messages will be delivered first
-   * @format double
+   * @format int32
    * @example "5"
    */
   priority?: number;
@@ -80,7 +80,10 @@ export interface SubscribeQueueRequest {
 }
 
 export interface DecreasePriorityByNakExpireBehavior {
-  /** @format double */
+  /**
+   * Amount to decrease the priority by
+   * @format int32
+   */
   decreasePriorityBy: number;
 }
 
@@ -141,7 +144,7 @@ export interface CreateQueueRequest {
   deadLetterTopicName?: string;
   /**
    * max number of time to receive a message before moving it to the dlq
-   * @format double
+   * @format int32
    * @example "10"
    */
   maxReceiveCount?: number;
@@ -162,37 +165,37 @@ export interface CreateQueueRequest {
 
 export interface GetQueueResponse {
   name: string;
-  /** @format double */
-  numberOfMessage: number;
-  /** @format double */
+  /** @format int32 */
+  numberOfMessages: number;
+  /** @format int32 */
   numberOfMessagesVisible: number;
-  /** @format double */
+  /** @format int32 */
   numberOfMessagesNotVisible: number;
-  /** @format double */
+  /** @format int32 */
   numberOfMessagesDelayed: number;
   /** @format date-time */
   created: string;
   /** @format date-time */
   lastModified: string;
-  /** @format double */
+  /** @format int32 */
   delayMs?: number;
-  /** @format double */
+  /** @format int32 */
   expiresMs?: number;
   /** @format date-time */
   expiresAt?: string;
-  /** @format double */
+  /** @format int32 */
   maxMessageSize?: number;
-  /** @format double */
+  /** @format int32 */
   messageRetentionPeriodMs?: number;
-  /** @format double */
+  /** @format int32 */
   receiveMessageWaitTimeMs?: number;
-  /** @format double */
+  /** @format int32 */
   visibilityTimeoutMs?: number;
   /** Construct a type with a set of properties K of type T */
   tags: RecordStringString;
   deadLetterQueueName?: string;
   deadLetterTopicName?: string;
-  /** @format double */
+  /** @format int32 */
   maxReceiveCount?: number;
   paused: boolean;
 }
@@ -206,14 +209,14 @@ export interface SendMessageResponse {
 }
 
 export interface MoveMessagesResponse {
-  /** @format double */
+  /** @format int32 */
   movedMessageCount: number;
 }
 
 export interface UpdateMessageRequest {
   /**
    * New priority for the message
-   * @format double
+   * @format int32
    * @example 5
    */
   priority?: number;
@@ -235,7 +238,7 @@ export interface ReceiveMessagesResponseMessage {
   id: string;
   receiptHandle: string;
   body: string;
-  /** @format double */
+  /** @format int32 */
   priority: number;
   /** Construct a type with a set of properties K of type T */
   attributes: RecordStringString;
@@ -248,7 +251,7 @@ export interface ReceiveMessagesResponse {
 }
 
 export interface ReceiveMessagesRequest {
-  /** @format double */
+  /** @format int32 */
   maxNumberOfMessages?: number;
   visibilityTimeout?: string;
   waitTime?: string;
@@ -257,7 +260,7 @@ export interface ReceiveMessagesRequest {
 export interface PeekMessagesResponseMessage {
   id: string;
   body: string;
-  /** @format double */
+  /** @format int32 */
   priority: number;
   /** Construct a type with a set of properties K of type T */
   attributes: RecordStringString;
@@ -272,17 +275,17 @@ export interface PeekMessagesResponse {
 export interface GetMessageResponse {
   id: string;
   body: string;
-  /** @format double */
+  /** @format int32 */
   priority: number;
   /** Construct a type with a set of properties K of type T */
   attributes: RecordStringString;
   /** Time the message was originally sent */
   sentTime: string;
-  /** @format double */
+  /** @format int32 */
   positionInQueue: number;
   delayUntil?: string;
   isAvailable: boolean;
-  /** @format double */
+  /** @format int32 */
   receiveCount: number;
   expiresAt?: string;
   receiptHandle?: string;
@@ -660,7 +663,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      *
      * @tags queue
      * @name DeleteMessage
-     * @request POST:/api/v1/queue/{queueName}/message/{messageId}
+     * @request DELETE:/api/v1/queue/{queueName}/message/{messageId}
      */
     deleteMessage: (
       queueName: string,
@@ -673,7 +676,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
     ) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/message/${messageId}`,
-        method: "POST",
+        method: "DELETE",
         query: query,
         ...params,
       }),
@@ -793,7 +796,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
       query?: {
         /**
          * maximum number of message to peek
-         * @format double
+         * @format int32
          */
         maxNumberOfMessages?: number;
         /** true, to include not visible (received messages) */
