@@ -8,6 +8,8 @@ import {
   DeleteDeadLetterQueueError,
   DeleteDeadLetterTopicError,
   GetMessage,
+  InvalidQueueNameError,
+  InvalidTopicNameError,
   Message,
   MoveMessagesResult,
   parseDurationIntoMs,
@@ -101,6 +103,11 @@ export class MemoryStore implements Store {
   }
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
+    queueName = queueName.trim();
+    if (queueName.length === 0) {
+      throw new InvalidQueueNameError(queueName);
+    }
+
     const existingQueue = this.queues[queueName];
     if (options?.upsert !== true) {
       if (existingQueue) {
@@ -356,6 +363,11 @@ export class MemoryStore implements Store {
   }
 
   public async createTopic(topicName: string, options?: CreateTopicOptions): Promise<void> {
+    topicName = topicName.trim();
+    if (topicName.length === 0) {
+      throw new InvalidTopicNameError(topicName);
+    }
+
     const requiredOptions: CreateTopicOptions = { ...options };
     if (requiredOptions.tags === undefined) {
       requiredOptions.tags = {};

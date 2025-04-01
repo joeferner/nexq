@@ -80,6 +80,10 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
     });
 
+    test("create queue with bad name", async () => {
+      await expect(async () => await store.createQueue("")).rejects.toThrowError('queue name "" is invalid');
+    });
+
     test("peek messages", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);
@@ -1223,14 +1227,18 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       );
     });
 
-    test("duplicate queues", async () => {
+    test("create topic with bad name", async () => {
+      await expect(async () => await store.createTopic("")).rejects.toThrowError('topic name "" is invalid');
+    });
+
+    test("duplicate topics", async () => {
       await store.createTopic(TOPIC1_NAME, { tags: { a: "b" } });
       await expect(async () => await store.createTopic(TOPIC1_NAME, { tags: { a: "c" } })).rejects.toThrowError(
         /topic "topic1" already exists: tags are different/
       );
     });
 
-    test("duplicate queues (without tags)", async () => {
+    test("duplicate topics (without tags)", async () => {
       await store.createTopic(TOPIC1_NAME, {});
       await store.createTopic(TOPIC1_NAME, {});
     });

@@ -10,6 +10,8 @@ import {
   DeleteDeadLetterTopicError,
   GetMessage,
   hashPassword,
+  InvalidQueueNameError,
+  InvalidTopicNameError,
   InvalidUpdateError,
   isDecreasePriorityByNakExpireBehavior,
   Message,
@@ -204,6 +206,11 @@ export class SqlStore implements Store {
   }
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
+    queueName = queueName.trim();
+    if (queueName.length === 0) {
+      throw new InvalidQueueNameError(queueName);
+    }
+
     await this.dialect.withTransaction(async (tx) => {
       const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
       if (existingQueue && options?.upsert !== true) {
@@ -653,6 +660,11 @@ export class SqlStore implements Store {
   }
 
   public async createTopic(topicName: string, options?: CreateTopicOptions): Promise<void> {
+    topicName = topicName.trim();
+    if (topicName.length === 0) {
+      throw new InvalidTopicNameError(topicName);
+    }
+
     await this.dialect.withTransaction(async (tx) => {
       const requiredOptions: CreateTopicOptions = { ...options };
       if (requiredOptions.tags === undefined) {

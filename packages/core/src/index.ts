@@ -1,5 +1,7 @@
 export { DeleteDeadLetterQueueError } from "./error/DeleteDeadLetterQueueError.js";
 export { DeleteDeadLetterTopicError } from "./error/DeleteDeadLetterTopicError.js";
+export { InvalidQueueNameError } from "./error/InvalidQueueNameError.js";
+export { InvalidTopicNameError } from "./error/InvalidTopicNameError.js";
 export { InvalidUpdateError } from "./error/InvalidUpdateError.js";
 export { MessageExceededMaxMessageSizeError } from "./error/MessageExceededMaxMessageSizeError.js";
 export { MessageNotFoundError } from "./error/MessageNotFoundError.js";
@@ -13,11 +15,11 @@ export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.j
 
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
 export { createLogger, DEFAULT_LOGGER_CONFIG, Logger, LoggerConfig, LogLevel } from "./logger.js";
-export { GetMessage, Message, ReceivedMessage, isAvailable, isDelayed } from "./Message.js";
+export { GetMessage, isAvailable, isDelayed, Message, ReceivedMessage } from "./Message.js";
 export {
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
-  DEFAULT_PASSWORD_HASH_ROUNDS,
   DEFAULT_NAK_EXPIRE_BEHAVIOR,
+  DEFAULT_PASSWORD_HASH_ROUNDS,
   DEFAULT_VISIBILITY_TIMEOUT_MS,
   Store,
 } from "./Store.js";
@@ -47,11 +49,11 @@ export { User } from "./User.js";
 export {
   createId,
   DurationParseError,
+  getErrorMessage,
   hashPassword,
   parseBind,
   parseDurationIntoMs,
   parseOptionalBytesSize,
   parseOptionalDurationIntoMs,
   verifyPassword,
-  getErrorMessage,
 } from "./utils.js";
