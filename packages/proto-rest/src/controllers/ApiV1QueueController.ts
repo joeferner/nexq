@@ -269,7 +269,7 @@ export class ApiV1QueueController extends Controller {
    * @example queueName "queue1"
    * @example messageId "1effd43f-efc0-64a0-abb1-a262ad6a08d6"
    */
-  @Post("{queueName}/message/{messageId}")
+  @Delete("{queueName}/message/{messageId}")
   @SuccessResponse("200", "Message deleted")
   @Response<void>(404, "queue, message id, or receipt handle not found")
   public async deleteMessage(
