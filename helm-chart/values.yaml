@@ -91,11 +91,11 @@ resources:
 
 livenessProbe:
   httpGet:
-    path: /
+    path: /api/v1/info
     port: http
 readinessProbe:
   httpGet:
-    path: /
+    path: /api/v1/info
     port: http
 
 autoscaling:

@@ -1,1 +1,1 @@
-see [NexQ](README.md)
+see [NexQ](https://github.com/joeferner/nexq)

@@ -1,4 +1,4 @@
-see [NexQ](README.md)
+see [NexQ](https://github.com/joeferner/nexq)
 
 ```yaml
 apiVersion: keda.sh/v1alpha1

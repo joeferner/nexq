@@ -1,8 +1,8 @@
 {
   "name": "@nexq/app",
   "version": "1.0.0",
-  "main": "build/index.js",
-  "types": "build/index.d.ts",
+  "main": "build/main.js",
+  "types": "build/main.d.ts",
   "type": "module",
   "scripts": {
     "build": "tsc",

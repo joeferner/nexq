@@ -1,4 +1,4 @@
-see [NexQ](README.md)
+see [NexQ](https://github.com/joeferner/nexq)
 
 # Swagger UI / OpenAPI UI
 

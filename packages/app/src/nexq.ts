@@ -18,9 +18,16 @@ const logger = createLogger("App");
 export interface StartOptions {
   configFilename: string;
   configOverrides?: string[];
+  version: string;
 }
 
 export async function start(options: StartOptions): Promise<void> {
+  console.log(`     __            ____
+  /\\ \\ \\_____  __ /___ \\
+ /  \\/ / _ \\ \\/ ///  / /
+/ /\\  /  __/>  </ \\_/ /
+\\_\\ \\/ \\___/_/\\_\\___,_\\  v${options.version}
+`);
   const fullConfigFilename = path.resolve(options.configFilename);
   const config = await loadConfig(fullConfigFilename, options.configOverrides);
   Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);

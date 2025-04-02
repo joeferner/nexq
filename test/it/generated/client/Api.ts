@@ -266,6 +266,7 @@ export interface PeekMessagesResponseMessage {
   attributes: RecordStringString;
   /** Time the message was originally sent */
   sentTime: string;
+  lastNakReason?: string;
 }
 
 export interface PeekMessagesResponse {
@@ -291,6 +292,10 @@ export interface GetMessageResponse {
   receiptHandle?: string;
   firstReceivedAt?: string;
   lastNakReason?: string;
+}
+
+export interface GetInfoResponse {
+  version: string;
 }
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, HeadersDefaults, ResponseType } from "axios";
@@ -810,6 +815,21 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         path: `/api/v1/queue/${queueName}/peek`,
         method: "GET",
         query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description gets info about the running NexQ
+     *
+     * @tags info
+     * @name GetInfo
+     * @request GET:/api/v1/info
+     */
+    getInfo: (params: RequestParams = {}) =>
+      this.request<GetInfoResponse, any>({
+        path: `/api/v1/info`,
+        method: "GET",
         format: "json",
         ...params,
       }),

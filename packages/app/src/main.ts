@@ -39,6 +39,7 @@ async function parseCommandLineAndStart(): Promise<void> {
       await start({
         ...args,
         configFilename: args.config,
+        version: packageJson.version,
       });
     },
   });
