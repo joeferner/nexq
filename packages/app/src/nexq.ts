@@ -28,6 +28,7 @@ export async function start(options: StartOptions): Promise<void> {
   logger.info(`using config "${fullConfigFilename}"`);
   const time = new RealTime();
   const store = await createStore(config, time);
+  void store.poll();
 
   if (config.rest) {
     const rest = new RestServer(store, config.rest);
