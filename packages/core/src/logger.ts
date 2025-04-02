@@ -10,22 +10,36 @@ export enum LogLevel {
   Off = 40,
 }
 
+export type LogLevelString = "debug" | "info" | "warn" | "error" | "off";
+
 export interface LoggerConfig {
-  defaultLevel?: LogLevel;
-  level?: Record<string, LogLevel>;
+  defaultLevel?: LogLevelString;
+  level?: Record<string, LogLevelString>;
 }
 
 export const DEFAULT_LOGGER_CONFIG: Required<LoggerConfig> = {
-  defaultLevel: LogLevel.Info,
+  defaultLevel: "info",
   level: {},
 };
 
 export class Logger {
   private static config: LoggerConfig = DEFAULT_LOGGER_CONFIG;
-  private readonly level: LogLevel;
+  private _level?: LogLevel;
+  private _config?: LoggerConfig;
 
-  public constructor(public readonly name: string) {
-    this.level = Logger.config.level?.[name] ?? Logger.config.defaultLevel ?? DEFAULT_LOGGER_CONFIG.defaultLevel;
+  public constructor(public readonly name: string) {}
+
+  private get level(): LogLevel {
+    if (this._config !== Logger.config) {
+      this._level = undefined;
+      this._config = Logger.config;
+    }
+    if (!this._level) {
+      this._level = stringToLogLevel(
+        Logger.config.level?.[this.name] ?? Logger.config.defaultLevel ?? DEFAULT_LOGGER_CONFIG.defaultLevel
+      );
+    }
+    return this._level;
   }
 
   public static configure(config: LoggerConfig): void {
@@ -85,4 +99,21 @@ export class Logger {
 
 export function createLogger(name: string): Logger {
   return new Logger(name);
+}
+
+export function stringToLogLevel(logLevel: LogLevelString): LogLevel {
+  switch (logLevel) {
+    case "debug":
+      return LogLevel.Debug;
+    case "info":
+      return LogLevel.Info;
+    case "warn":
+      return LogLevel.Warn;
+    case "error":
+      return LogLevel.Error;
+    case "off":
+      return LogLevel.Off;
+    default:
+      throw new Error(`unhandled log level "${logLevel}"`);
+  }
 }

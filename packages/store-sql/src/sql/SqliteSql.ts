@@ -7,7 +7,7 @@ import { SqlMigration } from "./dto/SqlMigration.js";
 import { isTransaction, Transaction } from "../dialect/Transaction.js";
 import { isSqliteTransaction } from "../dialect/SqliteTransaction.js";
 
-const logger = createLogger("SqliteSql");
+const logger = createLogger("SqlStore:SqliteSql");
 const sqlLogger = createLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;

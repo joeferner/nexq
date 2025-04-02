@@ -1,5 +1,10 @@
 # configuration file accepts environment variable substitution using: "${env:USER}"
 
+logger:
+  defaultLevel: debug
+  level:
+    SQL: info
+
 # This user is created on a store that has not yet been initialized
 initialUsers:
   - username: admin

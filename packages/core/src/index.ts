@@ -14,7 +14,15 @@ export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlread
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
-export { createLogger, DEFAULT_LOGGER_CONFIG, Logger, LoggerConfig, LogLevel } from "./logger.js";
+export {
+  createLogger,
+  DEFAULT_LOGGER_CONFIG,
+  Logger,
+  LoggerConfig,
+  LogLevelString,
+  LogLevel,
+  stringToLogLevel,
+} from "./logger.js";
 export { GetMessage, isAvailable, isDelayed, Message, ReceivedMessage } from "./Message.js";
 export {
   DEFAULT_MAX_NUMBER_OF_MESSAGES,

@@ -15,7 +15,7 @@ import { isHttpError } from "./utils.js";
 import createHttpError from "http-errors";
 import { serverMetrics } from "./serverMetrics.js";
 
-const logger = createLogger("PrometheusServer");
+const logger = createLogger("Prometheus:Server");
 
 export class PrometheusServer {
   private readonly app: Express;

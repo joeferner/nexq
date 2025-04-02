@@ -8,7 +8,7 @@ import { Sql } from "./Sql.js";
 import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
 
-const logger = createLogger("PostgresSql");
+const logger = createLogger("SqlStore:PostgresSql");
 const sqlLogger = createLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;

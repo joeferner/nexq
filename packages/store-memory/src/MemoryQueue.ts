@@ -27,7 +27,7 @@ import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 
-const logger = createLogger("MemoryQueue");
+const logger = createLogger("MemoryStore:Queue");
 
 export class MemoryQueue {
   public readonly name: string;

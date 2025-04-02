@@ -13,7 +13,7 @@ import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
 import { applyConfigOverrides, envSubstitution } from "./utils.js";
 
-const logger = createLogger("App");
+const logger = createLogger("NexQ");
 
 export interface StartOptions {
   configFilename: string;
@@ -31,7 +31,6 @@ export async function start(options: StartOptions): Promise<void> {
   const fullConfigFilename = path.resolve(options.configFilename);
   const config = await loadConfig(fullConfigFilename, options.configOverrides);
   Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);
-  const logger = createLogger("NexQ");
   logger.info(`using config "${fullConfigFilename}"`);
   const time = new RealTime();
   const store = await createStore(config, time);

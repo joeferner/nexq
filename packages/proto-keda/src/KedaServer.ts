@@ -5,7 +5,7 @@ import { ExternalScalerImpl } from "./ExternalScalerImpl.js";
 import { ExternalScalerService } from "./generated/ExternalScaler.js";
 import fs from "node:fs";
 
-const logger = createLogger("KedaServer");
+const logger = createLogger("Keda:Server");
 
 export class KedaServer {
   private readonly server: grpc.Server;

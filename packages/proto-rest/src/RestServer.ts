@@ -21,7 +21,7 @@ import { iocContainer } from "./ioc.js";
 import { RegisterRoutes } from "./routes/routes.js";
 import { isHttpError } from "./utils.js";
 
-const logger = createLogger("RestServer");
+const logger = createLogger("Rest:Server");
 
 export class RestServer {
   private readonly app: Express;

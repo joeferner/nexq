@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Controller, Get, Route, SuccessResponse, Tags } from "tsoa";
 import { GetInfoResponse } from "../dto/GetInfoResponse.js";
 
-const logger = createLogger("Rest:ApiV1QueueController");
+const logger = createLogger("Rest:ApiV1InfoController");
 
 export interface User {
   userId: number;
