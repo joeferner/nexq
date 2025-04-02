@@ -5,6 +5,7 @@ import { SqlStoreCreateConfigPostgres } from "../SqlStore.js";
 import { PostgresSql } from "../sql/PostgresSql.js";
 import { Dialect } from "./Dialect.js";
 import { PostgresTransaction } from "./PostgresTransaction.js";
+import fs from "node:fs";
 
 export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
   private constructor(sql: PostgresSql, pool: Pool<pg.Client>, time: Time) {
@@ -36,6 +37,16 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
     const params = new URL(options.connectionString);
     const database = params.pathname?.split("/")?.[1];
     const port = parseInt(params.port ?? "5432");
+
+    if (options.options?.ssl?.ca) {
+      options.options.ssl.ca = await fs.promises.readFile(options.options.ssl.ca, 'utf8');
+    }
+    if (options.options?.ssl?.cert) {
+      options.options.ssl.cert = await fs.promises.readFile(options.options.ssl.cert, 'utf8');
+    }
+    if (options.options?.ssl?.key) {
+      options.options.ssl.key = await fs.promises.readFile(options.options.ssl.key, 'utf8');
+    }
 
     pg.types.setTypeParser(1700, parseFloat);
     pg.types.setTypeParser(20, parseFloat);
