@@ -4,8 +4,16 @@ import { ApiContext, NexqClientApi } from "../ApiContext.js";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { SortDirection, TableView, TableViewColumn } from "./TableView.js";
 import * as R from "radash";
+import { HotKey } from "./Header.js";
 
 export const QUEUES_ID = "queues";
+
+export const QUEUE_HOT_KEYS: HotKey[] = [
+  {
+    name: 'Purge',
+    shortcut: 'ctrl-p'
+  }
+];
 
 const COLUMNS: TableViewColumn<GetQueueResponse>[] = [
   {

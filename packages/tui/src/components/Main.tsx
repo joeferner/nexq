@@ -2,7 +2,7 @@ import { Box, useApp, useFocusManager, useInput } from "ink";
 import React, { ReactNode, useEffect, useState } from "react";
 import { Input } from "../utils/Input.js";
 import { Header } from "./Header.js";
-import { Queues, QUEUES_ID } from "./Queues.js";
+import { QUEUE_HOT_KEYS, Queues, QUEUES_ID } from "./Queues.js";
 
 export interface MainProps {
   tuiVersion: string;
@@ -30,7 +30,7 @@ class _Main extends React.Component<_MainProps> {
   public override render(): ReactNode {
     return (
       <Box flexDirection="column" height="100%">
-        <Header tuiVersion={this.props.tuiVersion} />
+        <Header tuiVersion={this.props.tuiVersion} hotkeys={QUEUE_HOT_KEYS} />
         <Queues />
       </Box>
     );
