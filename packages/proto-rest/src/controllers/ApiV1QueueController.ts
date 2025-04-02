@@ -470,6 +470,7 @@ export class ApiV1QueueController extends Controller {
             attributes: m.attributes,
             sentTime: m.sentTime.toISOString(),
             body: m.body,
+            lastNakReason: m.lastNakReason,
           } satisfies PeekMessagesResponseMessage;
         }),
       };

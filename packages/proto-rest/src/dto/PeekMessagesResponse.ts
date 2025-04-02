@@ -15,4 +15,5 @@ export interface PeekMessagesResponseMessage {
    * Time the message was originally sent
    */
   sentTime: string;
+  lastNakReason?: string;
 }
