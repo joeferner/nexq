@@ -3,7 +3,7 @@ import React, { ReactNode, useEffect, useState } from "react";
 import { Input } from "../utils/Input.js";
 import { useNexqFocusManager } from "../utils/useNexqFocusManager.js";
 import { Header } from "./Header.js";
-import { Dialog } from "./Dialog.js";
+import { Dialogs } from "./Dialogs.js";
 import { QUEUE_HOTKEYS, Queues, QUEUES_ID } from "./Queues.js";
 
 export interface MainProps {
@@ -32,7 +32,7 @@ class _Main extends React.Component<_MainProps> {
       <Box flexDirection="column" height="100%">
         <Header tuiVersion={tuiVersion} hotkeys={QUEUE_HOTKEYS} />
         <Queues input={input} />
-        <Dialog input={input} />
+        <Dialogs input={input} />
       </Box>
     );
   }

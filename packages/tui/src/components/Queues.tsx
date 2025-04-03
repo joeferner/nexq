@@ -5,7 +5,7 @@ import { ApiContext, NexqClientApi } from "../ApiContext.js";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { getErrorMessage } from "../utils/error.js";
 import { Input, isInputMatch } from "../utils/Input.js";
-import { DialogContext, DialogService } from "./Dialog.js";
+import { DialogContext, DialogService } from "./Dialogs.js";
 import { HotKey } from "./Header.js";
 import { SortDirection, TableView, TableViewColumn } from "./TableView.js";
 
@@ -110,7 +110,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     const result = await dialogService.showConfirmationDialog({
       message: `Are you sure you want to purge "${queueName}"?`,
       options: ["Cancel", "Purge"],
-      selectedOption: "Cancel"
+      defaultOption: "Cancel"
     });
     if (result === 'Purge') {
       try {
