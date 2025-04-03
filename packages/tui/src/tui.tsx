@@ -1,12 +1,12 @@
 /* eslint no-console: "off" */
 
 import { render } from "ink";
+import https from "node:https";
 import React from "react";
 import { ApiContext } from "./ApiContext.js";
+import { Api } from "./client/NexqClientApi.js";
 import { FullScreen } from "./components/FullScreen.js";
 import { Main } from "./components/Main.js";
-import { Api } from "./client/NexqClientApi.js";
-import https from "node:https";
 
 export interface StartOptions {
   url: string;

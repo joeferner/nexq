@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import React, { ReactNode } from "react";
 import { ApiContext, NexqClientApi } from "../ApiContext.js";
 import { HOTKEY_COLOR, HOTKEY_NAME_COLOR } from "../styles.js";
+import { Input } from "../utils/Input.js";
 
 const NAME_COLOR = "#fca321";
 const LOGO = `     __            ____ 
@@ -11,6 +12,7 @@ const LOGO = `     __            ____
 \\_\\ \\/ \\___/_/\\_\\___,_\\`;
 
 export interface HotKey {
+  id: string;
   name: string;
   shortcut: string;
 }

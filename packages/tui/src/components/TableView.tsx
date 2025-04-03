@@ -1,6 +1,6 @@
-import { Box, DOMElement, Text, useFocus, useInput } from "ink";
+import { Box, Text, useFocus } from "ink";
 import * as R from "radash";
-import React, { ReactNode, useState } from "react";
+import React, { ReactNode } from "react";
 import { HEADER_HEIGHT, MAIN_BORDER_COLOR, UNSELECTED_TEXT_COLOR } from "../styles.js";
 import { Input, isInputMatch } from "../utils/Input.js";
 import { useStdoutDimensions } from "../utils/useStdoutDimensions.js";
@@ -20,6 +20,7 @@ export interface TableViewColumn<T> {
 export interface TableViewProps<T> {
   id: string;
   columns: TableViewColumn<T>[];
+  input: Input | null;
   rows: T[];
 }
 
@@ -38,8 +39,6 @@ export interface TableViewState<T> {
 }
 
 class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T>> {
-  private ref = React.createRef<DOMElement>();
-
   public constructor(props: _TableViewProps<T>) {
     super(props);
     this.state = {
@@ -102,7 +101,6 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
         flexDirection="column"
         borderStyle="single"
         borderColor={MAIN_BORDER_COLOR}
-        ref={this.ref}
         width={displayColumns}
         height={displayRows}
       >
@@ -240,17 +238,13 @@ function TableViewThumb(props: { selectedIndex: number; rowCount: number; displa
 export function TableView<T>(props: TableViewProps<T>): ReactNode {
   const { isFocused } = useFocus({ id: props.id });
   const { rows, columns } = useStdoutDimensions();
-  const [input, setInput] = useState<Input | null>(null);
-  useInput((text, key) => {
-    setInput({ t: new Date(), text, key });
-  });
+
   return (
     <_TableView
       {...props}
       isFocused={isFocused}
       displayRows={rows - HEADER_HEIGHT}
       displayColumns={columns}
-      input={input}
     />
   );
 }
