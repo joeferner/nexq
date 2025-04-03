@@ -1,6 +1,5 @@
 import { useFocusManager } from "ink";
-import React from "react";
-import { logToFile } from "./log.js";
+import React, { createContext } from "react";
 
 export interface NexqFocusManager {
     activeId: string | null;
@@ -8,18 +7,23 @@ export interface NexqFocusManager {
     enableFocus: () => void;
 }
 
+interface ContextData {
+    activeId: string | null;
+}
+
+export const NexqFocusManagerContext = createContext<ContextData>({ activeId: null });
+
 export function useNexqFocusManager(): NexqFocusManager {
-    const [activeId, setActiveId] = React.useState<string | null>(null);
+    const ctx = React.useContext(NexqFocusManagerContext);
     const { focus, enableFocus } = useFocusManager();
 
     const myFocus = (id: string): void => {
-        logToFile(`myFocus: ${id}`)
         focus(id);
-        setActiveId(id);
+        ctx.activeId = id;
     };
 
     return {
-        activeId,
+        activeId: ctx.activeId,
         focus: myFocus,
         enableFocus
     }

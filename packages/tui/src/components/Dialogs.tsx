@@ -2,7 +2,7 @@ import React, { createContext } from "react";
 import { Input } from "../utils/Input.js";
 import { useNexqFocusManager } from "../utils/useNexqFocusManager.js";
 import { CONFIRMATION_DIALOG_ID, ConfirmationDialog } from "./ConfirmationDialog.js";
-import { logToFile } from "../utils/log.js";
+import { ERROR_DIALOG_ID, ErrorDialog } from "./ErrorDialog.js";
 
 export interface ShowConfirmationDialogOptions {
     message: string;
@@ -38,6 +38,8 @@ interface DialogsState {
     lastFocusId: string | null;
     confirmationDialogOptions?: ShowConfirmationDialogOptions;
     confirmationDialogResolve?: (result: string | null) => void;
+    errorDialogOptions?: ShowErrorDialogOptions;
+    errorDialogResolve?: () => void;
 }
 
 class _Dialogs extends React.Component<_DialogsProps, DialogsState> {
@@ -51,12 +53,12 @@ class _Dialogs extends React.Component<_DialogsProps, DialogsState> {
     public override componentDidMount(): void {
         const { modalContext } = this.props;
         modalContext.showConfirmationDialog = this.showConfirmationDialog.bind(this);
+        modalContext.showErrorDialog = this.showErrorDialog.bind(this);
     }
 
     private showConfirmationDialog(options: ShowConfirmationDialogOptions): Promise<string | null> {
         const { activeId, focus } = this.props;
 
-        logToFile(`activeId: ${activeId}`)
         this.setState({
             lastFocusId: activeId,
             confirmationDialogOptions: options
@@ -72,7 +74,6 @@ class _Dialogs extends React.Component<_DialogsProps, DialogsState> {
 
     private handleConfirmationDialogConfirm(result: string | null): void {
         this.state.confirmationDialogResolve?.(result);
-        logToFile(`this.state.lastFocusId: ${this.state.lastFocusId}`)
         if (this.state.lastFocusId) {
             this.props.focus(this.state.lastFocusId);
         }
@@ -83,11 +84,41 @@ class _Dialogs extends React.Component<_DialogsProps, DialogsState> {
         })
     }
 
+    private showErrorDialog(options: ShowErrorDialogOptions): Promise<void> {
+        const { activeId, focus } = this.props;
+
+        this.setState({
+            lastFocusId: activeId,
+            errorDialogOptions: options
+        });
+        focus(ERROR_DIALOG_ID);
+
+        return new Promise<void>((resolve) => {
+            this.setState({
+                errorDialogResolve: resolve,
+            });
+        });
+    }
+
+    private handleErrorDialogConfirm(): void {
+        this.state.errorDialogResolve?.();
+        if (this.state.lastFocusId) {
+            this.props.focus(this.state.lastFocusId);
+        }
+        this.setState({
+            errorDialogOptions: undefined,
+            errorDialogResolve: undefined,
+            lastFocusId: null
+        })
+    }
+
     public override render(): React.ReactNode {
         const { input } = this.props;
-        const { confirmationDialogOptions } = this.state;
+        const { errorDialogOptions, confirmationDialogOptions } = this.state;
 
-        if (confirmationDialogOptions) {
+        if (errorDialogOptions) {
+            return (<ErrorDialog {...errorDialogOptions} input={input} onConfirm={() => this.handleErrorDialogConfirm()} />);
+        } else if (confirmationDialogOptions) {
             return (<ConfirmationDialog {...confirmationDialogOptions} input={input} onConfirm={(result) => this.handleConfirmationDialogConfirm(result)} />);
         } else {
             return (<></>);
@@ -98,7 +129,6 @@ class _Dialogs extends React.Component<_DialogsProps, DialogsState> {
 export function Dialogs(props: DialogsProps): React.ReactNode {
     const modalContext = React.useContext(DialogContext);
     const { activeId, focus } = useNexqFocusManager();
-    logToFile(`zactiveId: ${activeId}`)
 
     return (<_Dialogs {...props} modalContext={modalContext} activeId={activeId} focus={focus} />);
 }

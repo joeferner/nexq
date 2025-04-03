@@ -8,6 +8,7 @@ import { Input, isInputMatch } from "../utils/Input.js";
 import { DialogContext, DialogService } from "./Dialogs.js";
 import { HotKey } from "./Header.js";
 import { SortDirection, TableView, TableViewColumn } from "./TableView.js";
+import { logToFile } from "../utils/log.js";
 
 export const QUEUES_ID = "queues";
 
@@ -70,6 +71,8 @@ interface QueuesState {
 }
 
 export class _Queues extends React.Component<_QueuesProps, QueuesState> {
+  private loadTimeout?: NodeJS.Timeout;
+
   public constructor(props: _QueuesProps) {
     super(props);
     this.state = {
@@ -117,8 +120,10 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
         await api.api.purgeQueue(queueName);
       } catch (err) {
         void dialogService.showErrorDialog({
-          message: `Failed to purge "${queueName}".\n${getErrorMessage(err)}`
+          message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`
         });
+      } finally {
+        void this.load();
       }
     }
   }
@@ -126,19 +131,29 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   private async load(): Promise<void> {
     const { api } = this.props;
 
-    const resp = await api.api.getQueues();
-    for (let i = 0; i < 100; i++) {
-      resp.data.queues.push({
-        name: `queue${i}`,
-        numberOfMessage: i * 100,
-        numberOfMessagesVisible: i * 100,
-        numberOfMessagesNotVisible: i * 100,
-        numberOfMessagesDelayed: i * 100,
-      } as GetQueueResponse);
+    if (this.loadTimeout) {
+      clearTimeout(this.loadTimeout);
     }
-    this.setState({
-      queues: resp.data.queues,
-    });
+
+    try {
+      const resp = await api.api.getQueues();
+      for (let i = 0; i < 100; i++) {
+        resp.data.queues.push({
+          name: `queue${i}`,
+          numberOfMessage: i * 100,
+          numberOfMessagesVisible: i * 100,
+          numberOfMessagesNotVisible: i * 100,
+          numberOfMessagesDelayed: i * 100,
+        } as GetQueueResponse);
+      }
+      this.setState({
+        queues: resp.data.queues,
+      });
+    } finally {
+      this.loadTimeout = setTimeout(() => {
+        void this.load();
+      }, 5000);
+    }
   }
 
   public override render(): ReactNode {
