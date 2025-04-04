@@ -27,6 +27,7 @@ export interface TableViewProps<T> {
   columns: TableViewColumn<T>[];
   input: Input | null;
   rows: T[];
+  selectedRowChanged: (row: T | null) => unknown;
 }
 
 export interface _TableViewProps<T> extends TableViewProps<T> {
@@ -41,6 +42,7 @@ export interface TableViewState<T> {
   offset: number;
   sortColumn: TableViewColumn<T> | undefined;
   sortColumnDirection: SortDirection;
+  sortedRows: T[];
 }
 
 class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T>> {
@@ -51,16 +53,36 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
       offset: 0,
       sortColumn: props.columns[0],
       sortColumnDirection: SortDirection.Ascending,
+      sortedRows: [],
     };
+  }
+
+  public override componentDidMount(): void {
+    this.updateSortedRows();
   }
 
   public override componentDidUpdate(
     prevProps: Readonly<_TableViewProps<T>>,
-    _prevState: Readonly<TableViewState<T>>
+    prevState: Readonly<TableViewState<T>>
   ): void {
     if (this.props.isFocused && this.props.input && this.props.input?.t !== prevProps.input?.t) {
       this.processInput(this.props.input);
     }
+
+    if (this.state.sortColumn !== prevState.sortColumn || this.props.rows !== prevProps.rows || this.state.sortColumnDirection !== prevState.sortColumnDirection) {
+      this.updateSortedRows();
+    }
+  }
+
+  private updateSortedRows(): void {
+    const { sortColumn, sortColumnDirection } = this.state;
+    const { rows } = this.props;
+
+    const sortedRows = sortColumn?.sortRows(rows, sortColumnDirection) ?? rows;
+    this.props.selectedRowChanged(sortedRows[this.state.selectedIndex] ?? null);
+    this.setState({
+      sortedRows
+    });
   }
 
   private processInput(input: Input): void {
@@ -92,14 +114,12 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
   }
 
   public override render(): ReactNode {
-    const { selectedIndex, offset, sortColumn, sortColumnDirection } = this.state;
+    const { selectedIndex, offset, sortColumn, sortColumnDirection, sortedRows } = this.state;
     const { rows, columns, displayColumns, displayRows } = this.props;
 
     const columnWidths = columns.map((column) => {
       return Math.max(...rows.map((row) => `${column.valueFn(row)}`.length), column.name.length + SORT_ARROW_WIDTH) + SPACE_BETWEEN_COLUMNS;
     });
-
-    const sortedRows = sortColumn?.sortRows(rows, sortColumnDirection) ?? rows;
 
     return (
       <Box
@@ -149,6 +169,9 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
         offset = selectedIndex;
       } else {
         offset = this.state.offset;
+      }
+      if (prevState.selectedIndex !== selectedIndex) {
+        this.props.selectedRowChanged(this.state.sortedRows[selectedIndex] ?? null);
       }
       return {
         selectedIndex,

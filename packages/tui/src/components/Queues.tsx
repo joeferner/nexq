@@ -63,6 +63,8 @@ interface _QueuesProps extends QueuesProps {
   queues: GetQueueResponse[] | null;
   dialogService: DialogService;
   isFocused: boolean;
+  selectedQueue: string | null;
+  setSelectedQueue: (queueName: string | null) => void;
   purgeQueue: (queueName: string) => Promise<void>;
   loadQueues: () => Promise<void>;
 }
@@ -97,9 +99,16 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   private async purgeSelectedQueue(): Promise<void> {
-    const { dialogService, purgeQueue } = this.props;
+    const { dialogService, purgeQueue, selectedQueue } = this.props;
 
-    const queueName = 'TODO';
+    if (!selectedQueue) {
+      void dialogService.showErrorDialog({
+        message: `No selected queue`
+      });
+      return;
+    }
+
+    const queueName = selectedQueue;
     const result = await dialogService.showConfirmationDialog({
       message: `Are you sure you want to purge "${queueName}"?`,
       options: ["Cancel", "Purge"],
@@ -135,9 +144,9 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   public override render(): ReactNode {
-    const { input, queues } = this.props;
+    const { input, queues, setSelectedQueue } = this.props;
 
-    return <TableView id={QUEUES_ID} input={input} columns={COLUMNS} rows={queues ?? []} />;
+    return <TableView id={QUEUES_ID} input={input} columns={COLUMNS} rows={queues ?? []} selectedRowChanged={queue => { setSelectedQueue(queue?.name ?? null) }} />;
   }
 }
 
@@ -146,5 +155,14 @@ export function Queues(props: QueuesProps): ReactNode {
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 
-  return <_Queues {...props} queues={state.queues} purgeQueue={state.purgeQueue} loadQueues={state.loadQueues} dialogService={dialogService} isFocused={isFocused} />;
+  return <_Queues
+    {...props}
+    queues={state.queues}
+    purgeQueue={state.purgeQueue}
+    loadQueues={state.loadQueues}
+    dialogService={dialogService}
+    isFocused={isFocused}
+    selectedQueue={state.selectedQueue}
+    setSelectedQueue={state.setSelectedQueue}
+  />;
 }
