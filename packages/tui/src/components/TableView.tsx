@@ -91,7 +91,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
     const { rows, columns, displayColumns, displayRows } = this.props;
 
     const columnWidths = columns.map((column) => {
-      return Math.max(...rows.map((row) => Math.max(`${column.valueFn(row)}`.length, column.name.length) + 2));
+      return Math.max(...rows.map((row) => Math.max(`${column.valueFn(row)}`.length, column.name.length + 2) + 2), column.name.length + 2);
     });
 
     const sortedRows = sortColumn?.sortRows(rows, sortColumnDirection) ?? rows;

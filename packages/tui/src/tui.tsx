@@ -3,10 +3,10 @@
 import { render } from "ink";
 import https from "node:https";
 import React from "react";
-import { ApiContext } from "./ApiContext.js";
 import { Api } from "./client/NexqClientApi.js";
 import { FullScreen } from "./components/FullScreen.js";
 import { Main } from "./components/Main.js";
+import { StateProvider } from "./StateContext.js";
 
 export interface StartOptions {
   url: string;
@@ -30,10 +30,10 @@ export async function start(options: StartOptions): Promise<void> {
   const api = new Api({ baseURL: options.url, httpsAgent });
 
   render(
-    <ApiContext.Provider value={api}>
+    <StateProvider tuiVersion={options.tuiVersion} api={api}>
       <FullScreen>
-        <Main tuiVersion={options.tuiVersion} />
+        <Main />
       </FullScreen>
-    </ApiContext.Provider>
+    </StateProvider>
   );
 }

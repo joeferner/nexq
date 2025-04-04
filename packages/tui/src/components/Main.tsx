@@ -7,7 +7,7 @@ import { Dialogs } from "./Dialogs.js";
 import { QUEUE_HOTKEYS, Queues, QUEUES_ID } from "./Queues.js";
 
 export interface MainProps {
-  tuiVersion: string;
+  _placeholder?: unknown;
 }
 
 interface _MainProps extends MainProps {
@@ -26,11 +26,11 @@ class _Main extends React.Component<_MainProps> {
   }
 
   public override render(): ReactNode {
-    const { input, tuiVersion } = this.props;
+    const { input } = this.props;
 
     return (
       <Box flexDirection="column" height="100%">
-        <Header tuiVersion={tuiVersion} hotkeys={QUEUE_HOTKEYS} />
+        <Header hotkeys={QUEUE_HOTKEYS} />
         <Queues input={input} />
         <Dialogs input={input} />
       </Box>

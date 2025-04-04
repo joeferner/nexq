@@ -1,14 +1,13 @@
 import { useFocus } from "ink";
 import * as R from "radash";
 import React, { ReactNode } from "react";
-import { ApiContext, NexqClientApi } from "../ApiContext.js";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
+import { StateContext } from "../StateContext.js";
 import { getErrorMessage } from "../utils/error.js";
 import { Input, isInputMatch } from "../utils/Input.js";
 import { DialogContext, DialogService } from "./Dialogs.js";
 import { HotKey } from "./Header.js";
 import { SortDirection, TableView, TableViewColumn } from "./TableView.js";
-import { logToFile } from "../utils/log.js";
 
 export const QUEUES_ID = "queues";
 
@@ -61,24 +60,15 @@ export interface QueuesProps {
 }
 
 interface _QueuesProps extends QueuesProps {
-  api: NexqClientApi;
+  queues: GetQueueResponse[] | null;
   dialogService: DialogService;
   isFocused: boolean;
+  purgeQueue: (queueName: string) => Promise<void>;
+  loadQueues: () => Promise<void>;
 }
 
-interface QueuesState {
-  queues: GetQueueResponse[];
-}
-
-export class _Queues extends React.Component<_QueuesProps, QueuesState> {
+export class _Queues extends React.Component<_QueuesProps> {
   private loadTimeout?: NodeJS.Timeout;
-
-  public constructor(props: _QueuesProps) {
-    super(props);
-    this.state = {
-      queues: [],
-    };
-  }
 
   public override componentDidMount(): void {
     void this.load();
@@ -86,7 +76,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
 
   public override componentDidUpdate(
     prevProps: Readonly<_QueuesProps>,
-    _prevState: Readonly<QueuesState>
+    _prevState: Readonly<unknown>
   ): void {
     const { isFocused, input } = this.props;
     if (isFocused && input && input?.t !== prevProps.input?.t) {
@@ -107,7 +97,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   }
 
   private async purgeSelectedQueue(): Promise<void> {
-    const { dialogService, api } = this.props;
+    const { dialogService, purgeQueue } = this.props;
 
     const queueName = 'TODO';
     const result = await dialogService.showConfirmationDialog({
@@ -117,7 +107,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     });
     if (result === 'Purge') {
       try {
-        await api.api.purgeQueue(queueName);
+        await purgeQueue(queueName);
       } catch (err) {
         void dialogService.showErrorDialog({
           message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`
@@ -129,26 +119,14 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   }
 
   private async load(): Promise<void> {
-    const { api } = this.props;
+    const { loadQueues } = this.props;
 
     if (this.loadTimeout) {
       clearTimeout(this.loadTimeout);
     }
 
     try {
-      const resp = await api.api.getQueues();
-      for (let i = 0; i < 100; i++) {
-        resp.data.queues.push({
-          name: `queue${i}`,
-          numberOfMessage: i * 100,
-          numberOfMessagesVisible: i * 100,
-          numberOfMessagesNotVisible: i * 100,
-          numberOfMessagesDelayed: i * 100,
-        } as GetQueueResponse);
-      }
-      this.setState({
-        queues: resp.data.queues,
-      });
+      await loadQueues();
     } finally {
       this.loadTimeout = setTimeout(() => {
         void this.load();
@@ -157,20 +135,16 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   }
 
   public override render(): ReactNode {
-    const { input } = this.props;
-    const { queues } = this.state;
+    const { input, queues } = this.props;
 
-    return <TableView id={QUEUES_ID} input={input} columns={COLUMNS} rows={queues} />;
+    return <TableView id={QUEUES_ID} input={input} columns={COLUMNS} rows={queues ?? []} />;
   }
 }
 
 export function Queues(props: QueuesProps): ReactNode {
-  const api = React.useContext(ApiContext);
+  const state = React.useContext(StateContext);
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 
-  if (!api) {
-    return <></>;
-  }
-  return <_Queues {...props} api={api} dialogService={dialogService} isFocused={isFocused} />;
+  return <_Queues {...props} queues={state.queues} purgeQueue={state.purgeQueue} loadQueues={state.loadQueues} dialogService={dialogService} isFocused={isFocused} />;
 }

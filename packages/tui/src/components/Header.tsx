@@ -1,8 +1,8 @@
 import { Box, Text } from "ink";
 import React, { ReactNode } from "react";
-import { ApiContext, NexqClientApi } from "../ApiContext.js";
+import { StateContext } from "../StateContext.js";
+import { GetInfoResponse } from "../client/NexqClientApi.js";
 import { HOTKEY_COLOR, HOTKEY_NAME_COLOR } from "../styles.js";
-import { Input } from "../utils/Input.js";
 
 const NAME_COLOR = "#fca321";
 const LOGO = `     __            ____ 
@@ -18,40 +18,17 @@ export interface HotKey {
 }
 
 export interface HeaderProps {
-  tuiVersion: string;
   hotkeys: HotKey[];
 }
 
 interface _HeaderProps extends HeaderProps {
-  api: NexqClientApi;
+  tuiVersion: string;
+  info: GetInfoResponse | null;
 }
 
-interface HeaderState {
-  nexqVersion: string;
-}
-
-class _Header extends React.Component<_HeaderProps, HeaderState> {
-  public constructor(props: _HeaderProps) {
-    super(props);
-    this.state = {
-      nexqVersion: '???'
-    }
-  }
-
-  public override componentDidMount(): void {
-    void this.load();
-  }
-
-  private async load(): Promise<void> {
-    const info = await this.props.api.api.getInfo();
-    this.setState({
-      nexqVersion: info.data.version
-    });
-  }
-
+class _Header extends React.Component<_HeaderProps> {
   public override render(): ReactNode {
-    const { tuiVersion, hotkeys } = this.props;
-    const { nexqVersion } = this.state;
+    const { info, hotkeys, tuiVersion } = this.props;
 
     return (
       <Box justifyContent="space-between">
@@ -62,7 +39,7 @@ class _Header extends React.Component<_HeaderProps, HeaderState> {
           </Box>
           <Box>
             <Text color={NAME_COLOR}>NexQ Ver: </Text>
-            <Text color="white">v{nexqVersion}</Text>
+            <Text color="white">v{info?.version ?? '???'}</Text>
           </Box>
         </Box>
         <Box>
@@ -81,9 +58,6 @@ class _Header extends React.Component<_HeaderProps, HeaderState> {
 }
 
 export function Header(props: HeaderProps): ReactNode {
-  const api = React.useContext(ApiContext);
-  if (api === null) {
-    return (<></>);
-  }
-  return (<_Header {...props} api={api} />);
+  const state = React.useContext(StateContext);
+  return (<_Header {...props} info={state.info} tuiVersion={state.tuiVersion} />);
 }
