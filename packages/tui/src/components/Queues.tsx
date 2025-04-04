@@ -29,8 +29,8 @@ const COLUMNS: TableViewColumn<GetQueueResponse>[] = [
   {
     name: "COUNT",
     sortKeyboardShortcut: "shift-c",
-    valueFn: (row) => row.numberOfMessage,
-    sortRows: (rows, direction) => R.sort(rows, (row) => row.numberOfMessage, direction === SortDirection.Descending),
+    valueFn: (row) => row.numberOfMessages,
+    sortRows: (rows, direction) => R.sort(rows, (row) => row.numberOfMessages, direction === SortDirection.Descending),
   },
   {
     name: "VISIBLE",

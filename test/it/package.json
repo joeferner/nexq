@@ -9,7 +9,8 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier src --write",
     "generate": "swagger-typescript-api  --path http://localhost:7887/swagger.json --axios --output ./generated/client --api-class-name NexqApi",
-    "start": "node build/src/index.js"
+    "start": "node build/src/index.js",
+    "createTestData": "node build/src/createTestData.js"
   },
   "author": "Joe Ferner <joe@fernsroth.com>",
   "license": "MIT",

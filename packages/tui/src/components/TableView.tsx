@@ -5,6 +5,11 @@ import { HEADER_HEIGHT, MAIN_BORDER_COLOR, UNSELECTED_TEXT_COLOR } from "../styl
 import { Input, isInputMatch } from "../utils/Input.js";
 import { useStdoutDimensions } from "../utils/useStdoutDimensions.js";
 
+const SPACE_BETWEEN_COLUMNS = 1;
+const SORT_ARROW_WIDTH = 1;
+const BORDERS_WIDTH = 2;
+const THUMB_WIDTH = 1;
+
 export enum SortDirection {
   Ascending = "asc",
   Descending = "desc",
@@ -91,7 +96,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
     const { rows, columns, displayColumns, displayRows } = this.props;
 
     const columnWidths = columns.map((column) => {
-      return Math.max(...rows.map((row) => Math.max(`${column.valueFn(row)}`.length, column.name.length + 2) + 2), column.name.length + 2);
+      return Math.max(...rows.map((row) => `${column.valueFn(row)}`.length), column.name.length + SORT_ARROW_WIDTH) + SPACE_BETWEEN_COLUMNS;
     });
 
     const sortedRows = sortColumn?.sortRows(rows, sortColumnDirection) ?? rows;
@@ -169,8 +174,8 @@ function TableViewHeader<T>(props: TableViewHeaderProps<T>): React.ReactNode {
         return (
           <>
             <Text key={columnIndex}>{column.name}</Text>
-            {column.name === sortColumn?.name ? <SortArrow direction={sortColumnDirection} /> : undefined}
-            <Text>{" ".repeat(Math.max(0, columnWidths[columnIndex] - column.name.length))}</Text>
+            {column.name === sortColumn?.name ? <SortArrow direction={sortColumnDirection} /> : (<Text> </Text>)}
+            <Text>{" ".repeat(Math.max(0, columnWidths[columnIndex] - column.name.length - SORT_ARROW_WIDTH) + SPACE_BETWEEN_COLUMNS)}</Text>
           </>
         );
       })}
@@ -199,23 +204,23 @@ function TableViewRow<T>(props: {
 }): React.ReactNode {
   const { columns, columnWidths, row, selected, viewportColumns } = props;
 
-  const remainingSpace = Math.max(0, viewportColumns - columnWidths.reduce((p, v) => p + v, 0) - 2);
+  const remainingSpace = Math.max(0, viewportColumns - columnWidths.reduce((p, v) => p + v + SPACE_BETWEEN_COLUMNS, 0) - BORDERS_WIDTH - THUMB_WIDTH);
   return (
     <Box>
       {columns.map((column, columnIndex) => {
         const value = column.valueFn(row);
-        const padding = " ".repeat(Math.max(0, columnWidths[columnIndex] - `${value}`.length - 1));
+        const valueStr = `${value}`;
+        const alignLeft = R.isString(value);
+        const paddingWidth = Math.max(0, columnWidths[columnIndex] - valueStr.length - SORT_ARROW_WIDTH - SPACE_BETWEEN_COLUMNS);
+        const padding = " ".repeat(paddingWidth);
+        const paddingLeft = alignLeft ? "" : padding;
+        const paddingRight = alignLeft ? padding : "";
+        const text = `${paddingLeft}${valueStr}${paddingRight}   `;
         return (
-          <Text key={columnIndex} color={UNSELECTED_TEXT_COLOR} inverse={selected}>
-            {R.isString(value) ? "" : padding}
-            {value}
-            {R.isString(value) ? padding : ""}{" "}
-          </Text>
+          <Text key={columnIndex} color={UNSELECTED_TEXT_COLOR} inverse={selected}>{text}</Text>
         );
       })}
-      <Text color={UNSELECTED_TEXT_COLOR} inverse={selected}>
-        {" ".repeat(remainingSpace)}
-      </Text>
+      <Text color={UNSELECTED_TEXT_COLOR} inverse={selected}>{" ".repeat(remainingSpace)}</Text>
     </Box>
   );
 }
