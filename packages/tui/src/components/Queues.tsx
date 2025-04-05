@@ -64,7 +64,7 @@ export const QUEUES_DEFAULT_STATE: TableViewState<GetQueueResponse> = {
   offset: 0,
   selectedRowId: null,
   sortColumn: COLUMNS[0],
-  sortColumnDirection: SortDirection.Ascending
+  sortColumnDirection: SortDirection.Ascending,
 };
 
 export interface QueuesProps {
@@ -92,8 +92,8 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   public constructor(props: _QueuesProps) {
     super(props);
     this.state = {
-      queues: []
-    }
+      queues: [],
+    };
   }
 
   public override componentDidMount(): void {
@@ -106,11 +106,12 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
       void this.processInput(input);
     }
 
-    if (this.props.tableViewState.sortColumn !== prevProps.tableViewState.sortColumn
-      || this.props.tableViewState.sortColumnDirection !== prevProps.tableViewState.sortColumnDirection
+    if (
+      this.props.tableViewState.sortColumn !== prevProps.tableViewState.sortColumn ||
+      this.props.tableViewState.sortColumnDirection !== prevProps.tableViewState.sortColumnDirection
     ) {
       this.setState({
-        queues: this.sortQueues(this.state.queues)
+        queues: this.sortQueues(this.state.queues),
       });
     }
   }
@@ -119,11 +120,11 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     const { sortColumn, sortColumnDirection } = this.props.tableViewState;
 
     queues = sortColumn.sortRows(queues, sortColumnDirection);
-    return queues.map(q => {
+    return queues.map((q) => {
       return {
         id: q.name,
-        ...q
-      }
+        ...q,
+      };
     });
   }
 
@@ -167,7 +168,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     if (result === "Purge") {
       try {
         await purgeQueue(queueName);
-        setStatus((<Text>Queue "{queueName}" purged!</Text>));
+        setStatus(<Text>Queue "{queueName}" purged!</Text>);
       } catch (err) {
         void dialogService.showErrorDialog({
           message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`,
@@ -197,7 +198,7 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     if (result === "Delete") {
       try {
         await deleteQueue(queueName);
-        setStatus((<Text>Queue "{queueName}" deleted!</Text>));
+        setStatus(<Text>Queue "{queueName}" deleted!</Text>);
       } catch (err) {
         void dialogService.showErrorDialog({
           message: `Failed to delete "${queueName}".\n\n${getErrorMessage(err)}`,
@@ -218,8 +219,8 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
     try {
       const queues = await loadQueues();
       this.setState({
-        queues: this.sortQueues(queues)
-      })
+        queues: this.sortQueues(queues),
+      });
     } finally {
       this.loadTimeout = setTimeout(() => {
         void this.load();
@@ -245,7 +246,8 @@ export class _Queues extends React.Component<_QueuesProps, QueuesState> {
 }
 
 export function Queues(props: QueuesProps): ReactNode {
-  const { purgeQueue, deleteQueue, loadQueues, queuesTableViewState, setQueuesTableViewState, setStatus } = React.useContext(StateContext);
+  const { purgeQueue, deleteQueue, loadQueues, queuesTableViewState, setQueuesTableViewState, setStatus } =
+    React.useContext(StateContext);
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 

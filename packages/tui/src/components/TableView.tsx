@@ -46,10 +46,7 @@ export interface _TableViewProps<T> extends TableViewProps<T> {
 }
 
 class _TableView<T> extends React.Component<_TableViewProps<T>> {
-  public override componentDidUpdate(
-    prevProps: Readonly<_TableViewProps<T>>,
-    _prevState: Readonly<unknown>
-  ): void {
+  public override componentDidUpdate(prevProps: Readonly<_TableViewProps<T>>, _prevState: Readonly<unknown>): void {
     if (this.props.isFocused && this.props.input && this.props.input?.t !== prevProps.input?.t) {
       this.processInput(this.props.input);
     }
@@ -58,7 +55,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>> {
       if (this.props.state.selectedRowId) {
         const { selectedRowId, offset: stateOffset } = this.props.state;
 
-        const selectedIndex = this.props.rows.findIndex(r => r.id === selectedRowId);
+        const selectedIndex = this.props.rows.findIndex((r) => r.id === selectedRowId);
         let offset: number;
         if (selectedIndex >= stateOffset + (this.props.displayRows - 3)) {
           offset = selectedIndex - (this.props.displayRows - 4);
@@ -70,9 +67,9 @@ class _TableView<T> extends React.Component<_TableViewProps<T>> {
         if (this.props.state.offset !== offset) {
           this.props.stateChanged({
             ...this.props.state,
-            offset
+            offset,
           });
-        };
+        }
       }
     }
   }
@@ -110,7 +107,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>> {
     const { rows, columns, displayColumns, displayRows } = this.props;
     const { offset, sortColumn, sortColumnDirection, selectedRowId } = this.props.state;
 
-    const selectedIndex = selectedRowId ? rows.findIndex(r => r.id === selectedRowId) : 0;
+    const selectedIndex = selectedRowId ? rows.findIndex((r) => r.id === selectedRowId) : 0;
 
     const columnWidths = columns.map((column) => {
       return (
@@ -158,12 +155,12 @@ class _TableView<T> extends React.Component<_TableViewProps<T>> {
 
   private setSelectedIndexHelper(changer: (value: number) => number): void {
     const { selectedRowId } = this.props.state;
-    const prevSelectedIndex = selectedRowId ? this.props.rows.findIndex(r => r.id === selectedRowId) : 0;
+    const prevSelectedIndex = selectedRowId ? this.props.rows.findIndex((r) => r.id === selectedRowId) : 0;
     const next = changer(prevSelectedIndex);
     const selectedIndex = Math.max(0, Math.min(this.props.rows.length - 1, next));
     this.props.stateChanged({
       ...this.props.state,
-      selectedRowId: this.props.rows[selectedIndex]?.id ?? null
+      selectedRowId: this.props.rows[selectedIndex]?.id ?? null,
     });
   }
 }
@@ -268,5 +265,12 @@ export function TableView<T>(props: TableViewProps<T>): ReactNode {
   const { isFocused } = useFocus({ id: props.id });
   const { rows, columns } = useStdoutDimensions();
 
-  return <_TableView {...props} isFocused={isFocused} displayRows={rows - HEADER_HEIGHT - STATUS_HEIGHT} displayColumns={columns} />;
+  return (
+    <_TableView
+      {...props}
+      isFocused={isFocused}
+      displayRows={rows - HEADER_HEIGHT - STATUS_HEIGHT}
+      displayColumns={columns}
+    />
+  );
 }

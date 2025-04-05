@@ -19,13 +19,15 @@ export interface State {
 export const StateContext = createContext<State>({
   tuiVersion: "???",
   info: null,
-  loadQueues: async () => { return []; },
+  loadQueues: async () => {
+    return [];
+  },
   queuesTableViewState: QUEUES_DEFAULT_STATE,
-  setQueuesTableViewState: () => { },
-  purgeQueue: async () => { },
-  deleteQueue: async () => { },
-  status: (<Text></Text>),
-  setStatus: () => { }
+  setQueuesTableViewState: () => {},
+  purgeQueue: async () => {},
+  deleteQueue: async () => {},
+  status: <Text></Text>,
+  setStatus: () => {},
 });
 
 interface Status {
@@ -41,8 +43,9 @@ export function StateProvider(props: {
   const { children, api, tuiVersion } = props;
 
   const [info, setInfo] = useState<GetInfoResponse | null>(null);
-  const [queuesTableViewState, setQueuesTableViewState] = useState<TableViewState<GetQueueResponse>>(QUEUES_DEFAULT_STATE);
-  const [_status, _setStatus] = useState<Status>({ status: (<Text></Text>), timeout: null });
+  const [queuesTableViewState, setQueuesTableViewState] =
+    useState<TableViewState<GetQueueResponse>>(QUEUES_DEFAULT_STATE);
+  const [_status, _setStatus] = useState<Status>({ status: <Text></Text>, timeout: null });
 
   useEffect(() => {
     const load = async (): Promise<void> => {
@@ -73,16 +76,16 @@ export function StateProvider(props: {
 
     const timeout = setTimeout(() => {
       _setStatus({
-        status: (<Text></Text>),
-        timeout: null
-      })
+        status: <Text></Text>,
+        timeout: null,
+      });
     }, 1000);
 
     _setStatus({
       status,
-      timeout
+      timeout,
     });
-  }
+  };
 
   return (
     <StateContext.Provider
@@ -95,7 +98,7 @@ export function StateProvider(props: {
         deleteQueue,
         loadQueues,
         status: _status.status,
-        setStatus
+        setStatus,
       }}
     >
       {children}
