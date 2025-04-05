@@ -17,6 +17,11 @@ export const QUEUE_HOTKEYS: HotKey[] = [
     name: "Purge",
     shortcut: "ctrl-u",
   },
+  {
+    id: "delete",
+    name: "Delete",
+    shortcut: "ctrl-d",
+  },
 ];
 
 const COLUMNS: TableViewColumn<GetQueueResponse>[] = [
@@ -67,6 +72,7 @@ interface _QueuesProps extends QueuesProps {
   setSelectedQueue: (queueName: string | null) => void;
   setStatus: (status: React.ReactNode) => void;
   purgeQueue: (queueName: string) => Promise<void>;
+  deleteQueue: (queueName: string) => Promise<void>;
   loadQueues: () => Promise<void>;
 }
 
@@ -97,6 +103,9 @@ export class _Queues extends React.Component<_QueuesProps> {
           case "purge":
             await this.purgeSelectedQueue();
             break;
+          case "delete":
+            await this.deleteSelectedQueue();
+            break;
         }
       }
     }
@@ -125,6 +134,36 @@ export class _Queues extends React.Component<_QueuesProps> {
       } catch (err) {
         void dialogService.showErrorDialog({
           message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`,
+        });
+      } finally {
+        void this.load();
+      }
+    }
+  }
+
+  private async deleteSelectedQueue(): Promise<void> {
+    const { dialogService, deleteQueue, selectedQueue, setStatus } = this.props;
+
+    if (!selectedQueue) {
+      void dialogService.showErrorDialog({
+        message: `No selected queue`,
+      });
+      return;
+    }
+
+    const queueName = selectedQueue;
+    const result = await dialogService.showConfirmationDialog({
+      message: `Are you sure you want to delete "${queueName}"?`,
+      options: ["Cancel", "Delete"],
+      defaultOption: "Cancel",
+    });
+    if (result === "Delete") {
+      try {
+        await deleteQueue(queueName);
+        setStatus((<Text>Queue "{queueName}" deleted!</Text>));
+      } catch (err) {
+        void dialogService.showErrorDialog({
+          message: `Failed to delete "${queueName}".\n\n${getErrorMessage(err)}`,
         });
       } finally {
         void this.load();
@@ -166,7 +205,7 @@ export class _Queues extends React.Component<_QueuesProps> {
 }
 
 export function Queues(props: QueuesProps): ReactNode {
-  const { queues, purgeQueue, loadQueues, selectedQueue, setSelectedQueue, setStatus } = React.useContext(StateContext);
+  const { queues, purgeQueue, deleteQueue, loadQueues, selectedQueue, setSelectedQueue, setStatus } = React.useContext(StateContext);
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 
@@ -175,6 +214,7 @@ export function Queues(props: QueuesProps): ReactNode {
       {...props}
       queues={queues}
       purgeQueue={purgeQueue}
+      deleteQueue={deleteQueue}
       loadQueues={loadQueues}
       dialogService={dialogService}
       isFocused={isFocused}

@@ -42,7 +42,7 @@ class _Header extends React.Component<_HeaderProps> {
             <Text color="white">v{info?.version ?? "???"}</Text>
           </Box>
         </Box>
-        <Box>
+        <Box flexDirection="column">
           {hotkeys.map((hotkey) => {
             return (
               <Box>

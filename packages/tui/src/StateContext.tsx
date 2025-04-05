@@ -10,6 +10,7 @@ export interface State {
   selectedQueue: string | null;
   setSelectedQueue: (selectedQueue: string | null) => void;
   purgeQueue: (queueName: string) => Promise<void>;
+  deleteQueue: (queueName: string) => Promise<void>;
   status: React.ReactNode;
   setStatus: (status: React.ReactNode) => void;
 }
@@ -22,6 +23,7 @@ export const StateContext = createContext<State>({
   selectedQueue: null,
   setSelectedQueue: () => { },
   purgeQueue: async () => { },
+  deleteQueue: async () => { },
   status: (<Text></Text>),
   setStatus: () => { }
 });
@@ -56,6 +58,10 @@ export function StateProvider(props: {
     await api.api.purgeQueue(queueName);
   };
 
+  const deleteQueue = async (queueName: string): Promise<void> => {
+    await api.api.deleteQueue(queueName);
+  };
+
   const loadQueues = async (): Promise<void> => {
     const queues = await api.api.getQueues();
     setQueues(queues.data.queues);
@@ -81,7 +87,7 @@ export function StateProvider(props: {
 
   return (
     <StateContext.Provider
-      value={{ tuiVersion, queues, info, selectedQueue, setSelectedQueue, purgeQueue, loadQueues, status: _status.status, setStatus }}
+      value={{ tuiVersion, queues, info, selectedQueue, setSelectedQueue, purgeQueue, deleteQueue, loadQueues, status: _status.status, setStatus }}
     >
       {children}
     </StateContext.Provider>
