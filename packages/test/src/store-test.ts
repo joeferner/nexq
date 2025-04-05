@@ -5,11 +5,11 @@ import {
   Store,
   Time,
   TopicProtocol,
-  verifyPassword,
+  verifyPassword
 } from "@nexq/core";
+import * as R from "radash";
 import { afterEach, assert, beforeEach, describe, expect, test } from "vitest";
 import { MockTime } from "./MockTime.js";
-import * as R from "radash";
 
 const QUEUE1_NAME = "queue1";
 const QUEUE2_NAME = "queue2";
@@ -387,26 +387,22 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       // create the queue
       await store.createQueue(QUEUE1_NAME, { expiresMs: 60 * 1000 });
       await time.advance(59 * 1000);
-      await poll(store);
+      await store.poll();
 
       // verify receive_messages resets expire
-      console.log("a", time.getCurrentTime().toISOString());
       await store.receiveMessage(QUEUE1_NAME);
-      console.log("b", time.getCurrentTime().toISOString());
       await time.advance(59 * 1000);
-      console.log("c", time.getCurrentTime().toISOString());
-      await poll(store);
-      console.log("d", time.getCurrentTime().toISOString());
+      await store.poll();
       expect(await store.getQueueInfo(QUEUE1_NAME)).toBeTruthy();
 
       // verify queue gets deleted, first reset the clock
       await store.receiveMessage(QUEUE1_NAME);
       await time.advance(59 * 1000);
-      await poll(store);
+      await store.poll();
       expect(await store.getQueueInfo(QUEUE1_NAME)).toBeTruthy();
 
       await time.advance(2 * 1000);
-      await poll(store);
+      await store.poll();
       await expect(async () => await store.getQueueInfo(QUEUE1_NAME)).rejects.toThrowError(/not found/);
     });
 

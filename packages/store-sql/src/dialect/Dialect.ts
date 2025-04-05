@@ -86,13 +86,28 @@ import { parseOptionalDate } from "../utils.js";
 import { DialectCreateUser } from "./dto/DialectCreateUser.js";
 import { Transaction } from "./Transaction.js";
 import { SqlSubscription } from "../sql/dto/SqlSubscription.js";
+import EventEmitter from "node:events";
 
-export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> {
+export interface DialectMessageNotification {
+  op: "INSERT" | "UPDATE" | "DELETE";
+  id: string;
+  queueName: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export declare interface Dialect<TDatabase, TSql extends Sql<TDatabase>> {
+  on(event: "messageNotification", listener: (notification: DialectMessageNotification) => unknown): this;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends EventEmitter {
   protected constructor(
     protected readonly sql: TSql,
     protected readonly database: TDatabase,
     protected readonly time: Time
-  ) {}
+  ) {
+    super();
+  }
 
   public abstract beginTransaction(): Promise<Transaction>;
 

@@ -49,6 +49,7 @@ import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 import { clearRecord } from "./utils.js";
+import { DialectMessageNotification } from "./dialect/Dialect.js";
 
 const logger = createLogger("SqlStore");
 
@@ -112,7 +113,7 @@ export class SqlStore implements Store {
   private readonly passwordHashRounds: number;
   private readonly pollIntervalMs: number;
   private readonly dialect: SqliteDialect | PostgresDialect;
-  private readonly triggers: Trigger<NewQueueMessageEvent | ResumeEvent>[] = [];
+  private readonly triggers: Trigger<NewQueueMessageEvent | ResumeEvent | DialectMessageNotification>[] = [];
   private readonly cachedQueueInfo: Record<string, QueueInfo> = {};
   private readonly cachedTopicInfo: Record<string, TopicInfo> = {};
   private readonly queueTouched: Record<string, Date> = {};
@@ -121,6 +122,9 @@ export class SqlStore implements Store {
   private constructor(options: SqlStoreCreateOptions & { _dialect: SqliteDialect | PostgresDialect }) {
     this.time = options.time;
     this.dialect = options._dialect;
+    this.dialect.on("messageNotification", (notification) => {
+      this.handleDialectMessageNotification(notification);
+    });
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
 
     let pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
@@ -347,7 +351,11 @@ export class SqlStore implements Store {
     return this.dialect.getMessage(queue.name, messageId);
   }
 
-  private trigger(message: NewQueueMessageEvent | ResumeEvent): void {
+  private handleDialectMessageNotification(notification: DialectMessageNotification): void {
+    this.trigger(notification);
+  }
+
+  private trigger(message: NewQueueMessageEvent | ResumeEvent | DialectMessageNotification): void {
     const triggers = [...this.triggers];
     this.triggers.length = 0;
     for (const trigger of triggers) {
