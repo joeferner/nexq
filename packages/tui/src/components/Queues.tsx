@@ -7,7 +7,7 @@ import { getErrorMessage } from "../utils/error.js";
 import { Input, isInputMatch } from "../utils/Input.js";
 import { DialogContext, DialogService } from "./Dialogs.js";
 import { HotKey } from "./Header.js";
-import { SortDirection, TableView, TableViewColumn } from "./TableView.js";
+import { SortDirection, TableView, TableViewColumn, TableViewState } from "./TableView.js";
 
 export const QUEUES_ID = "queues";
 
@@ -60,24 +60,41 @@ const COLUMNS: TableViewColumn<GetQueueResponse>[] = [
   },
 ];
 
+export const QUEUES_DEFAULT_STATE: TableViewState<GetQueueResponse> = {
+  offset: 0,
+  selectedRowId: null,
+  sortColumn: COLUMNS[0],
+  sortColumnDirection: SortDirection.Ascending
+};
+
 export interface QueuesProps {
   input: Input | null;
 }
 
 interface _QueuesProps extends QueuesProps {
-  queues: GetQueueResponse[] | null;
   dialogService: DialogService;
   isFocused: boolean;
-  selectedQueue: string | null;
-  setSelectedQueue: (queueName: string | null) => void;
+  tableViewState: TableViewState<GetQueueResponse>;
+  setQueuesTableViewState: (state: TableViewState<GetQueueResponse>) => void;
   setStatus: (status: React.ReactNode) => void;
   purgeQueue: (queueName: string) => Promise<void>;
   deleteQueue: (queueName: string) => Promise<void>;
-  loadQueues: () => Promise<void>;
+  loadQueues: () => Promise<GetQueueResponse[]>;
 }
 
-export class _Queues extends React.Component<_QueuesProps> {
+interface QueuesState {
+  queues: (GetQueueResponse & { id: string })[];
+}
+
+export class _Queues extends React.Component<_QueuesProps, QueuesState> {
   private loadTimeout?: NodeJS.Timeout;
+
+  public constructor(props: _QueuesProps) {
+    super(props);
+    this.state = {
+      queues: []
+    }
+  }
 
   public override componentDidMount(): void {
     void this.load();
@@ -88,6 +105,26 @@ export class _Queues extends React.Component<_QueuesProps> {
     if (isFocused && input && input?.t !== prevProps.input?.t) {
       void this.processInput(input);
     }
+
+    if (this.props.tableViewState.sortColumn !== prevProps.tableViewState.sortColumn
+      || this.props.tableViewState.sortColumnDirection !== prevProps.tableViewState.sortColumnDirection
+    ) {
+      this.setState({
+        queues: this.sortQueues(this.state.queues)
+      });
+    }
+  }
+
+  private sortQueues(queues: GetQueueResponse[]): (GetQueueResponse & { id: string })[] {
+    const { sortColumn, sortColumnDirection } = this.props.tableViewState;
+
+    queues = sortColumn.sortRows(queues, sortColumnDirection);
+    return queues.map(q => {
+      return {
+        id: q.name,
+        ...q
+      }
+    });
   }
 
   public override componentWillUnmount(): void {
@@ -112,16 +149,16 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   private async purgeSelectedQueue(): Promise<void> {
-    const { dialogService, purgeQueue, selectedQueue, setStatus } = this.props;
+    const { dialogService, purgeQueue, tableViewState, setStatus } = this.props;
 
-    if (!selectedQueue) {
+    if (!tableViewState.selectedRowId) {
       void dialogService.showErrorDialog({
         message: `No selected queue`,
       });
       return;
     }
 
-    const queueName = selectedQueue;
+    const queueName = tableViewState.selectedRowId;
     const result = await dialogService.showConfirmationDialog({
       message: `Are you sure you want to purge "${queueName}"?`,
       options: ["Cancel", "Purge"],
@@ -142,16 +179,16 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   private async deleteSelectedQueue(): Promise<void> {
-    const { dialogService, deleteQueue, selectedQueue, setStatus } = this.props;
+    const { dialogService, deleteQueue, tableViewState, setStatus } = this.props;
 
-    if (!selectedQueue) {
+    if (!tableViewState.selectedRowId) {
       void dialogService.showErrorDialog({
         message: `No selected queue`,
       });
       return;
     }
 
-    const queueName = selectedQueue;
+    const queueName = tableViewState.selectedRowId;
     const result = await dialogService.showConfirmationDialog({
       message: `Are you sure you want to delete "${queueName}"?`,
       options: ["Cancel", "Delete"],
@@ -179,7 +216,10 @@ export class _Queues extends React.Component<_QueuesProps> {
     }
 
     try {
-      await loadQueues();
+      const queues = await loadQueues();
+      this.setState({
+        queues: this.sortQueues(queues)
+      })
     } finally {
       this.loadTimeout = setTimeout(() => {
         void this.load();
@@ -188,39 +228,37 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   public override render(): ReactNode {
-    const { input, queues, setSelectedQueue, selectedQueue } = this.props;
+    const { input, setQueuesTableViewState, tableViewState: queuesTableViewState } = this.props;
+    const { queues } = this.state;
 
     return (
       <TableView
         id={QUEUES_ID}
         input={input}
         columns={COLUMNS}
-        rows={queues ?? []}
-        selectedRow={queues?.find(q => q.name == selectedQueue) ?? null}
-        selectedRowChanged={(queue) => {
-          setSelectedQueue(queue?.name ?? null);
-        }}
+        rows={queues}
+        state={queuesTableViewState}
+        stateChanged={setQueuesTableViewState}
       />
     );
   }
 }
 
 export function Queues(props: QueuesProps): ReactNode {
-  const { queues, purgeQueue, deleteQueue, loadQueues, selectedQueue, setSelectedQueue, setStatus } = React.useContext(StateContext);
+  const { purgeQueue, deleteQueue, loadQueues, queuesTableViewState, setQueuesTableViewState, setStatus } = React.useContext(StateContext);
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 
   return (
     <_Queues
       {...props}
-      queues={queues}
       purgeQueue={purgeQueue}
       deleteQueue={deleteQueue}
       loadQueues={loadQueues}
       dialogService={dialogService}
       isFocused={isFocused}
-      selectedQueue={selectedQueue}
-      setSelectedQueue={setSelectedQueue}
+      tableViewState={queuesTableViewState}
+      setQueuesTableViewState={setQueuesTableViewState}
       setStatus={setStatus}
     />
   );

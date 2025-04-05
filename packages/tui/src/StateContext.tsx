@@ -1,14 +1,15 @@
+import { Text } from "ink";
 import React, { createContext, useEffect, useState } from "react";
 import { Api, GetInfoResponse, GetQueueResponse } from "./client/NexqClientApi.js";
-import { Text } from "ink";
+import { QUEUES_DEFAULT_STATE } from "./components/Queues.js";
+import { TableViewState } from "./components/TableView.js";
 
 export interface State {
   tuiVersion: string;
   info: GetInfoResponse | null;
-  queues: GetQueueResponse[] | null;
-  loadQueues: () => Promise<void>;
-  selectedQueue: string | null;
-  setSelectedQueue: (selectedQueue: string | null) => void;
+  loadQueues: () => Promise<GetQueueResponse[]>;
+  queuesTableViewState: TableViewState<GetQueueResponse>;
+  setQueuesTableViewState: (state: TableViewState<GetQueueResponse>) => void;
   purgeQueue: (queueName: string) => Promise<void>;
   deleteQueue: (queueName: string) => Promise<void>;
   status: React.ReactNode;
@@ -18,10 +19,9 @@ export interface State {
 export const StateContext = createContext<State>({
   tuiVersion: "???",
   info: null,
-  queues: null,
-  loadQueues: async () => { },
-  selectedQueue: null,
-  setSelectedQueue: () => { },
+  loadQueues: async () => { return []; },
+  queuesTableViewState: QUEUES_DEFAULT_STATE,
+  setQueuesTableViewState: () => { },
   purgeQueue: async () => { },
   deleteQueue: async () => { },
   status: (<Text></Text>),
@@ -41,8 +41,7 @@ export function StateProvider(props: {
   const { children, api, tuiVersion } = props;
 
   const [info, setInfo] = useState<GetInfoResponse | null>(null);
-  const [queues, setQueues] = useState<GetQueueResponse[] | null>(null);
-  const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
+  const [queuesTableViewState, setQueuesTableViewState] = useState<TableViewState<GetQueueResponse>>(QUEUES_DEFAULT_STATE);
   const [_status, _setStatus] = useState<Status>({ status: (<Text></Text>), timeout: null });
 
   useEffect(() => {
@@ -62,9 +61,9 @@ export function StateProvider(props: {
     await api.api.deleteQueue(queueName);
   };
 
-  const loadQueues = async (): Promise<void> => {
+  const loadQueues = async (): Promise<GetQueueResponse[]> => {
     const queues = await api.api.getQueues();
-    setQueues(queues.data.queues);
+    return queues.data.queues;
   };
 
   const setStatus = (status: React.ReactNode): void => {
@@ -87,7 +86,17 @@ export function StateProvider(props: {
 
   return (
     <StateContext.Provider
-      value={{ tuiVersion, queues, info, selectedQueue, setSelectedQueue, purgeQueue, deleteQueue, loadQueues, status: _status.status, setStatus }}
+      value={{
+        tuiVersion,
+        info,
+        queuesTableViewState,
+        setQueuesTableViewState,
+        purgeQueue,
+        deleteQueue,
+        loadQueues,
+        status: _status.status,
+        setStatus
+      }}
     >
       {children}
     </StateContext.Provider>

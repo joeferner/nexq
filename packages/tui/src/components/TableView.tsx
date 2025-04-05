@@ -22,13 +22,20 @@ export interface TableViewColumn<T> {
   valueFn: (row: T) => string | number;
 }
 
+export interface TableViewState<T> {
+  offset: number;
+  selectedRowId: string | null;
+  sortColumn: TableViewColumn<T>;
+  sortColumnDirection: SortDirection;
+}
+
 export interface TableViewProps<T> {
   id: string;
   columns: TableViewColumn<T>[];
   input: Input | null;
-  rows: T[];
-  selectedRowChanged: (row: T | null) => unknown;
-  selectedRow: T | null;
+  rows: (T & { id: string })[];
+  stateChanged: (state: TableViewState<T>) => unknown;
+  state: TableViewState<T>;
 }
 
 export interface _TableViewProps<T> extends TableViewProps<T> {
@@ -38,78 +45,36 @@ export interface _TableViewProps<T> extends TableViewProps<T> {
   input: Input | null;
 }
 
-export interface TableViewState<T> {
-  selectedIndex: number;
-  offset: number;
-  sortColumn: TableViewColumn<T> | undefined;
-  sortColumnDirection: SortDirection;
-  sortedRows: T[];
-}
-
-class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T>> {
-  public constructor(props: _TableViewProps<T>) {
-    super(props);
-    this.state = {
-      selectedIndex: 0,
-      offset: 0,
-      sortColumn: props.columns[0],
-      sortColumnDirection: SortDirection.Ascending,
-      sortedRows: [],
-    };
-  }
-
-  public override componentDidMount(): void {
-    this.updateSortedRows();
-  }
-
+class _TableView<T> extends React.Component<_TableViewProps<T>> {
   public override componentDidUpdate(
     prevProps: Readonly<_TableViewProps<T>>,
-    prevState: Readonly<TableViewState<T>>
+    _prevState: Readonly<unknown>
   ): void {
     if (this.props.isFocused && this.props.input && this.props.input?.t !== prevProps.input?.t) {
       this.processInput(this.props.input);
     }
 
-    if (this.props.selectedRow !== prevProps.selectedRow) {
-      if (this.props.selectedRow) {
-        const selectedIndex = this.props.rows.indexOf(this.props.selectedRow);
+    if (this.props.state !== prevProps.state) {
+      if (this.props.state.selectedRowId) {
+        const { selectedRowId, offset: stateOffset } = this.props.state;
+
+        const selectedIndex = this.props.rows.findIndex(r => r.id === selectedRowId);
         let offset: number;
-        if (selectedIndex >= this.state.offset + (this.props.displayRows - 3)) {
+        if (selectedIndex >= stateOffset + (this.props.displayRows - 3)) {
           offset = selectedIndex - (this.props.displayRows - 4);
-        } else if (selectedIndex < this.state.offset) {
+        } else if (selectedIndex < stateOffset) {
           offset = selectedIndex;
         } else {
-          offset = this.state.offset;
+          offset = stateOffset;
         }
-        this.setState({
-          selectedIndex,
-          offset
-        });
-      } else {
-        this.setState({
-          selectedIndex: -1
-        });
+        if (this.props.state.offset !== offset) {
+          this.props.stateChanged({
+            ...this.props.state,
+            offset
+          });
+        };
       }
     }
-
-    if (
-      this.state.sortColumn !== prevState.sortColumn ||
-      this.props.rows !== prevProps.rows ||
-      this.state.sortColumnDirection !== prevState.sortColumnDirection
-    ) {
-      this.updateSortedRows();
-    }
-  }
-
-  private updateSortedRows(): void {
-    const { sortColumn, sortColumnDirection } = this.state;
-    const { rows } = this.props;
-
-    const sortedRows = sortColumn?.sortRows(rows, sortColumnDirection) ?? rows;
-    this.props.selectedRowChanged(sortedRows[this.state.selectedIndex] ?? null);
-    this.setState({
-      sortedRows,
-    });
   }
 
   private processInput(input: Input): void {
@@ -127,11 +92,12 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
 
     for (const column of this.props.columns) {
       if (column.sortKeyboardShortcut && isInputMatch(input, column.sortKeyboardShortcut)) {
-        const isSameColumn = this.state.sortColumn?.name === column.name;
-        this.setState({
+        const isSameColumn = this.props.state.sortColumn?.name === column.name;
+        this.props.stateChanged({
+          ...this.props.state,
           sortColumn: column,
           sortColumnDirection:
-            isSameColumn && this.state.sortColumnDirection === SortDirection.Ascending
+            isSameColumn && this.props.state.sortColumnDirection === SortDirection.Ascending
               ? SortDirection.Descending
               : SortDirection.Ascending,
         });
@@ -141,8 +107,10 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
   }
 
   public override render(): ReactNode {
-    const { selectedIndex, offset, sortColumn, sortColumnDirection, sortedRows } = this.state;
     const { rows, columns, displayColumns, displayRows } = this.props;
+    const { offset, sortColumn, sortColumnDirection, selectedRowId } = this.props.state;
+
+    const selectedIndex = selectedRowId ? rows.findIndex(r => r.id === selectedRowId) : 0;
 
     const columnWidths = columns.map((column) => {
       return (
@@ -167,7 +135,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
         />
         <Box flexDirection="row" justifyContent="space-between">
           <Box flexDirection="column">
-            {sortedRows.slice(offset, offset + displayRows - 3).map((row: T, rowIndex) => {
+            {rows.slice(offset, offset + displayRows - 3).map((row: T, rowIndex) => {
               const selected = selectedIndex === rowIndex + offset;
               return (
                 <Box key={rowIndex}>
@@ -189,17 +157,20 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
   }
 
   private setSelectedIndexHelper(changer: (value: number) => number): void {
-    this.setState((prevState) => {
-      const next = changer(prevState.selectedIndex);
-      const selectedIndex = Math.max(0, Math.min(this.props.rows.length - 1, next));
-      this.props.selectedRowChanged(this.state.sortedRows[selectedIndex] ?? null);
+    const { selectedRowId } = this.props.state;
+    const prevSelectedIndex = selectedRowId ? this.props.rows.findIndex(r => r.id === selectedRowId) : 0;
+    const next = changer(prevSelectedIndex);
+    const selectedIndex = Math.max(0, Math.min(this.props.rows.length - 1, next));
+    this.props.stateChanged({
+      ...this.props.state,
+      selectedRowId: this.props.rows[selectedIndex]?.id ?? null
     });
   }
 }
 
 interface TableViewHeaderProps<T> {
   columns: TableViewColumn<T>[];
-  sortColumn: TableViewColumn<T> | undefined;
+  sortColumn: TableViewColumn<T> | null;
   sortColumnDirection: SortDirection;
   columnWidths: number[];
 }
