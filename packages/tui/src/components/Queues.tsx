@@ -1,4 +1,4 @@
-import { useFocus } from "ink";
+import { Text, useFocus } from "ink";
 import * as R from "radash";
 import React, { ReactNode } from "react";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
@@ -13,10 +13,10 @@ export const QUEUES_ID = "queues";
 
 export const QUEUE_HOTKEYS: HotKey[] = [
   {
-    id: 'purge',
-    name: 'Purge',
-    shortcut: 'ctrl-u'
-  }
+    id: "purge",
+    name: "Purge",
+    shortcut: "ctrl-u",
+  },
 ];
 
 const COLUMNS: TableViewColumn<GetQueueResponse>[] = [
@@ -65,6 +65,7 @@ interface _QueuesProps extends QueuesProps {
   isFocused: boolean;
   selectedQueue: string | null;
   setSelectedQueue: (queueName: string | null) => void;
+  setStatus: (status: React.ReactNode) => void;
   purgeQueue: (queueName: string) => Promise<void>;
   loadQueues: () => Promise<void>;
 }
@@ -76,13 +77,16 @@ export class _Queues extends React.Component<_QueuesProps> {
     void this.load();
   }
 
-  public override componentDidUpdate(
-    prevProps: Readonly<_QueuesProps>,
-    _prevState: Readonly<unknown>
-  ): void {
+  public override componentDidUpdate(prevProps: Readonly<_QueuesProps>, _prevState: Readonly<unknown>): void {
     const { isFocused, input } = this.props;
     if (isFocused && input && input?.t !== prevProps.input?.t) {
       void this.processInput(input);
+    }
+  }
+
+  public override componentWillUnmount(): void {
+    if (this.loadTimeout) {
+      clearTimeout(this.loadTimeout);
     }
   }
 
@@ -90,7 +94,7 @@ export class _Queues extends React.Component<_QueuesProps> {
     for (const hotkey of QUEUE_HOTKEYS) {
       if (isInputMatch(input, hotkey.shortcut)) {
         switch (hotkey.id) {
-          case 'purge':
+          case "purge":
             await this.purgeSelectedQueue();
             break;
         }
@@ -99,11 +103,11 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   private async purgeSelectedQueue(): Promise<void> {
-    const { dialogService, purgeQueue, selectedQueue } = this.props;
+    const { dialogService, purgeQueue, selectedQueue, setStatus } = this.props;
 
     if (!selectedQueue) {
       void dialogService.showErrorDialog({
-        message: `No selected queue`
+        message: `No selected queue`,
       });
       return;
     }
@@ -112,14 +116,15 @@ export class _Queues extends React.Component<_QueuesProps> {
     const result = await dialogService.showConfirmationDialog({
       message: `Are you sure you want to purge "${queueName}"?`,
       options: ["Cancel", "Purge"],
-      defaultOption: "Cancel"
+      defaultOption: "Cancel",
     });
-    if (result === 'Purge') {
+    if (result === "Purge") {
       try {
         await purgeQueue(queueName);
+        setStatus((<Text>Queue "{queueName}" purged!</Text>));
       } catch (err) {
         void dialogService.showErrorDialog({
-          message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`
+          message: `Failed to purge "${queueName}".\n\n${getErrorMessage(err)}`,
         });
       } finally {
         void this.load();
@@ -146,23 +151,36 @@ export class _Queues extends React.Component<_QueuesProps> {
   public override render(): ReactNode {
     const { input, queues, setSelectedQueue } = this.props;
 
-    return <TableView id={QUEUES_ID} input={input} columns={COLUMNS} rows={queues ?? []} selectedRowChanged={queue => { setSelectedQueue(queue?.name ?? null) }} />;
+    return (
+      <TableView
+        id={QUEUES_ID}
+        input={input}
+        columns={COLUMNS}
+        rows={queues ?? []}
+        selectedRowChanged={(queue) => {
+          setSelectedQueue(queue?.name ?? null);
+        }}
+      />
+    );
   }
 }
 
 export function Queues(props: QueuesProps): ReactNode {
-  const state = React.useContext(StateContext);
+  const { queues, purgeQueue, loadQueues, selectedQueue, setSelectedQueue, setStatus } = React.useContext(StateContext);
   const dialogService = React.useContext(DialogContext);
   const { isFocused } = useFocus({ id: QUEUES_ID });
 
-  return <_Queues
-    {...props}
-    queues={state.queues}
-    purgeQueue={state.purgeQueue}
-    loadQueues={state.loadQueues}
-    dialogService={dialogService}
-    isFocused={isFocused}
-    selectedQueue={state.selectedQueue}
-    setSelectedQueue={state.setSelectedQueue}
-  />;
+  return (
+    <_Queues
+      {...props}
+      queues={queues}
+      purgeQueue={purgeQueue}
+      loadQueues={loadQueues}
+      dialogService={dialogService}
+      isFocused={isFocused}
+      selectedQueue={selectedQueue}
+      setSelectedQueue={setSelectedQueue}
+      setStatus={setStatus}
+    />
+  );
 }

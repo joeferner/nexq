@@ -1,10 +1,11 @@
-import { Box, useApp, useInput } from "ink";
-import React, { ReactNode, useEffect, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
+import React, { ReactNode, useContext, useEffect, useState } from "react";
 import { Input } from "../utils/Input.js";
 import { useNexqFocusManager } from "../utils/useNexqFocusManager.js";
 import { Header } from "./Header.js";
 import { Dialogs } from "./Dialogs.js";
 import { QUEUE_HOTKEYS, Queues, QUEUES_ID } from "./Queues.js";
+import { StateContext } from "../StateContext.js";
 
 export interface MainProps {
   _placeholder?: unknown;
@@ -13,6 +14,7 @@ export interface MainProps {
 interface _MainProps extends MainProps {
   exit: () => void;
   input: Input | null;
+  status: React.ReactNode;
 }
 
 class _Main extends React.Component<_MainProps> {
@@ -22,16 +24,16 @@ class _Main extends React.Component<_MainProps> {
     }
   }
 
-  private processInput(_input: Input): void {
-  }
+  private processInput(_input: Input): void { }
 
   public override render(): ReactNode {
-    const { input } = this.props;
+    const { input, status } = this.props;
 
     return (
       <Box flexDirection="column" height="100%">
         <Header hotkeys={QUEUE_HOTKEYS} />
         <Queues input={input} />
+        <Box justifyContent="center">{status}</Box>
         <Dialogs input={input} />
       </Box>
     );
@@ -40,6 +42,7 @@ class _Main extends React.Component<_MainProps> {
 
 export function Main(props: MainProps): ReactNode {
   const { exit } = useApp();
+  const { status } = useContext(StateContext);
   const { focus, enableFocus } = useNexqFocusManager();
   const [input, setInput] = useState<Input | null>(null);
   useInput((text, key) => {
@@ -51,5 +54,5 @@ export function Main(props: MainProps): ReactNode {
     focus(QUEUES_ID);
   }, []);
 
-  return <_Main {...props} exit={exit} input={input} />;
+  return <_Main {...props} exit={exit} input={input} status={status} />;
 }

@@ -1,50 +1,89 @@
 import React, { createContext, useEffect, useState } from "react";
 import { Api, GetInfoResponse, GetQueueResponse } from "./client/NexqClientApi.js";
+import { Text } from "ink";
 
 export interface State {
-    tuiVersion: string;
-    info: GetInfoResponse | null;
-    queues: GetQueueResponse[] | null;
-    loadQueues: () => Promise<void>;
-    selectedQueue: string | null;
-    setSelectedQueue: (selectedQueue: string | null) => void;
-    purgeQueue: (queueName: string) => Promise<void>;
+  tuiVersion: string;
+  info: GetInfoResponse | null;
+  queues: GetQueueResponse[] | null;
+  loadQueues: () => Promise<void>;
+  selectedQueue: string | null;
+  setSelectedQueue: (selectedQueue: string | null) => void;
+  purgeQueue: (queueName: string) => Promise<void>;
+  status: React.ReactNode;
+  setStatus: (status: React.ReactNode) => void;
 }
 
 export const StateContext = createContext<State>({
-    tuiVersion: '???',
-    info: null,
-    queues: null,
-    loadQueues: async () => { },
-    selectedQueue: null,
-    setSelectedQueue: () => { },
-    purgeQueue: async () => { }
+  tuiVersion: "???",
+  info: null,
+  queues: null,
+  loadQueues: async () => { },
+  selectedQueue: null,
+  setSelectedQueue: () => { },
+  purgeQueue: async () => { },
+  status: (<Text></Text>),
+  setStatus: () => { }
 });
 
-export function StateProvider(props: { api: Api<unknown>, tuiVersion: string, children: React.ReactNode | React.ReactNode[] }): React.ReactNode {
-    const { children, api, tuiVersion } = props;
+interface Status {
+  status: React.ReactNode;
+  timeout: NodeJS.Timeout | null;
+}
 
-    const [info, setInfo] = useState<GetInfoResponse | null>(null);
-    const [queues, setQueues] = useState<GetQueueResponse[] | null>(null);
-    const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
+export function StateProvider(props: {
+  api: Api<unknown>;
+  tuiVersion: string;
+  children: React.ReactNode | React.ReactNode[];
+}): React.ReactNode {
+  const { children, api, tuiVersion } = props;
 
-    useEffect(() => {
-        const load = async (): Promise<void> => {
-            const newInfo = await api.api.getInfo();
-            setInfo(newInfo.data);
-        }
+  const [info, setInfo] = useState<GetInfoResponse | null>(null);
+  const [queues, setQueues] = useState<GetQueueResponse[] | null>(null);
+  const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
+  const [_status, _setStatus] = useState<Status>({ status: (<Text></Text>), timeout: null });
 
-        void load();
-    }, []);
+  useEffect(() => {
+    const load = async (): Promise<void> => {
+      const newInfo = await api.api.getInfo();
+      setInfo(newInfo.data);
+    };
 
-    const purgeQueue = async (queueName: string): Promise<void> => {
-        await api.api.purgeQueue(queueName);
+    void load();
+  }, []);
+
+  const purgeQueue = async (queueName: string): Promise<void> => {
+    await api.api.purgeQueue(queueName);
+  };
+
+  const loadQueues = async (): Promise<void> => {
+    const queues = await api.api.getQueues();
+    setQueues(queues.data.queues);
+  };
+
+  const setStatus = (status: React.ReactNode): void => {
+    if (_status.timeout) {
+      clearTimeout(_status.timeout);
     }
 
-    const loadQueues = async (): Promise<void> => {
-        const queues = await api.api.getQueues();
-        setQueues(queues.data.queues);
-    }
+    const timeout = setTimeout(() => {
+      _setStatus({
+        status: (<Text></Text>),
+        timeout: null
+      })
+    }, 1000);
 
-    return (<StateContext.Provider value={{ tuiVersion, queues, info, selectedQueue, setSelectedQueue, purgeQueue, loadQueues }}>{children}</StateContext.Provider>);
+    _setStatus({
+      status,
+      timeout
+    });
+  }
+
+  return (
+    <StateContext.Provider
+      value={{ tuiVersion, queues, info, selectedQueue, setSelectedQueue, purgeQueue, loadQueues, status: _status.status, setStatus }}
+    >
+      {children}
+    </StateContext.Provider>
+  );
 }

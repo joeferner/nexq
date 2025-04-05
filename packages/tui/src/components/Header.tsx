@@ -39,14 +39,17 @@ class _Header extends React.Component<_HeaderProps> {
           </Box>
           <Box>
             <Text color={NAME_COLOR}>NexQ Ver: </Text>
-            <Text color="white">v{info?.version ?? '???'}</Text>
+            <Text color="white">v{info?.version ?? "???"}</Text>
           </Box>
         </Box>
         <Box>
-          {hotkeys.map(hotkey => {
-            return (<Box>
-              <Text color={HOTKEY_COLOR}>{`<${hotkey.shortcut}>`}</Text><Text color={HOTKEY_NAME_COLOR}> {hotkey.name}</Text>
-            </Box>);
+          {hotkeys.map((hotkey) => {
+            return (
+              <Box>
+                <Text color={HOTKEY_COLOR}>{`<${hotkey.shortcut}>`}</Text>
+                <Text color={HOTKEY_NAME_COLOR}> {hotkey.name}</Text>
+              </Box>
+            );
           })}
         </Box>
         <Box>
@@ -59,5 +62,5 @@ class _Header extends React.Component<_HeaderProps> {
 
 export function Header(props: HeaderProps): ReactNode {
   const state = React.useContext(StateContext);
-  return (<_Header {...props} info={state.info} tuiVersion={state.tuiVersion} />);
+  return <_Header {...props} info={state.info} tuiVersion={state.tuiVersion} />;
 }
