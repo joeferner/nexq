@@ -28,6 +28,7 @@ export interface TableViewProps<T> {
   input: Input | null;
   rows: T[];
   selectedRowChanged: (row: T | null) => unknown;
+  selectedRow: T | null;
 }
 
 export interface _TableViewProps<T> extends TableViewProps<T> {
@@ -67,6 +68,28 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
   ): void {
     if (this.props.isFocused && this.props.input && this.props.input?.t !== prevProps.input?.t) {
       this.processInput(this.props.input);
+    }
+
+    if (this.props.selectedRow !== prevProps.selectedRow) {
+      if (this.props.selectedRow) {
+        const selectedIndex = this.props.rows.indexOf(this.props.selectedRow);
+        let offset: number;
+        if (selectedIndex >= this.state.offset + (this.props.displayRows - 3)) {
+          offset = selectedIndex - (this.props.displayRows - 4);
+        } else if (selectedIndex < this.state.offset) {
+          offset = selectedIndex;
+        } else {
+          offset = this.state.offset;
+        }
+        this.setState({
+          selectedIndex,
+          offset
+        });
+      } else {
+        this.setState({
+          selectedIndex: -1
+        });
+      }
     }
 
     if (
@@ -169,21 +192,7 @@ class _TableView<T> extends React.Component<_TableViewProps<T>, TableViewState<T
     this.setState((prevState) => {
       const next = changer(prevState.selectedIndex);
       const selectedIndex = Math.max(0, Math.min(this.props.rows.length - 1, next));
-      let offset: number;
-      if (selectedIndex >= this.state.offset + (this.props.displayRows - 3)) {
-        offset = selectedIndex - (this.props.displayRows - 4);
-      } else if (selectedIndex < this.state.offset) {
-        offset = selectedIndex;
-      } else {
-        offset = this.state.offset;
-      }
-      if (prevState.selectedIndex !== selectedIndex) {
-        this.props.selectedRowChanged(this.state.sortedRows[selectedIndex] ?? null);
-      }
-      return {
-        selectedIndex,
-        offset,
-      };
+      this.props.selectedRowChanged(this.state.sortedRows[selectedIndex] ?? null);
     });
   }
 }

@@ -188,7 +188,7 @@ export class _Queues extends React.Component<_QueuesProps> {
   }
 
   public override render(): ReactNode {
-    const { input, queues, setSelectedQueue } = this.props;
+    const { input, queues, setSelectedQueue, selectedQueue } = this.props;
 
     return (
       <TableView
@@ -196,6 +196,7 @@ export class _Queues extends React.Component<_QueuesProps> {
         input={input}
         columns={COLUMNS}
         rows={queues ?? []}
+        selectedRow={queues?.find(q => q.name == selectedQueue) ?? null}
         selectedRowChanged={(queue) => {
           setSelectedQueue(queue?.name ?? null);
         }}
