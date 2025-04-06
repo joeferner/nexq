@@ -108,12 +108,15 @@ export interface SqlStoreCreateOptions {
   config: SqlStoreCreateConfig;
 }
 
+type QueueTriggerMessage = NewQueueMessageEvent | ResumeEvent | DialectMessageNotification;
+type QueueTrigger = Trigger<QueueTriggerMessage>;
+
 export class SqlStore implements Store {
   private readonly time: Time;
   private readonly passwordHashRounds: number;
   private readonly pollIntervalMs: number;
   private readonly dialect: SqliteDialect | PostgresDialect;
-  private readonly triggers: Trigger<NewQueueMessageEvent | ResumeEvent | DialectMessageNotification>[] = [];
+  private readonly triggers: Record<string, QueueTrigger[]> = {};
   private readonly cachedQueueInfo: Record<string, QueueInfo> = {};
   private readonly cachedTopicInfo: Record<string, TopicInfo> = {};
   private readonly queueTouched: Record<string, Date> = {};
@@ -254,7 +257,7 @@ export class SqlStore implements Store {
       throw new MessageExceededMaxMessageSizeError(body.length, queueInfo.maxMessageSize);
     }
     await this.dialect.sendMessage(undefined, queueInfo, id, body, options);
-    this.trigger({ type: "new-queue-message", queueName } satisfies NewQueueMessageEvent);
+    this.trigger({ type: "newQueueMessageEvent", queueName } satisfies NewQueueMessageEvent);
     return { id };
   }
 
@@ -281,7 +284,7 @@ export class SqlStore implements Store {
     for (const queueInfo of queueInfos) {
       const id = createId();
       await this.dialect.sendMessage(tx, queueInfo, id, body, options);
-      this.trigger({ type: "new-queue-message", queueName: queueInfo.name } satisfies NewQueueMessageEvent);
+      this.trigger({ type: "newQueueMessageEvent", queueName: queueInfo.name } satisfies NewQueueMessageEvent);
     }
   }
 
@@ -310,8 +313,7 @@ export class SqlStore implements Store {
       }
     }
     while (true) {
-      const trigger = new Trigger<NewQueueMessageEvent>(this.time);
-      this.triggers.push(trigger);
+      const trigger = this.addTrigger(queueName);
 
       if (!queueInfo.paused) {
         const messages = await this.dialect.receiveMessages(queueName, {
@@ -355,9 +357,21 @@ export class SqlStore implements Store {
     this.trigger(notification);
   }
 
-  private trigger(message: NewQueueMessageEvent | ResumeEvent | DialectMessageNotification): void {
-    const triggers = [...this.triggers];
-    this.triggers.length = 0;
+  private addTrigger(queueName: string): QueueTrigger {
+    const trigger = new Trigger<QueueTriggerMessage>(this.time);
+    this.triggers[queueName] ??= [];
+    this.triggers[queueName].push(trigger);
+    return trigger;
+  }
+
+  private trigger(message: QueueTriggerMessage): void {
+    const queueName = message.queueName;
+    if (!(queueName in this.triggers)) {
+      return;
+    }
+    const triggers = this.triggers[queueName];
+    delete this.triggers[queueName];
+
     for (const trigger of triggers) {
       trigger.trigger(message);
     }
@@ -397,7 +411,7 @@ export class SqlStore implements Store {
     await this.dialect.resume(queueName);
     const queue = await this.getCachedQueueInfo(queueName);
     queue.paused = false;
-    this.trigger({ type: "resume" } satisfies ResumeEvent);
+    this.trigger({ type: "resumeEvent", queueName } satisfies ResumeEvent);
   }
 
   public async poll(): Promise<void> {

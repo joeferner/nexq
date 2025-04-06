@@ -1,8 +1,9 @@
 export interface NewQueueMessageEvent {
-  type: "new-queue-message";
+  type: "newQueueMessageEvent";
   queueName: string;
 }
 
 export interface ResumeEvent {
-  type: "resume";
+  type: "resumeEvent";
+  queueName: string;
 }

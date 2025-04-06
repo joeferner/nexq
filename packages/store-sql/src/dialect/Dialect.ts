@@ -89,6 +89,7 @@ import { SqlSubscription } from "../sql/dto/SqlSubscription.js";
 import EventEmitter from "node:events";
 
 export interface DialectMessageNotification {
+  type: "dialectMessageNotification";
   op: "INSERT" | "UPDATE" | "DELETE";
   id: string;
   queueName: string;

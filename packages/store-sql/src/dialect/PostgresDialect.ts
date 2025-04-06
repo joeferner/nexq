@@ -40,6 +40,7 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
 
       const payloadObj = JSON.parse(payload) as DialectMessageNotification;
       this.emit("messageNotification", {
+        type: "dialectMessageNotification",
         op: payloadObj.op,
         id: payloadObj.id,
         queueName: payloadObj.queueName,
