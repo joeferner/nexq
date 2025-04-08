@@ -23,7 +23,7 @@ async function parseCommandLineAndStart(): Promise<void> {
         long: "allowUnauthorized",
         type: boolean,
         description: "disable strict certificate validation",
-        defaultValue: () => true,
+        defaultValue: () => false,
       }),
       ca: option({
         long: "ca",
