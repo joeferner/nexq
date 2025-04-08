@@ -32,6 +32,7 @@ RUN find /opt/nexq/packages -type d -not -path "*/node_modules/*" -exec chmod 55
     && find /opt/nexq/packages -type f -not -path "*/node_modules/*" -exec chmod 444 {} \;
 
 COPY --chmod=555 docker-files/start.sh /opt/nexq/start
+COPY --chmod=555 docker-files/tui.sh /opt/nexq/tui
 
 WORKDIR /opt/nexq/
 USER node
