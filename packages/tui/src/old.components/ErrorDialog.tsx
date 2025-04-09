@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
-import { MAIN_BORDER_COLOR } from "../styles.js";
-import { Input } from "../utils/Input.js";
+import { MAIN_BORDER_COLOR } from "./styles.js";
+import { Input } from "./Input.js";
 import { Dialog } from "./Dialog.js";
 
 export const ERROR_DIALOG_ID = "ErrorDialog";

@@ -1,8 +1,8 @@
 import { Box, Text } from "ink";
 import React, { ReactNode } from "react";
-import { StateContext } from "../StateContext.js";
 import { GetInfoResponse } from "../client/NexqClientApi.js";
-import { HOTKEY_COLOR, HOTKEY_NAME_COLOR } from "../styles.js";
+import { HOTKEY_COLOR, HOTKEY_NAME_COLOR } from "./styles.js";
+import { StateContext } from "./StateContext.js";
 
 const NAME_COLOR = "#fca321";
 const LOGO = `     __            ____ 

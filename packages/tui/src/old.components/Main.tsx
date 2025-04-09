@@ -1,8 +1,8 @@
 import { Box, useApp, useInput } from "ink";
 import React, { ReactNode, useContext, useEffect, useState } from "react";
-import { StateContext } from "../StateContext.js";
-import { Input } from "../utils/Input.js";
-import { useNexqFocusManager } from "../utils/useNexqFocusManager.js";
+import { StateContext } from "./StateContext.js";
+import { Input } from "./Input.js";
+import { useNexqFocusManager } from "./useNexqFocusManager.js";
 import { Dialogs } from "./Dialogs.js";
 import { Header } from "./Header.js";
 import { QUEUE_HOTKEYS, Queues, QUEUES_ID } from "./Queues.js";

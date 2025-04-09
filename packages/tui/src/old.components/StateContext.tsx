@@ -1,8 +1,8 @@
 import { Text } from "ink";
 import React, { createContext, useEffect, useState } from "react";
-import { Api, GetInfoResponse, GetQueueResponse } from "./client/NexqClientApi.js";
-import { QUEUES_DEFAULT_STATE } from "./components/Queues.js";
-import { TableViewState } from "./components/TableView.js";
+import { Api, GetInfoResponse, GetQueueResponse } from "../client/NexqClientApi.js";
+import { TableViewState } from "./TableView.js";
+import { QUEUES_DEFAULT_STATE } from "./Queues.js";
 
 export interface State {
   tuiVersion: string;

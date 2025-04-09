@@ -1,6 +1,6 @@
 import { Box, DOMElement, measureElement, Text } from "ink";
 import React from "react";
-import { Dimensions, useStdoutDimensions } from "../utils/useStdoutDimensions.js";
+import { Dimensions, useStdoutDimensions } from "./useStdoutDimensions.js";
 
 export interface DialogProps {
   borderColor: string;

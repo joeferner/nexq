@@ -1,6 +1,6 @@
 import React, { createContext } from "react";
-import { Input } from "../utils/Input.js";
-import { useNexqFocusManager } from "../utils/useNexqFocusManager.js";
+import { Input } from "./Input.js";
+import { useNexqFocusManager } from "./useNexqFocusManager.js";
 import { CONFIRMATION_DIALOG_ID, ConfirmationDialog } from "./ConfirmationDialog.js";
 import { ERROR_DIALOG_ID, ErrorDialog } from "./ErrorDialog.js";
 

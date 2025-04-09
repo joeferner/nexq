@@ -1,9 +1,9 @@
 import { Box, Text, useFocus } from "ink";
 import * as R from "radash";
 import React, { ReactNode } from "react";
-import { HEADER_HEIGHT, MAIN_BORDER_COLOR, STATUS_HEIGHT, UNSELECTED_TEXT_COLOR } from "../styles.js";
-import { Input, isInputMatch } from "../utils/Input.js";
-import { useStdoutDimensions } from "../utils/useStdoutDimensions.js";
+import { HEADER_HEIGHT, MAIN_BORDER_COLOR, STATUS_HEIGHT, UNSELECTED_TEXT_COLOR } from "./styles.js";
+import { Input, isInputMatch } from "./Input.js";
+import { useStdoutDimensions } from "./useStdoutDimensions.js";
 
 const SPACE_BETWEEN_COLUMNS = 1;
 const SORT_ARROW_WIDTH = 1;
