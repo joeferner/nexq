@@ -10,6 +10,7 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier src --write",
     "start": "node --enable-source-maps build/main.js",
+    "start:debug": "node --inspect --enable-source-maps build/main.js",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "generate": "swagger-typescript-api generate --axios -o src/client -n NexqClientApi -p http://localhost:7887/swagger.json"
@@ -22,18 +23,16 @@
     "type": "git"
   },
   "dependencies": {
+    "ansi-escapes": "^7.0.0",
+    "ansis": "^3.17.0",
     "axios": "^1.8.4",
     "cmd-ts": "^0.13.0",
     "find-root": "^1.1.0",
-    "ink": "^5.2.0",
-    "radash": "^12.1.0",
-    "react": "^18.3.1"
+    "radash": "^12.1.0"
   },
   "devDependencies": {
     "@types/find-root": "^1.1.4",
-    "@types/ink": "^0.5.2",
     "@types/node": "^22.13.10",
-    "@types/react": "^19.0.12",
     "eslint": "^9.22.0",
     "prettier": "^3.5.3",
     "swagger-typescript-api": "^13.0.28",

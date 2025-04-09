@@ -1,14 +1,18 @@
-import { Key } from "ink";
+import { Key } from "readline";
 
-export interface Input {
-  t: Date;
-  text: string;
-  key: Key;
-}
-
-export function isInputMatch(input: Input, shortcut: string): boolean {
-  let text: string | undefined = input.text.toLocaleLowerCase();
-  const keys = { ...input.key };
+export function isInputMatch(key: Key | undefined, shortcut: string): boolean {
+  if (!key) {
+    return false;
+  }
+  let text: string | undefined = key.name?.toLocaleLowerCase();
+  if (!text) {
+    return false;
+  }
+  const keys = {
+    shift: key.shift,
+    ctrl: key.ctrl,
+    meta: key.meta,
+  };
   const shortcutParts = shortcut.split("-");
   for (const shortcutPart of shortcutParts) {
     if (shortcutPart === "shift" && keys.shift) {
