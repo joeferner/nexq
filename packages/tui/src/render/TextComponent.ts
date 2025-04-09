@@ -1,5 +1,5 @@
+import { Component } from "./Component.js";
 import { Geometry } from "./Geometry.js";
-import { Component } from "./Renderer.js";
 import { RenderItem } from "./RenderItem.js";
 
 export interface TextComponentOptions {
@@ -25,7 +25,8 @@ export class TextComponent extends Component {
         return this._geometry;
     }
 
-    public calculateGeometry(): void {
+    public calculateGeometry(_container: Geometry): void {
+        // TODO wrap text
         const lines = this.options.text.split('\n');
         const height = lines.length;
         const width = Math.max(...lines.map(l => l.length));
@@ -37,7 +38,7 @@ export class TextComponent extends Component {
         };
     }
 
-    public override render(_container: Geometry): RenderItem[] {
+    public override render(): RenderItem[] {
         return [{
             type: 'text',
             text: this.options.text,

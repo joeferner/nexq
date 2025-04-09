@@ -1,7 +1,6 @@
 import { NexqState } from "../NexqState.js";
 import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
-import { Geometry } from "../render/Geometry.js";
-import { Component } from "../render/Renderer.js";
+import { Component } from "../render/Component.js";
 import { Header } from "./Header.js";
 
 export class App extends Component {

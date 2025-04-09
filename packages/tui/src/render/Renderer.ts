@@ -1,40 +1,12 @@
 import chalk, { ChalkInstance } from "chalk";
-import { Geometry } from "./Geometry.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
 import * as R from "radash";
 import { cursorTo } from "ansi-escapes";
+import { Component } from "./Component.js";
 
 interface Character {
     value: string;
     color: string;
-}
-
-export abstract class Component {
-    public render(container: Geometry): RenderItem[] {
-        const renderItems: RenderItem[] = [];
-        for (const child of this.children) {
-            renderItems.push(...child.render(container));
-        }
-        return renderItems;
-    }
-
-    public calculateGeometry(): void {
-        for (const child of this.children) {
-            child.calculateGeometry();
-        }
-    }
-
-    public get geometry(): Geometry {
-        if (this.children.length === 0) {
-            return { left: 0, top: 0, height: 0, width: 0 };
-        }
-        if (this.children.length === 1) {
-            return this.children[0].geometry;
-        }
-        throw new Error('if children is greater that 1 you must implement get geometry');
-    }
-
-    public abstract get children(): Component[];
 }
 
 export class Renderer {
@@ -54,11 +26,11 @@ export class Renderer {
     }
 
     public render(component: Component): void {
-        this._width = process.stdout.columns;
-        this._height = process.stdout.rows;
+        this._width = process.stdout.columns ?? 80;
+        this._height = process.stdout.rows ?? 40;
 
-        component.calculateGeometry();
-        const renderItems = component.render({ top: 0, left: 0, width: this.width, height: this.height });
+        component.calculateGeometry({ top: 0, left: 0, width: this.width, height: this.height });
+        const renderItems = component.render();
         const sortedRenderItems = R.sort(renderItems, r => r.zIndex)
 
         if (!this.buffer || this._width !== this.previousWidth || this._height !== this.previousHeight) {

@@ -1,7 +1,7 @@
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
+import { Component } from "../render/Component.js";
 import { Geometry } from "../render/Geometry.js";
-import { Component } from "../render/Renderer.js";
 import { TextComponent } from "../render/TextComponent.js";
 
 const LOGO = `     __            ____ 
@@ -28,6 +28,7 @@ export class Header extends Component {
 
         const left = new BoxComponent({
             direction: BoxDirection.Vertical,
+            justifyContent: JustifyContent.End,
             children: [
                 createLeftItem('TUI Ver:  ', `v${state.tuiVersion}`),
                 createLeftItem('NexQ Ver: ', `v${state.nexqVersion}`)
@@ -36,6 +37,8 @@ export class Header extends Component {
 
         this._children = [new BoxComponent({
             direction: BoxDirection.Horizontal,
+            justifyContent: JustifyContent.SpaceBetween,
+            maxHeight: 5,
             children: [
                 left,
                 new TextComponent({ text: LOGO, color: state.logoColor })
