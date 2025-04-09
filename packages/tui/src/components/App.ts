@@ -1,17 +1,23 @@
-import { NexqApi } from "../NexqApi.js";
-import { BoxComponent } from "../render/BoxComponent.js";
+import { NexqState } from "../NexqState.js";
+import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { Geometry } from "../render/Geometry.js";
 import { Component } from "../render/Renderer.js";
 import { Header } from "./Header.js";
 
 export class App extends Component {
-    private readonly header = new Header();
-    private readonly children: Component[] = [new BoxComponent({ children: [this.header] })];
+    private readonly header: Header;
+    private readonly _children: Component[];
 
-    public constructor(private readonly api: NexqApi) {
+    public constructor(private readonly state: NexqState) {
         super();
+        this.header = new Header(state);
+        this._children = [new BoxComponent({
+            direction: BoxDirection.Vertical,
+            children: [this.header]
+        })];
     }
 
-    public getChildren(): Component[] {
-        return this.children;
+    public get children(): Component[] {
+        return this._children;
     }
 }

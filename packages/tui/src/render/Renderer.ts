@@ -10,14 +10,31 @@ interface Character {
 }
 
 export abstract class Component {
-    public getGeometry(): Geometry | undefined {
-        return undefined;
-    }
-    public getRenderItems(): RenderItem[] {
-        return [];
+    public render(container: Geometry): RenderItem[] {
+        const renderItems: RenderItem[] = [];
+        for (const child of this.children) {
+            renderItems.push(...child.render(container));
+        }
+        return renderItems;
     }
 
-    public abstract getChildren(): Component[];
+    public calculateGeometry(): void {
+        for (const child of this.children) {
+            child.calculateGeometry();
+        }
+    }
+
+    public get geometry(): Geometry {
+        if (this.children.length === 0) {
+            return { left: 0, top: 0, height: 0, width: 0 };
+        }
+        if (this.children.length === 1) {
+            return this.children[0].geometry;
+        }
+        throw new Error('if children is greater that 1 you must implement get geometry');
+    }
+
+    public abstract get children(): Component[];
 }
 
 export class Renderer {
@@ -37,12 +54,13 @@ export class Renderer {
     }
 
     public render(component: Component): void {
-        const renderItems: RenderItem[] = [];
-        walkComponent(component, renderItems);
-        const sortedRenderItems = R.sort(renderItems, r => r.zIndex)
-
         this._width = process.stdout.columns;
         this._height = process.stdout.rows;
+
+        component.calculateGeometry();
+        const renderItems = component.render({ top: 0, left: 0, width: this.width, height: this.height });
+        const sortedRenderItems = R.sort(renderItems, r => r.zIndex)
+
         if (!this.buffer || this._width !== this.previousWidth || this._height !== this.previousHeight) {
             this.buffer = createBuffer(this._width, this._height);
         }
@@ -75,7 +93,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
 
     for (let y = 0; y < buffer.length; y++) {
         const row = buffer[y];
-        process.stdout.write(cursorTo(0, y + 1));
+        process.stdout.write(cursorTo(0, y));
         for (let x = 0; x < row.length; x++) {
             const ch = row[x];
             const ansi = getAnsi(ch);
@@ -114,14 +132,6 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
             bufferCh.value = ch ?? ' ';
             bufferCh.color = renderItem.color;
         }
-    }
-}
-
-function walkComponent(component: Component, renderItems: RenderItem[]): void {
-    const componentRenderItems = component.getRenderItems();
-    renderItems.push(...componentRenderItems);
-    for (const child of component.getChildren()) {
-        walkComponent(child, renderItems);
     }
 }
 

@@ -1,4 +1,17 @@
 {
   "version": "0.2.0",
-  "configurations": []
+  "configurations": [
+    {
+      "name": "TUI",
+      "program": "${workspaceFolder}/packages/tui/build/main.js",
+      "request": "launch",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "args": [
+        "http://localhost:7887"
+      ],
+      "type": "node"
+    }
+  ]
 }
