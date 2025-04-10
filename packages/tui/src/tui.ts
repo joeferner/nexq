@@ -1,9 +1,9 @@
 import { enterAlternativeScreen, exitAlternativeScreen } from "ansi-escapes";
+import readline, { Key } from 'node:readline';
 import * as R from "radash";
 import { App } from "./components/App.js";
 import { NexqState, NexqStateOptions } from "./NexqState.js";
 import { Renderer } from "./render/Renderer.js";
-import { logToFile } from "./utils/log.js";
 
 export async function start(options: NexqStateOptions): Promise<void> {
   const state = new NexqState(options);
@@ -43,15 +43,15 @@ export async function start(options: NexqStateOptions): Promise<void> {
     if (process.stdin.setRawMode) {
       process.stdin.setRawMode(true);
     }
-    process.stdin.on('data', (key) => {
-      const str = key.toString();
-      if (str === '\x03') { // Ctrl+C
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.on('keypress', (chunk: string, key: Key | undefined) => {
+      if (key && key.ctrl && key.name === 'c') {
         tryExitAlternativeScreen();
         process.exit(0);
-      } else {
-        logToFile(`key: ${str}`);
       }
+      state.handleKeyPress(chunk, key);
     });
+    process.stdin.resume();
     inAlternateScreen = true;
     await render();
 

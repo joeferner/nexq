@@ -1,6 +1,7 @@
 import https from "node:https";
 import { Api, GetInfoResponse } from "./client/NexqClientApi.js";
 import EventEmitter from "node:events";
+import { Key } from "readline";
 
 export interface NexqStateOptions {
     tuiVersion: string;
@@ -12,7 +13,8 @@ export interface NexqStateOptions {
 }
 
 export interface StateEvents {
-    'changed': () => void;
+    'changed': () => unknown;
+    'keypress': (chunk: string, key: Key | undefined) => unknown;
 }
 
 export class NexqState extends EventEmitter {
@@ -46,6 +48,10 @@ export class NexqState extends EventEmitter {
 
     public get nexqVersion(): string {
         return this.info.version;
+    }
+
+    public handleKeyPress(chunk: string, key: Key | undefined): void {
+        this.emit('keypress', chunk, key);
     }
 
     public override on<T extends keyof StateEvents>(event: T, listener: StateEvents[T]): this {

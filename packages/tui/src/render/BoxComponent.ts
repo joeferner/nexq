@@ -26,8 +26,12 @@ export class BoxComponent extends Component {
 
     public constructor(options: BoxComponentOptions) {
         super();
-        this.options = structuredClone(options);
-        this.options.children = options.children;
+        this.options = {
+            children: options.children,
+            direction: options.direction,
+            justifyContent: options.justifyContent,
+            maxHeight: options.maxHeight
+        };
         this._geometry = { left: 0, top: 0, width: 0, height: 0 };
     }
 

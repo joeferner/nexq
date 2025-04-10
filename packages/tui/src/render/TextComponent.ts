@@ -8,12 +8,14 @@ export interface TextComponentOptions {
 }
 
 export class TextComponent extends Component {
-    private readonly options: TextComponentOptions;
+    public text: string;
+    public color: string | undefined;
     private _geometry: Geometry;
 
     public constructor(options: TextComponentOptions) {
         super();
-        this.options = structuredClone(options);
+        this.text = options.text;
+        this.color = options.color;
         this._geometry = { left: 0, top: 0, width: 0, height: 0 };
     }
 
@@ -27,7 +29,7 @@ export class TextComponent extends Component {
 
     public calculateGeometry(_container: Geometry): void {
         // TODO wrap text
-        const lines = this.options.text.split('\n');
+        const lines = this.text.split('\n');
         const height = lines.length;
         const width = Math.max(...lines.map(l => l.length));
         this._geometry = {
@@ -41,8 +43,8 @@ export class TextComponent extends Component {
     public override render(): RenderItem[] {
         return [{
             type: 'text',
-            text: this.options.text,
-            color: this.options.color ?? '#ffffff',
+            text: this.text,
+            color: this.color ?? '#ffffff',
             zIndex: 0,
             geometry: this.geometry
         }];
