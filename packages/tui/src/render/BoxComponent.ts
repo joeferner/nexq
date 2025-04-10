@@ -21,22 +21,23 @@ export interface BoxComponentOptions {
 }
 
 export class BoxComponent extends Component {
-    private readonly options: BoxComponentOptions;
     private _geometry: Geometry;
+    private _children: Component[];
+    public direction: BoxDirection;
+    public justifyContent: JustifyContent | undefined;
+    public maxHeight: number | undefined;
 
     public constructor(options: BoxComponentOptions) {
         super();
-        this.options = {
-            children: options.children,
-            direction: options.direction,
-            justifyContent: options.justifyContent,
-            maxHeight: options.maxHeight
-        };
+        this._children = options.children;
+        this.direction = options.direction;
+        this.justifyContent = options.justifyContent;
+        this.maxHeight = options.maxHeight;
         this._geometry = { left: 0, top: 0, width: 0, height: 0 };
     }
 
     public get children(): Component[] {
-        return this.options.children;
+        return this._children;
     }
 
     public override calculateGeometry(container: Geometry): void {
@@ -47,13 +48,13 @@ export class BoxComponent extends Component {
             width: 0
         };
         const remainingContainer: Geometry = structuredClone(container);
-        if (this.options.maxHeight !== undefined) {
-            remainingContainer.height = Math.min(remainingContainer.height, this.options.maxHeight);
+        if (this.maxHeight !== undefined) {
+            remainingContainer.height = Math.min(remainingContainer.height, this.maxHeight);
         }
         for (const child of this.children) {
             child.calculateGeometry(remainingContainer);
             const childGeometry = child.geometry;
-            if (this.options.direction === BoxDirection.Horizontal) {
+            if (this.direction === BoxDirection.Horizontal) {
                 results.height = Math.max(results.height, childGeometry.height);
                 results.width += childGeometry.width;
                 remainingContainer.width -= childGeometry.width;
@@ -63,8 +64,8 @@ export class BoxComponent extends Component {
                 remainingContainer.height -= childGeometry.height;
             }
         }
-        if (this.options.justifyContent === JustifyContent.SpaceBetween || this.options.justifyContent === JustifyContent.End) {
-            if (this.options.direction === BoxDirection.Horizontal) {
+        if (this.justifyContent === JustifyContent.SpaceBetween || this.justifyContent === JustifyContent.End) {
+            if (this.direction === BoxDirection.Horizontal) {
                 results.width = container.width;
             } else {
                 results.height = container.height;
@@ -83,16 +84,16 @@ export class BoxComponent extends Component {
         let y = this.geometry.top;
 
         let gap = 0;
-        if (this.options.justifyContent === JustifyContent.SpaceBetween) {
-            if (this.options.direction === BoxDirection.Horizontal) {
+        if (this.justifyContent === JustifyContent.SpaceBetween) {
+            if (this.direction === BoxDirection.Horizontal) {
                 const totalChildrenWidth = this.children.reduce((p, v) => p + v.geometry.width, 0);
                 gap = (this.geometry.width - totalChildrenWidth) / (this.children.length - 1);
             } else {
                 const totalChildrenHeight = this.children.reduce((p, v) => p + v.geometry.height, 0);
                 gap = (this.geometry.height - totalChildrenHeight) / (this.children.length - 1);
             }
-        } else if (this.options.justifyContent === JustifyContent.End) {
-            if (this.options.direction === BoxDirection.Horizontal) {
+        } else if (this.justifyContent === JustifyContent.End) {
+            if (this.direction === BoxDirection.Horizontal) {
                 const totalChildrenWidth = this.children.reduce((p, v) => p + v.geometry.width, 0);
                 x += Math.max(0, this.geometry.width - totalChildrenWidth);
             } else {
@@ -109,14 +110,14 @@ export class BoxComponent extends Component {
                 renderItems.push(childRenderItem);
             }
 
-            if (this.options.direction === BoxDirection.Horizontal) {
+            if (this.direction === BoxDirection.Horizontal) {
                 x += child.geometry.width;
-                if (this.options.justifyContent === JustifyContent.SpaceBetween) {
+                if (this.justifyContent === JustifyContent.SpaceBetween) {
                     x += gap;
                 }
             } else {
                 y += child.geometry.height;
-                if (this.options.justifyContent === JustifyContent.SpaceBetween) {
+                if (this.justifyContent === JustifyContent.SpaceBetween) {
                     y += gap;
                 }
             }
