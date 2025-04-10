@@ -3,10 +3,18 @@ import { RenderItem, TextRenderItem } from "./RenderItem.js";
 import * as R from "radash";
 import { cursorTo } from "ansi-escapes";
 import { Component } from "./Component.js";
+import { logToFile } from "../utils/log.js";
 
 interface Character {
     value: string;
     color: string;
+}
+
+function isCharacterEqual(ch1: Character, ch2: Character | undefined): boolean {
+    if (ch2 === undefined) {
+        return false;
+    }
+    return ch1.value === ch2.value && ch1.color === ch2.color;
 }
 
 export class Renderer {
@@ -14,8 +22,8 @@ export class Renderer {
     private _height = 0;
     private previousWidth = 0;
     private previousHeight = 0;
-    private lastBuffer?: Character[][];
-    private buffer?: Character[][];
+    private buffers: Character[][][] = [];
+    private bufferIndex = 0;
 
     public get width(): number {
         return this._width;
@@ -33,19 +41,20 @@ export class Renderer {
         const renderItems = component.render();
         const sortedRenderItems = R.sort(renderItems, r => r.zIndex)
 
-        if (!this.buffer || this._width !== this.previousWidth || this._height !== this.previousHeight) {
-            this.buffer = createBuffer(this._width, this._height);
+        if (!this.buffers[this.bufferIndex] || this._width !== this.previousWidth || this._height !== this.previousHeight) {
+            this.buffers[this.bufferIndex] = createBuffer(this._width, this._height);
         }
 
         for (const renderItem of sortedRenderItems) {
-            renderItemToBuffer(this.buffer, renderItem);
+            renderItemToBuffer(this.buffers[this.bufferIndex], renderItem);
         }
 
-        renderBuffer(this.buffer, this.lastBuffer);
+        const secondaryBufferIndex = (this.bufferIndex + 1) % 2;
+        renderBuffer(this.buffers[this.bufferIndex], this.buffers[secondaryBufferIndex]);
 
         this.previousWidth = this._width;
         this.previousHeight = this._height;
-        this.lastBuffer = this.buffer;
+        this.bufferIndex = secondaryBufferIndex;
     }
 }
 
@@ -63,13 +72,27 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
         return ansi;
     };
 
+    let nextY = -1;
+    let nextX = -1;
     for (let y = 0; y < buffer.length; y++) {
         const row = buffer[y];
-        process.stdout.write(cursorTo(0, y));
+        const lastRow = lastBuffer?.[y];
         for (let x = 0; x < row.length; x++) {
+            if (y === buffer.length - 1 && x === row.length - 1) {
+                break;
+            }
+
             const ch = row[x];
-            const ansi = getAnsi(ch);
-            process.stdout.write(ansi(ch.value));
+            if (y !== nextY && x !== nextX) {
+                process.stdout.write(cursorTo(x, y));
+                nextY = y;
+            }
+
+            if (!isCharacterEqual(ch, lastRow?.[x])) {
+                const ansi = getAnsi(ch);
+                process.stdout.write(ansi(ch.value));
+                nextX++;
+            }
         }
     }
 }

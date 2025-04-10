@@ -1,4 +1,4 @@
-import { enterAlternativeScreen, exitAlternativeScreen } from "ansi-escapes";
+import { cursorHide, cursorShow, enterAlternativeScreen, exitAlternativeScreen } from "ansi-escapes";
 import readline, { Key } from 'node:readline';
 import * as R from "radash";
 import { App } from "./components/App.js";
@@ -20,6 +20,7 @@ export async function start(options: NexqStateOptions): Promise<void> {
     if (inAlternateScreen) {
       process.stdin.setRawMode(false);
       process.stdout.write(exitAlternativeScreen);
+      process.stdout.write(cursorShow);
       inAlternateScreen = false;
     }
   };
@@ -43,6 +44,8 @@ export async function start(options: NexqStateOptions): Promise<void> {
     if (process.stdin.setRawMode) {
       process.stdin.setRawMode(true);
     }
+    process.stdout.write(cursorHide);
+
     readline.emitKeypressEvents(process.stdin);
     process.stdin.on('keypress', (chunk: string, key: Key | undefined) => {
       if (key && key.ctrl && key.name === 'c') {
