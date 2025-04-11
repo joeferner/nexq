@@ -81,6 +81,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
     const row = buffer[y];
     const lastRow = lastBuffer?.[y];
     for (let x = 0; x < row.length; x++) {
+      // TODO optimize by combining strings with same color
       if (y === buffer.length - 1 && x === row.length - 1) {
         break;
       }

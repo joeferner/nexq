@@ -16,14 +16,24 @@ export interface TableViewColumn<T> {
 export class TableView<T> extends Component {
   private readonly box = new BoxComponent({ children: [], direction: BoxDirection.Vertical });
   private readonly _children: Component[] = [this.box];
-  public items: T[] = [];
+  private _items: T[] = [];
   public selectedIndex = 0;
   public offset = 0;
   public columns: TableViewColumn<T>[];
+  private readonly columnWidths: number[] = [];
 
   public constructor(options: TableViewOptions<T>) {
     super();
     this.columns = options.columns;
+  }
+
+  public set items(items: T[]) {
+    this._items = items;
+    this.updateColumnWidths();
+  }
+
+  public get items(): T[] {
+    return this._items;
   }
 
   public get children(): Component[] {
@@ -48,31 +58,47 @@ export class TableView<T> extends Component {
       this.offset = this.selectedIndex - container.height + 2;
     }
 
-    const columnWidths: number[] = [];
     for (let i = 0; i < container.height - 1; i++) {
       const index = this.offset + i;
       children[i + 1].inverse = this.selectedIndex === index;
-      children[i + 1].text = this.createRowText(this.items[index], container.width, columnWidths);
+      children[i + 1].text = this.createRowText(this.items[index], container.width);
     }
 
     let header = '';
-    for (const column of this.columns) {
+    for (let i = 0; i < this.columns.length; i++) {
+      const column = this.columns[i];
       header += column.title;
+      header += ' '.repeat(Math.max(0, this.columnWidths[i] - column.title.length));
     }
     children[0].text = header;
 
     super.calculateGeometry(container);
   }
 
-  private createRowText(row: T, maxWidth: number, columnWidths: number[]): string {
+  private createRowText(row: T, maxWidth: number): string {
     let text = '';
     for (let i = 0; i < this.columns.length; i++) {
       const column = this.columns[i];
       const columnText = column.render(row);
-      columnWidths[i] = Math.max(columnWidths[i] ?? 0, columnText.length, column.title.length);
-      text += columnText;
+      const padding = ' '.repeat(this.columnWidths[i] - columnText.length - 1);
+      if (column.align === 'left') {
+        text += columnText + padding + ' ';
+      } else {
+        text += padding + columnText + ' ';
+      }
     }
-    text += ' '.repeat(maxWidth - text.length);
+    text += ' '.repeat(Math.max(0, maxWidth - text.length));
     return text;
+  }
+
+  private updateColumnWidths(): void {
+    this.columnWidths.length = 0;
+    for (const item of this.items) {
+      for (let i = 0; i < this.columns.length; i++) {
+        const column = this.columns[i];
+        const columnText = column.render(item);
+        this.columnWidths[i] = Math.max(this.columnWidths[i] ?? 0, columnText.length + 1, column.title.length + 1);
+      }
+    }
   }
 }
