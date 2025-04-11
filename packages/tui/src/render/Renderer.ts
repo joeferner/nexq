@@ -1,8 +1,8 @@
-import chalk, { ChalkInstance } from "chalk";
-import { RenderItem, TextRenderItem } from "./RenderItem.js";
-import * as R from "radash";
 import { cursorTo } from "ansi-escapes";
+import chalk, { ChalkInstance } from "chalk";
+import * as R from "radash";
 import { Component } from "./Component.js";
+import { RenderItem, TextRenderItem } from "./RenderItem.js";
 import { logToFile } from "../utils/log.js";
 
 interface Character {
@@ -83,7 +83,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
             }
 
             const ch = row[x];
-            if (y !== nextY && x !== nextX) {
+            if (y !== nextY || x !== nextX) {
                 process.stdout.write(cursorTo(x, y));
                 nextY = y;
             }
@@ -94,6 +94,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
                 nextX++;
             }
         }
+        nextX = -1;
     }
 }
 

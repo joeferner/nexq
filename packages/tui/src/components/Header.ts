@@ -1,7 +1,6 @@
 import { NexqState } from "../NexqState.js";
 import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
 import { TextComponent } from "../render/TextComponent.js";
 
 const LOGO = `     __            ____ 
@@ -38,7 +37,7 @@ export class Header extends Component {
         this._children = [new BoxComponent({
             direction: BoxDirection.Horizontal,
             justifyContent: JustifyContent.SpaceBetween,
-            maxHeight: 5,
+            height: 5,
             children: [
                 left,
                 new TextComponent({ text: LOGO, color: state.logoColor })

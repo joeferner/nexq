@@ -1,23 +1,55 @@
+import { logToFile } from "../utils/log.js";
 import { Component } from "./Component.js";
 import { Geometry } from "./Geometry.js";
-import { RenderItem } from "./RenderItem.js";
+import { RenderItem, TextRenderItem } from "./RenderItem.js";
 
 export enum BoxDirection {
-    Vertical,
-    Horizontal
+    Vertical = 'Vertical',
+    Horizontal = 'Horizontal'
+}
+
+export enum BoxBorder {
+    Single = 'Single'
 }
 
 export enum JustifyContent {
-    Start,
-    SpaceBetween,
-    End
+    Start = 'Start',
+    SpaceBetween = 'SpaceBetween',
+    End = 'End'
 }
 
 export interface BoxComponentOptions {
     direction: BoxDirection;
     justifyContent?: JustifyContent;
-    maxHeight?: number;
+    height?: number;
     children: Component[];
+    border?: BoxBorder;
+    borderColor?: string;
+    zIndex?: number;
+}
+
+interface BorderCharacters {
+    nw: string;
+    n: string;
+    ne: string;
+    e: string;
+    se: string;
+    s: string;
+    sw: string;
+    w: string;
+}
+
+const BORDERS: Record<BoxBorder, BorderCharacters> = {
+    [BoxBorder.Single]: {
+        nw: '┌',
+        n: '─',
+        ne: '┐',
+        e: '│',
+        se: '┘',
+        s: '─',
+        sw: '└',
+        w: '│',
+    }
 }
 
 export class BoxComponent extends Component {
@@ -25,14 +57,20 @@ export class BoxComponent extends Component {
     private _children: Component[];
     public direction: BoxDirection;
     public justifyContent: JustifyContent | undefined;
-    public maxHeight: number | undefined;
+    public height: number | undefined;
+    public border: BoxBorder | undefined;
+    public borderColor: string;
+    public zIndex: number;
 
     public constructor(options: BoxComponentOptions) {
         super();
         this._children = options.children;
         this.direction = options.direction;
         this.justifyContent = options.justifyContent;
-        this.maxHeight = options.maxHeight;
+        this.height = options.height;
+        this.border = options.border;
+        this.borderColor = options.borderColor ?? '#ffffff';
+        this.zIndex = options.zIndex ?? 0;
         this._geometry = { left: 0, top: 0, width: 0, height: 0 };
     }
 
@@ -48,8 +86,14 @@ export class BoxComponent extends Component {
             width: 0
         };
         const remainingContainer: Geometry = structuredClone(container);
-        if (this.maxHeight !== undefined) {
-            remainingContainer.height = Math.min(remainingContainer.height, this.maxHeight);
+        if (this.height !== undefined) {
+            remainingContainer.height = this.height;
+        }
+        if (this.border) {
+            remainingContainer.top += 1;
+            remainingContainer.left += 1;
+            remainingContainer.width -= 2;
+            remainingContainer.height -= 2;
         }
         for (const child of this.children) {
             child.calculateGeometry(remainingContainer);
@@ -71,6 +115,13 @@ export class BoxComponent extends Component {
                 results.height = container.height;
             }
         }
+        if (this.border) {
+            results.width += 2;
+            results.height += 2;
+        }
+        if (this.height !== undefined) {
+            results.height = this.height;
+        }
         this._geometry = results;
     }
 
@@ -82,6 +133,12 @@ export class BoxComponent extends Component {
         const renderItems: RenderItem[] = [];
         let x = this.geometry.left;
         let y = this.geometry.top;
+
+        if (this.border) {
+            this.renderBorder(renderItems);
+            x++;
+            y++;
+        }
 
         let gap = 0;
         if (this.justifyContent === JustifyContent.SpaceBetween) {
@@ -122,6 +179,102 @@ export class BoxComponent extends Component {
                 }
             }
         }
+
         return renderItems;
+    }
+
+    private renderBorder(renderItems: TextRenderItem[]): void {
+        if (!this.border) {
+            return;
+        }
+
+        const border = BORDERS[this.border];
+        const geometry = this.geometry;
+
+        // east/west
+        for (let y = 1; y < geometry.height - 1; y++) {
+            // west
+            renderItems.push({
+                type: 'text', text: border.w, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                    top: geometry.top + y,
+                    left: geometry.left,
+                    width: 1,
+                    height: 1
+                }
+            });
+
+            // east
+            renderItems.push({
+                type: 'text', text: border.e, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                    top: geometry.top + y,
+                    left: geometry.left + geometry.width - 1,
+                    width: 1,
+                    height: 1
+                }
+            });
+        }
+
+        // north/south
+        for (let x = 1; x < geometry.width - 1; x++) {
+            // north
+            renderItems.push({
+                type: 'text', text: border.n, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                    top: geometry.top,
+                    left: geometry.left + x,
+                    width: 1,
+                    height: 1
+                }
+            });
+
+            // south
+            renderItems.push({
+                type: 'text', text: border.s, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                    top: geometry.top + geometry.height - 1,
+                    left: geometry.left + x,
+                    width: 1,
+                    height: 1
+                }
+            });
+        }
+
+        // north west corner
+        renderItems.push({
+            type: 'text', text: border.nw, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                top: geometry.top,
+                left: geometry.left,
+                width: 1,
+                height: 1
+            }
+        });
+
+        // north east corner
+        renderItems.push({
+            type: 'text', text: border.ne, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                top: geometry.top,
+                left: geometry.left + geometry.width - 1,
+                width: 1,
+                height: 1
+            }
+        });
+
+        // south west corner
+        renderItems.push({
+            type: 'text', text: border.sw, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                top: geometry.top + geometry.height - 1,
+                left: geometry.left,
+                width: 1,
+                height: 1
+            }
+        });
+
+        // south east corner
+        renderItems.push({
+            type: 'text', text: border.se, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                top: geometry.top + geometry.height - 1,
+                left: geometry.left + geometry.width - 1,
+                width: 1,
+                height: 1
+            }
+        });
     }
 }
