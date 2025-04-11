@@ -12,7 +12,8 @@ export class Queues extends Component {
         this._children = [new BoxComponent({
             children: [t],
             direction: BoxDirection.Vertical,
-            border: BoxBorder.Single
+            border: BoxBorder.Single,
+            width: '100%'
         })];
         state.on('keypress', (chunk, key) => {
             t.text = key?.name ?? '?';

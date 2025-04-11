@@ -2,6 +2,7 @@ import { logToFile } from "../utils/log.js";
 import { Component } from "./Component.js";
 import { Geometry } from "./Geometry.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
+import * as R from "radash";
 
 export enum BoxDirection {
     Vertical = 'Vertical',
@@ -15,6 +16,7 @@ export enum BoxBorder {
 export enum JustifyContent {
     Start = 'Start',
     SpaceBetween = 'SpaceBetween',
+    Center = 'Center',
     End = 'End'
 }
 
@@ -22,6 +24,7 @@ export interface BoxComponentOptions {
     direction: BoxDirection;
     justifyContent?: JustifyContent;
     height?: number;
+    width?: number | string;
     children: Component[];
     border?: BoxBorder;
     borderColor?: string;
@@ -58,6 +61,7 @@ export class BoxComponent extends Component {
     public direction: BoxDirection;
     public justifyContent: JustifyContent | undefined;
     public height: number | undefined;
+    public width: number | string | undefined;
     public border: BoxBorder | undefined;
     public borderColor: string;
     public zIndex: number;
@@ -68,6 +72,7 @@ export class BoxComponent extends Component {
         this.direction = options.direction;
         this.justifyContent = options.justifyContent;
         this.height = options.height;
+        this.width = options.width;
         this.border = options.border;
         this.borderColor = options.borderColor ?? '#ffffff';
         this.zIndex = options.zIndex ?? 0;
@@ -122,6 +127,20 @@ export class BoxComponent extends Component {
         if (this.height !== undefined) {
             results.height = this.height;
         }
+        if (this.width !== undefined) {
+            if (R.isNumber(this.width)) {
+                results.width = this.width;
+            } else if (R.isString(this.width)) {
+                if (this.width.endsWith('%')) {
+                    const percent = parseFloat(this.width) / 100;
+                    results.width = Math.ceil(container.width * percent);
+                } else {
+                    throw new Error(`invalid width "${this.width}"`);
+                }
+            } else {
+                throw new Error(`invalid width "${this.width}"`);
+            }
+        }
         this._geometry = results;
     }
 
@@ -164,6 +183,13 @@ export class BoxComponent extends Component {
             for (const childRenderItem of childRenderItems) {
                 childRenderItem.geometry.left += x;
                 childRenderItem.geometry.top += y;
+                if (this.justifyContent === JustifyContent.Center) {
+                    if (this.direction === BoxDirection.Horizontal) {
+                        throw new Error('center/horizontal not supported');
+                    } else {
+                        childRenderItem.geometry.left += Math.floor((this.geometry.width - child.geometry.width) / 2);
+                    }
+                }
                 renderItems.push(childRenderItem);
             }
 
