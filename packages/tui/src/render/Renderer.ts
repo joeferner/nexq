@@ -70,8 +70,11 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
     process.stdout.write(s);
   };
 
-  const getAnsi = (ch: Character): ansis.Ansis => {
-    const key = `${ch.color}${ch.inverse ? 't' : 'f'}`;
+  const createColorKey = (ch: Character): string => {
+    return `${ch.color}${ch.inverse ? 't' : 'f'}`;
+  };
+
+  const getAnsi = (key: string, ch: Character): ansis.Ansis => {
     const existing = ansiCache[key];
     if (existing) {
       return existing;
@@ -86,6 +89,9 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
 
   let nextY = -1;
   let nextX = -1;
+  let lastKey = '';
+  let lastAnsi: ansis.Ansis | undefined = undefined;
+
   for (let y = 0; y < buffer.length; y++) {
     const row = buffer[y];
     const lastRow = lastBuffer?.[y];
@@ -102,16 +108,29 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
       }
 
       if (!isCharacterEqual(ch, lastRow?.[x])) {
-        const ansi = getAnsi(ch);
-        write(ansi(ch.value));
+        const key = createColorKey(ch);
+        if (key !== lastKey) {
+          if (lastAnsi) {
+            write(lastAnsi.close);
+          }
+          const ansi = getAnsi(key, ch);
+          write(ansi.open);
+          lastAnsi = ansi;
+          lastKey = key;
+        }
+        write(ch.value);
         nextX++;
       }
     }
     nextX = -1;
   }
 
+  if (lastAnsi) {
+    write(lastAnsi.close);
+  }
+
   const endTime = Date.now();
-  logToFile(`frame: ${bytesWritten}bytes ${endTime - startTime}ms`);
+  logToFile(`frame: ${bytesWritten}bytes ${endTime - startTime}ms ${Math.floor(1 / (endTime - startTime) * 1000)}fps`);
 }
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
