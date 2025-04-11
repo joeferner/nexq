@@ -63,6 +63,8 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   const ansiCache: Record<string, ansis.Ansis> = {};
 
   let bytesWritten = 0;
+  let cursorMoves = 0;
+  let charactersWritten = 0;
   const startTime = Date.now();
 
   const write = (s: string): void => {
@@ -102,12 +104,14 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
       }
 
       const ch = row[x];
-      if (y !== nextY || x !== nextX) {
-        write(cursorTo(x, y));
-        nextY = y;
-      }
-
       if (!isCharacterEqual(ch, lastRow?.[x])) {
+        if (y !== nextY || x !== nextX) {
+          write(cursorTo(x, y));
+          cursorMoves++;
+          nextY = y;
+        }
+
+        charactersWritten++;
         const key = createColorKey(ch);
         if (key !== lastKey) {
           if (lastAnsi) {
@@ -119,7 +123,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
           lastKey = key;
         }
         write(ch.value);
-        nextX++;
+        nextX = x + 1;
       }
     }
     nextX = -1;
@@ -130,7 +134,9 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   }
 
   const endTime = Date.now();
-  logToFile(`frame: ${bytesWritten}bytes ${endTime - startTime}ms ${Math.floor(1 / (endTime - startTime) * 1000)}fps`);
+  if (process.env['LOG_FPS']) {
+    logToFile(`frame: ${bytesWritten}bytes ${charactersWritten}charactersWritten ${cursorMoves}cursorMoves ${endTime - startTime}ms ${Math.floor(1 / (endTime - startTime) * 1000)}fps`);
+  }
 }
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
