@@ -3,6 +3,7 @@ import * as R from "radash";
 import { Component } from "./Component.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
 import * as ansis from 'ansis';
+import { logToFile } from "../utils/log.js";
 
 interface Character {
   value: string;
@@ -61,6 +62,14 @@ export class Renderer {
 function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   const ansiCache: Record<string, ansis.Ansis> = {};
 
+  let bytesWritten = 0;
+  const startTime = Date.now();
+
+  const write = (s: string): void => {
+    bytesWritten += s.length;
+    process.stdout.write(s);
+  };
+
   const getAnsi = (ch: Character): ansis.Ansis => {
     const key = `${ch.color}${ch.inverse ? 't' : 'f'}`;
     const existing = ansiCache[key];
@@ -88,18 +97,21 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
 
       const ch = row[x];
       if (y !== nextY || x !== nextX) {
-        process.stdout.write(cursorTo(x, y));
+        write(cursorTo(x, y));
         nextY = y;
       }
 
       if (!isCharacterEqual(ch, lastRow?.[x])) {
         const ansi = getAnsi(ch);
-        process.stdout.write(ansi(ch.value));
+        write(ansi(ch.value));
         nextX++;
       }
     }
     nextX = -1;
   }
+
+  const endTime = Date.now();
+  logToFile(`frame: ${bytesWritten}bytes ${endTime - startTime}ms`);
 }
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
