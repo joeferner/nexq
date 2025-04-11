@@ -1,8 +1,8 @@
 import { cursorTo } from "ansi-escapes";
-import chalk, { ChalkInstance } from "chalk";
 import * as R from "radash";
 import { Component } from "./Component.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
+import * as ansis from 'ansis';
 
 interface Character {
   value: string;
@@ -59,15 +59,15 @@ export class Renderer {
 }
 
 function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
-  const ansiCache: Record<string, ChalkInstance> = {};
+  const ansiCache: Record<string, ansis.Ansis> = {};
 
-  const getAnsi = (ch: Character): ChalkInstance => {
+  const getAnsi = (ch: Character): ansis.Ansis => {
     const key = `${ch.color}${ch.inverse ? 't' : 'f'}`;
     const existing = ansiCache[key];
     if (existing) {
       return existing;
     }
-    let ansi = chalk.hex(ch.color);
+    let ansi = ansis.hex(ch.color);
     if (ch.inverse) {
       ansi = ansi.inverse;
     }
