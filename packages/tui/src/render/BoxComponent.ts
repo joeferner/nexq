@@ -29,6 +29,7 @@ export interface BoxComponentOptions {
     border?: BoxBorder;
     borderColor?: string;
     zIndex?: number;
+    title?: string;
 }
 
 interface BorderCharacters {
@@ -65,6 +66,7 @@ export class BoxComponent extends Component {
     public border: BoxBorder | undefined;
     public borderColor: string;
     public zIndex: number;
+    public title: string | undefined;
 
     public constructor(options: BoxComponentOptions) {
         super();
@@ -75,6 +77,7 @@ export class BoxComponent extends Component {
         this.width = options.width;
         this.border = options.border;
         this.borderColor = options.borderColor ?? '#ffffff';
+        this.title = options.title;
         this.zIndex = options.zIndex ?? 0;
         this._geometry = { left: 0, top: 0, width: 0, height: 0 };
     }
@@ -302,5 +305,17 @@ export class BoxComponent extends Component {
                 height: 1
             }
         });
+
+        // title
+        if (this.title) {
+            renderItems.push({
+                type: 'text', text: ` ${this.title} `, color: this.borderColor, zIndex: this.zIndex, geometry: {
+                    top: geometry.top,
+                    left: geometry.left + Math.floor((geometry.width - (this.title.length + 2)) / 2),
+                    width: this.title.length + 2,
+                    height: 1
+                }
+            });
+        }
     }
 }

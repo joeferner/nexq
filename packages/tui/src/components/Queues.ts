@@ -13,7 +13,8 @@ export class Queues extends Component {
             children: [t],
             direction: BoxDirection.Vertical,
             border: BoxBorder.Single,
-            width: '100%'
+            width: '100%',
+            title: 'Queues'
         })];
         state.on('keypress', (chunk, key) => {
             t.text = key?.name ?? '?';
