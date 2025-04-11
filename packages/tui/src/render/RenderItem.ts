@@ -5,6 +5,7 @@ export interface TextRenderItem {
   text: string;
   geometry: Geometry;
   color: string;
+  inverse?: boolean;
   zIndex: number;
 }
 

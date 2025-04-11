@@ -17,9 +17,14 @@ export interface StateEvents {
   keypress: (chunk: string, key: Key | undefined) => unknown;
 }
 
+export enum Focus {
+  Queues = 'Queues'
+}
+
 export class NexqState extends EventEmitter {
   private readonly api: Api<unknown>;
   private info!: GetInfoResponse;
+  public focus: Focus = Focus.Queues;
   public readonly logoColor = "#fca321";
   public readonly headerNameColor = "#fca321";
   public readonly headerValueColor = "#ffffff";

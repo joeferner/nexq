@@ -5,17 +5,20 @@ import { RenderItem } from "./RenderItem.js";
 export interface TextComponentOptions {
   text: string;
   color?: string;
+  inverse?: boolean;
 }
 
 export class TextComponent extends Component {
   public text: string;
   public color: string | undefined;
+  public inverse: boolean;
   private _geometry: Geometry;
 
   public constructor(options: TextComponentOptions) {
     super();
     this.text = options.text;
     this.color = options.color;
+    this.inverse = options.inverse ?? false;
     this._geometry = { left: 0, top: 0, width: 0, height: 0 };
   }
 
@@ -46,6 +49,7 @@ export class TextComponent extends Component {
         type: "text",
         text: this.text,
         color: this.color ?? "#ffffff",
+        inverse: this.inverse,
         zIndex: 0,
         geometry: this.geometry,
       },

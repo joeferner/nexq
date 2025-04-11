@@ -7,13 +7,14 @@ import { RenderItem, TextRenderItem } from "./RenderItem.js";
 interface Character {
   value: string;
   color: string;
+  inverse: boolean;
 }
 
 function isCharacterEqual(ch1: Character, ch2: Character | undefined): boolean {
   if (ch2 === undefined) {
     return false;
   }
-  return ch1.value === ch2.value && ch1.color === ch2.color;
+  return ch1.value === ch2.value && ch1.color === ch2.color && ch1.inverse === ch2.inverse;
 }
 
 export class Renderer {
@@ -61,12 +62,15 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   const ansiCache: Record<string, ChalkInstance> = {};
 
   const getAnsi = (ch: Character): ChalkInstance => {
-    const key = ch.color;
+    const key = `${ch.color}${ch.inverse ? 't' : 'f'}`;
     const existing = ansiCache[key];
     if (existing) {
       return existing;
     }
-    const ansi = chalk.hex(ch.color);
+    let ansi = chalk.hex(ch.color);
+    if (ch.inverse) {
+      ansi = ansi.inverse;
+    }
     ansiCache[key] = ansi;
     return ansi;
   };
@@ -126,6 +130,7 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
       const ch = line?.[chIndex];
       bufferCh.value = ch ?? " ";
       bufferCh.color = renderItem.color;
+      bufferCh.inverse = renderItem.inverse ?? false;
     }
   }
 }
@@ -138,6 +143,7 @@ function createBuffer(width: number, height: number): Character[][] {
       line.push({
         value: " ",
         color: "#ffffff",
+        inverse: false,
       });
     }
     buffer.push(line);

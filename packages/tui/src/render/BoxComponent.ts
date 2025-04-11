@@ -22,7 +22,7 @@ export enum JustifyContent {
 export interface BoxComponentOptions {
   direction: BoxDirection;
   justifyContent?: JustifyContent;
-  height?: number;
+  height?: number | string;
   width?: number | string;
   children: Component[];
   border?: BoxBorder;
@@ -57,10 +57,10 @@ const BORDERS: Record<BoxBorder, BorderCharacters> = {
 
 export class BoxComponent extends Component {
   private _geometry: Geometry;
-  private _children: Component[];
+  public children: Component[];
   public direction: BoxDirection;
   public justifyContent: JustifyContent | undefined;
-  public height: number | undefined;
+  public height: number | string | undefined;
   public width: number | string | undefined;
   public border: BoxBorder | undefined;
   public borderColor: string;
@@ -69,7 +69,7 @@ export class BoxComponent extends Component {
 
   public constructor(options: BoxComponentOptions) {
     super();
-    this._children = options.children;
+    this.children = options.children;
     this.direction = options.direction;
     this.justifyContent = options.justifyContent;
     this.height = options.height;
@@ -81,10 +81,6 @@ export class BoxComponent extends Component {
     this._geometry = { left: 0, top: 0, width: 0, height: 0 };
   }
 
-  public get children(): Component[] {
-    return this._children;
-  }
-
   public override calculateGeometry(container: Geometry): void {
     const results: Geometry = {
       left: 0,
@@ -94,7 +90,10 @@ export class BoxComponent extends Component {
     };
     const remainingContainer: Geometry = structuredClone(container);
     if (this.height !== undefined) {
-      remainingContainer.height = this.height;
+      remainingContainer.height = fromNumberOrPercent(this.height, remainingContainer.height);
+    }
+    if (this.width !== undefined) {
+      remainingContainer.width = fromNumberOrPercent(this.width, remainingContainer.width);
     }
     if (this.border) {
       remainingContainer.top += 1;
@@ -127,21 +126,10 @@ export class BoxComponent extends Component {
       results.height += 2;
     }
     if (this.height !== undefined) {
-      results.height = this.height;
+      results.height = fromNumberOrPercent(this.height, container.height);
     }
     if (this.width !== undefined) {
-      if (R.isNumber(this.width)) {
-        results.width = this.width;
-      } else if (R.isString(this.width)) {
-        if (this.width.endsWith("%")) {
-          const percent = parseFloat(this.width) / 100;
-          results.width = Math.ceil(container.width * percent);
-        } else {
-          throw new Error(`invalid width "${this.width}"`);
-        }
-      } else {
-        throw new Error(`invalid width "${this.width}"`);
-      }
+      results.width = fromNumberOrPercent(this.width, container.width);
     }
     this._geometry = results;
   }
@@ -352,5 +340,20 @@ export class BoxComponent extends Component {
         },
       });
     }
+  }
+}
+
+function fromNumberOrPercent(v: number | string, containerWidth: number): number {
+  if (R.isNumber(v)) {
+    return v;
+  } else if (R.isString(v)) {
+    if (v.endsWith("%")) {
+      const percent = parseFloat(v) / 100;
+      return Math.ceil(containerWidth * percent);
+    } else {
+      throw new Error(`invalid width "${v}"`);
+    }
+  } else {
+    throw new Error(`invalid width "${v}"`);
   }
 }
