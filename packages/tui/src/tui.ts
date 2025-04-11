@@ -1,5 +1,5 @@
 import { cursorHide, cursorShow, enterAlternativeScreen, exitAlternativeScreen } from "ansi-escapes";
-import readline, { Key } from 'node:readline';
+import readline, { Key } from "node:readline";
 import * as R from "radash";
 import { App } from "./components/App.js";
 import { NexqState, NexqStateOptions } from "./NexqState.js";
@@ -25,17 +25,17 @@ export async function start(options: NexqStateOptions): Promise<void> {
     }
   };
 
-  process.on('SIGWINCH', () => {
+  process.on("SIGWINCH", () => {
     void render();
   });
-  process.on('SIGINT', () => {
+  process.on("SIGINT", () => {
     tryExitAlternativeScreen();
     process.exit(0);
   });
-  process.on('SIGQUIT', () => {
+  process.on("SIGQUIT", () => {
     tryExitAlternativeScreen();
   });
-  process.on('SIGTERM', () => {
+  process.on("SIGTERM", () => {
     tryExitAlternativeScreen();
   });
 
@@ -47,8 +47,8 @@ export async function start(options: NexqStateOptions): Promise<void> {
     process.stdout.write(cursorHide);
 
     readline.emitKeypressEvents(process.stdin);
-    process.stdin.on('keypress', (chunk: string, key: Key | undefined) => {
-      if (key && key.ctrl && key.name === 'c') {
+    process.stdin.on("keypress", (chunk: string, key: Key | undefined) => {
+      if (key && key.ctrl && key.name === "c") {
         tryExitAlternativeScreen();
         process.exit(0);
       }
@@ -59,7 +59,7 @@ export async function start(options: NexqStateOptions): Promise<void> {
     await render();
 
     let renderTimeout: NodeJS.Timeout | undefined;
-    state.on('changed', () => {
+    state.on("changed", () => {
       if (renderTimeout) {
         clearTimeout(renderTimeout);
         renderTimeout = undefined;

@@ -3,145 +3,144 @@ import chalk, { ChalkInstance } from "chalk";
 import * as R from "radash";
 import { Component } from "./Component.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
-import { logToFile } from "../utils/log.js";
 
 interface Character {
-    value: string;
-    color: string;
+  value: string;
+  color: string;
 }
 
 function isCharacterEqual(ch1: Character, ch2: Character | undefined): boolean {
-    if (ch2 === undefined) {
-        return false;
-    }
-    return ch1.value === ch2.value && ch1.color === ch2.color;
+  if (ch2 === undefined) {
+    return false;
+  }
+  return ch1.value === ch2.value && ch1.color === ch2.color;
 }
 
 export class Renderer {
-    private _width = 0;
-    private _height = 0;
-    private previousWidth = 0;
-    private previousHeight = 0;
-    private buffers: Character[][][] = [];
-    private bufferIndex = 0;
+  private _width = 0;
+  private _height = 0;
+  private previousWidth = 0;
+  private previousHeight = 0;
+  private buffers: Character[][][] = [];
+  private bufferIndex = 0;
 
-    public get width(): number {
-        return this._width;
+  public get width(): number {
+    return this._width;
+  }
+
+  public get height(): number {
+    return this._height;
+  }
+
+  public render(component: Component): void {
+    this._width = process.stdout.columns ?? 80;
+    this._height = process.stdout.rows ?? 40;
+
+    component.calculateGeometry({ top: 0, left: 0, width: this.width, height: this.height });
+    const renderItems = component.render();
+    const sortedRenderItems = R.sort(renderItems, (r) => r.zIndex);
+
+    if (!this.buffers[this.bufferIndex] || this._width !== this.previousWidth || this._height !== this.previousHeight) {
+      this.buffers[this.bufferIndex] = createBuffer(this._width, this._height);
     }
 
-    public get height(): number {
-        return this._height;
+    for (const renderItem of sortedRenderItems) {
+      renderItemToBuffer(this.buffers[this.bufferIndex], renderItem);
     }
 
-    public render(component: Component): void {
-        this._width = process.stdout.columns ?? 80;
-        this._height = process.stdout.rows ?? 40;
+    const secondaryBufferIndex = (this.bufferIndex + 1) % 2;
+    renderBuffer(this.buffers[this.bufferIndex], this.buffers[secondaryBufferIndex]);
 
-        component.calculateGeometry({ top: 0, left: 0, width: this.width, height: this.height });
-        const renderItems = component.render();
-        const sortedRenderItems = R.sort(renderItems, r => r.zIndex)
-
-        if (!this.buffers[this.bufferIndex] || this._width !== this.previousWidth || this._height !== this.previousHeight) {
-            this.buffers[this.bufferIndex] = createBuffer(this._width, this._height);
-        }
-
-        for (const renderItem of sortedRenderItems) {
-            renderItemToBuffer(this.buffers[this.bufferIndex], renderItem);
-        }
-
-        const secondaryBufferIndex = (this.bufferIndex + 1) % 2;
-        renderBuffer(this.buffers[this.bufferIndex], this.buffers[secondaryBufferIndex]);
-
-        this.previousWidth = this._width;
-        this.previousHeight = this._height;
-        this.bufferIndex = secondaryBufferIndex;
-    }
+    this.previousWidth = this._width;
+    this.previousHeight = this._height;
+    this.bufferIndex = secondaryBufferIndex;
+  }
 }
 
 function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
-    const ansiCache: Record<string, ChalkInstance> = {};
+  const ansiCache: Record<string, ChalkInstance> = {};
 
-    const getAnsi = (ch: Character): ChalkInstance => {
-        const key = ch.color;
-        const existing = ansiCache[key];
-        if (existing) {
-            return existing;
-        }
-        const ansi = chalk.hex(ch.color);
-        ansiCache[key] = ansi;
-        return ansi;
-    };
-
-    let nextY = -1;
-    let nextX = -1;
-    for (let y = 0; y < buffer.length; y++) {
-        const row = buffer[y];
-        const lastRow = lastBuffer?.[y];
-        for (let x = 0; x < row.length; x++) {
-            if (y === buffer.length - 1 && x === row.length - 1) {
-                break;
-            }
-
-            const ch = row[x];
-            if (y !== nextY || x !== nextX) {
-                process.stdout.write(cursorTo(x, y));
-                nextY = y;
-            }
-
-            if (!isCharacterEqual(ch, lastRow?.[x])) {
-                const ansi = getAnsi(ch);
-                process.stdout.write(ansi(ch.value));
-                nextX++;
-            }
-        }
-        nextX = -1;
+  const getAnsi = (ch: Character): ChalkInstance => {
+    const key = ch.color;
+    const existing = ansiCache[key];
+    if (existing) {
+      return existing;
     }
+    const ansi = chalk.hex(ch.color);
+    ansiCache[key] = ansi;
+    return ansi;
+  };
+
+  let nextY = -1;
+  let nextX = -1;
+  for (let y = 0; y < buffer.length; y++) {
+    const row = buffer[y];
+    const lastRow = lastBuffer?.[y];
+    for (let x = 0; x < row.length; x++) {
+      if (y === buffer.length - 1 && x === row.length - 1) {
+        break;
+      }
+
+      const ch = row[x];
+      if (y !== nextY || x !== nextX) {
+        process.stdout.write(cursorTo(x, y));
+        nextY = y;
+      }
+
+      if (!isCharacterEqual(ch, lastRow?.[x])) {
+        const ansi = getAnsi(ch);
+        process.stdout.write(ansi(ch.value));
+        nextX++;
+      }
+    }
+    nextX = -1;
+  }
 }
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
-    const type = renderItem.type;
-    if (type === 'text') {
-        renderTextItemToBuffer(buffer, renderItem);
-    } else {
-        throw new Error(`unhandled render item type "${type}"`);
-    }
+  const type = renderItem.type;
+  if (type === "text") {
+    renderTextItemToBuffer(buffer, renderItem);
+  } else {
+    throw new Error(`unhandled render item type "${type}"`);
+  }
 }
 
 function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderItem): void {
-    const lines = renderItem.text.split('\n');
-    let y = renderItem.geometry.top;
-    for (let lineIndex = 0; lineIndex < renderItem.geometry.height; lineIndex++, y++) {
-        const bufferRow = buffer[y];
-        if (!bufferRow) {
-            continue;
-        }
-
-        let x = renderItem.geometry.left;
-        const line = lines[lineIndex];
-        for (let chIndex = 0; chIndex < renderItem.geometry.width; chIndex++, x++) {
-            const bufferCh = bufferRow[x];
-            if (!bufferCh) {
-                continue;
-            }
-
-            const ch = line?.[chIndex];
-            bufferCh.value = ch ?? ' ';
-            bufferCh.color = renderItem.color;
-        }
+  const lines = renderItem.text.split("\n");
+  let y = renderItem.geometry.top;
+  for (let lineIndex = 0; lineIndex < renderItem.geometry.height; lineIndex++, y++) {
+    const bufferRow = buffer[y];
+    if (!bufferRow) {
+      continue;
     }
+
+    let x = renderItem.geometry.left;
+    const line = lines[lineIndex];
+    for (let chIndex = 0; chIndex < renderItem.geometry.width; chIndex++, x++) {
+      const bufferCh = bufferRow[x];
+      if (!bufferCh) {
+        continue;
+      }
+
+      const ch = line?.[chIndex];
+      bufferCh.value = ch ?? " ";
+      bufferCh.color = renderItem.color;
+    }
+  }
 }
 
 function createBuffer(width: number, height: number): Character[][] {
-    const buffer: Character[][] = [];
-    for (let y = 0; y < height; y++) {
-        const line: Character[] = [];
-        for (let x = 0; x < width; x++) {
-            line.push({
-                value: ' ',
-                color: '#ffffff'
-            });
-        }
-        buffer.push(line);
+  const buffer: Character[][] = [];
+  for (let y = 0; y < height; y++) {
+    const line: Character[] = [];
+    for (let x = 0; x < width; x++) {
+      line.push({
+        value: " ",
+        color: "#ffffff",
+      });
     }
-    return buffer;
+    buffer.push(line);
+  }
+  return buffer;
 }
