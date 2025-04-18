@@ -198,7 +198,11 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
       now,
     });
     if (results.changes !== 1) {
-      const messages = await this.sql.all<SqlMessage>(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, messageId]);
+      const messages = await this.sql.all<SqlMessage>(this.database, SQL_FIND_MESSAGE_BY_ID, [
+        queueName,
+        queueName,
+        messageId,
+      ]);
       if (messages.length === 0) {
         throw new MessageNotFoundError(queueName, messageId);
       }
@@ -227,7 +231,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
       receiptHandle,
     ]);
     if (results.changes !== 1) {
-      const messages = await this.sql.all(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, messageId]);
+      const messages = await this.sql.all(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, queueName, messageId]);
       if (messages.length === 0) {
         throw new MessageNotFoundError(queueName, messageId);
       }
@@ -285,6 +289,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
   public async getMessage(queueName: string, messageId: string): Promise<GetMessage> {
     const now = this.time.getCurrentTime();
     const messages = await this.sql.all<SqlMessage & { position: number }>(this.database, SQL_FIND_MESSAGE_BY_ID, [
+      queueName,
       queueName,
       messageId,
     ]);
@@ -586,7 +591,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
   }
 
   public async findMessageById(queueName: string, messageId: string): Promise<SqlMessage | undefined> {
-    const rows = await this.sql.all(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, messageId]);
+    const rows = await this.sql.all(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, queueName, messageId]);
     if (rows.length === 0) {
       return undefined;
     }

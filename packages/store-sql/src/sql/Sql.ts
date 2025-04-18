@@ -136,6 +136,7 @@ export abstract class Sql<TDatabase> {
             WHERE
               m2.priority <= m1.priority
               AND m2.order_by <= m1.order_by
+              AND queue_name = ?
           ) AS position
         FROM
           ${this.tablePrefix}_message m1

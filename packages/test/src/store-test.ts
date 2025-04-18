@@ -220,6 +220,28 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       );
     });
 
+    test("position in queue with multiple queues", async () => {
+      // create the queues
+      await store.createQueue(QUEUE1_NAME);
+      await store.createQueue(QUEUE2_NAME);
+
+      // send messages
+      const q1m1 = await store.sendMessage(QUEUE1_NAME, "q1m1");
+      await time.advance(1);
+      const q1m2 = await store.sendMessage(QUEUE1_NAME, "q1m2");
+      await time.advance(1);
+      const q2m1 = await store.sendMessage(QUEUE2_NAME, "q2m1");
+      await time.advance(1);
+      const q2m2 = await store.sendMessage(QUEUE2_NAME, "q2m2");
+      await time.advance(1);
+
+      // check message position
+      expect((await store.getMessage(QUEUE1_NAME, q1m1.id)).positionInQueue).toBe(0);
+      expect((await store.getMessage(QUEUE1_NAME, q1m2.id)).positionInQueue).toBe(1);
+      expect((await store.getMessage(QUEUE2_NAME, q2m1.id)).positionInQueue).toBe(0);
+      expect((await store.getMessage(QUEUE2_NAME, q2m2.id)).positionInQueue).toBe(1);
+    });
+
     test("receive message", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME);
