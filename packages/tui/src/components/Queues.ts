@@ -187,7 +187,7 @@ export class Queues extends Component {
       options: ["Cancel", "Purge"],
       defaultOption: "Cancel",
     });
-    if (confirm) {
+    if (confirm === "Purge") {
       try {
         await Promise.all(queues.map((r) => this.state.api.api.purgeQueue(r.name)));
         this.state.setStatus(`${queueNames} purged`);
@@ -216,7 +216,7 @@ export class Queues extends Component {
       options: ["Cancel", "Delete"],
       defaultOption: "Cancel",
     });
-    if (confirm) {
+    if (confirm === "Delete") {
       try {
         await Promise.all(queues.map((r) => this.state.api.api.deleteQueue(r.name)));
         this.state.setStatus(`${queueNames} deleted!`);

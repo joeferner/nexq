@@ -4,6 +4,7 @@ import * as R from "radash";
 import { App } from "./components/App.js";
 import { NexqState, NexqStateOptions, Screen } from "./NexqState.js";
 import { Renderer } from "./render/Renderer.js";
+import { isInputMatch } from "./utils/input.js";
 import { createLogger } from "./utils/logger.js";
 
 const logger = createLogger("tui");
@@ -54,10 +55,20 @@ export async function start(options: NexqStateOptions): Promise<void> {
     process.stdout.write(cursorHide);
 
     readline.emitKeypressEvents(process.stdin);
+    // windows command line only gets escape key through data and now keypress
+    process.stdin.on("data", (key) => {
+      if (key.length === 1 && key[0] === 27) {
+        state.handleKeyPress("1b", { name: "escape" });
+      }
+    });
     process.stdin.on("keypress", (chunk: string, key: Key | undefined) => {
       if (key && key.ctrl && key.name === "c") {
         tryExitAlternativeScreen();
         process.exit(0);
+      }
+      // handled in process.stdin.on("data", ...) to support windows
+      if (isInputMatch(key, "escape")) {
+        return;
       }
       state.handleKeyPress(chunk, key);
     });

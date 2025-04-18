@@ -109,7 +109,11 @@ export class Logger {
     for (const optionalParam of optionalParams ?? []) {
       text += ` ${paramToString(optionalParam)}`;
     }
-    fs.appendFileSync(Logger.config.logFile ?? DEFAULT_LOG_FILE, `${new Date().toISOString()}: ${text}\n`);
+    try {
+      fs.appendFileSync(Logger.config.logFile ?? DEFAULT_LOG_FILE, `${new Date().toISOString()}: ${text}\n`);
+    } catch (_err) {
+      // failed to log
+    }
   }
 }
 
