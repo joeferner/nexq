@@ -1,4 +1,5 @@
-import { ConfirmOptions, NexqState } from "../NexqState.js";
+import { Key } from "readline";
+import { NexqState } from "../NexqState.js";
 import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
@@ -7,79 +8,88 @@ import { Dialog } from "./Dialog.js";
 
 const logger = createLogger("ConfirmDialog");
 
-export class ConfirmDialog extends Dialog {
+export interface ConfirmOptions {
+  title: string;
+  message: string;
+  options: string[];
+  defaultOption: string;
+}
+
+export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
   public static readonly ID = "confirmDialog";
-  private lastConfirmOptions?: ConfirmOptions;
-  private selectedOption?: string;
 
   public constructor(state: NexqState) {
-    super(state);
-    state.on("changed", () => {
-      if (state.confirmOptions !== this.lastConfirmOptions) {
-        this.lastConfirmOptions = state.confirmOptions;
-        if (state.confirmOptions) {
-          this.selectedOption = state.confirmOptions.defaultOption;
-          this.refresh();
-        } else {
-          this.hide();
-        }
-      }
-    });
-    state.on("keypress", (_chunk, key) => {
-      if (state.focus !== ConfirmDialog.ID) {
-        return;
-      }
-      if (isInputMatch(key, "escape")) {
-        state.exitConfirmDialog(undefined);
-      } else if (isInputMatch(key, "left")) {
-        this.updateSelectedOption(-1);
-      } else if (isInputMatch(key, "right") || isInputMatch(key, "tab")) {
-        this.updateSelectedOption(1);
-      } else if (isInputMatch(key, "return")) {
-        state.exitConfirmDialog(this.selectedOption);
-      } else {
-        logger.debug("unhandled key press", JSON.stringify(key));
-      }
-    });
+    super(state, ConfirmDialog.ID);
+  }
+
+  protected override handleKeyPress(_chunk: string, key: Key | undefined): void {
+    if (isInputMatch(key, "escape")) {
+      this.close(undefined);
+    } else if (isInputMatch(key, "left")) {
+      this.updateSelectedOption(-1);
+    } else if (isInputMatch(key, "right") || isInputMatch(key, "tab")) {
+      this.updateSelectedOption(1);
+    } else if (isInputMatch(key, "return")) {
+      this.close(this.selectedOption);
+    } else {
+      logger.debug("unhandled key press", JSON.stringify(key));
+    }
+  }
+
+  public get selectedOption(): string | undefined {
+    if (this.state.focus === ConfirmDialog.ID) {
+      return this.options?.defaultOption;
+    }
+
+    const prefix = `${ConfirmDialog.ID}:`;
+    if (this.state.focus.startsWith(prefix)) {
+      return this.state.focus.substring(prefix.length);
+    }
+    return undefined;
+  }
+
+  public set selectedOption(option: string | undefined) {
+    if (option) {
+      this.state.focus = `${ConfirmDialog.ID}:${option}`;
+    }
   }
 
   private updateSelectedOption(dir: number): void {
-    const { confirmOptions } = this.state;
-    if (!confirmOptions) {
+    if (!this.options) {
       return;
     }
 
-    let i = confirmOptions.options.indexOf(this.selectedOption ?? "") ?? 0;
+    let i = this.options.options.indexOf(this.selectedOption ?? "") ?? 0;
     i += dir;
-    i = i % confirmOptions.options.length;
-    this.selectedOption = confirmOptions.options[i];
+    i = i % this.options.options.length;
+    this.selectedOption = this.options.options[i];
     this.refresh();
   }
 
-  private refresh(): void {
-    const { confirmOptions } = this.state;
-    if (!confirmOptions) {
+  protected override refresh(): void {
+    if (!this.options) {
       return;
     }
 
-    const optionsWidth = confirmOptions.options.reduce((p, o) => p + o.length + 3, 0);
+    const { options, message, title } = this.options;
+    const optionsWidth = options.reduce((p, o) => p + o.length + 3, 0);
     this.update({
-      title: confirmOptions.title,
+      title,
       children: [
         new BoxComponent({
           direction: BoxDirection.Vertical,
-          width: confirmOptions.message.length + 4,
+          width: message.length + 4,
           height: 5,
           justifyContent: JustifyContent.Center,
           children: [
             new TextComponent({
-              text: `\n${confirmOptions.message}\n`,
+              text: `\n${message}\n`,
             }),
             new BoxComponent({
               width: optionsWidth,
               direction: BoxDirection.Horizontal,
               justifyContent: JustifyContent.SpaceBetween,
-              children: confirmOptions.options.map((option) => {
+              children: options.map((option) => {
                 return new TextComponent({ text: ` ${option} `, inverse: this.selectedOption === option });
               }),
             }),

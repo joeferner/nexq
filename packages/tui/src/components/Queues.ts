@@ -33,6 +33,11 @@ export class Queues extends Component {
       name: "Pause/Resume",
       shortcut: "ctrl-r",
     },
+    {
+      id: "move",
+      name: "Move Messages",
+      shortcut: "ctrl-o",
+    },
   ];
 
   public constructor(private readonly state: NexqState) {
@@ -164,8 +169,37 @@ export class Queues extends Component {
       void this.deleteSelectedQueues();
     } else if (helpItem.id === "pause") {
       void this.pauseResumeSelectedQueues();
+    } else if (helpItem.id === "move") {
+      void this.moveMessagesFromSelectedQueue();
     } else {
-      throw new Error(`TODO ${helpItem.id}`);
+      logger.error(`unhandled help shortcut ${helpItem.id}`);
+    }
+  }
+
+  private async moveMessagesFromSelectedQueue(): Promise<void> {
+    const queues = this.tableView.getSelectedItems();
+    if (queues.length === 0) {
+      this.state.setStatus("No selected queues to move messages");
+      return;
+    }
+    if (queues.length > 1) {
+      this.state.setStatus("Can only move messages from one queue at a time");
+      return;
+    }
+
+    const sourceQueueName = queues[0].name;
+    const result = await this.state.moveMessagesDialog.show({
+      sourceQueueName,
+    });
+    if (result) {
+      try {
+        await this.state.api.api.moveMessages(sourceQueueName, { targetQueueName: result.targetQueueName });
+        this.state.setStatus(`Messages moved from "${sourceQueueName}" to "${result.targetQueueName}"`);
+        void this.refreshQueues();
+      } catch (err) {
+        logger.error(`failed to move messages from "${sourceQueueName}" to "${result.targetQueueName}"`, err);
+        this.state.setStatus(`Failed to move messages`, err);
+      }
     }
   }
 
@@ -181,7 +215,7 @@ export class Queues extends Component {
       queueNames = queueNames.substring(0, 40) + "…";
     }
 
-    const confirm = await this.state.confirm({
+    const confirm = await this.state.confirmDialog.show({
       title: "Purge Queue",
       message: `Are you sure you want to purge ${queueNames}?`,
       options: ["Cancel", "Purge"],
@@ -193,6 +227,7 @@ export class Queues extends Component {
         this.state.setStatus(`${queueNames} purged`);
         void this.refreshQueues();
       } catch (err) {
+        logger.error(`Failed to purge one or more queues`, err);
         this.state.setStatus(`Failed to purge one or more queues`, err);
       }
     }
@@ -210,7 +245,7 @@ export class Queues extends Component {
       queueNames = queueNames.substring(0, 40) + "…";
     }
 
-    const confirm = await this.state.confirm({
+    const confirm = await this.state.confirmDialog.show({
       title: "Delete Queue",
       message: `Are you sure you want to delete ${queueNames}?`,
       options: ["Cancel", "Delete"],
@@ -222,6 +257,7 @@ export class Queues extends Component {
         this.state.setStatus(`${queueNames} deleted!`);
         void this.refreshQueues();
       } catch (err) {
+        logger.error(`Failed to delete one or more queues`, err);
         this.state.setStatus(`Failed to delete one or more queues`, err);
       }
     }
@@ -261,7 +297,8 @@ export class Queues extends Component {
       }
       void this.refreshQueues();
     } catch (err) {
-      this.state.setStatus(`Failed to delete one or more queues`, err);
+      logger.error(`Failed to pause/resume one or more queues`, err);
+      this.state.setStatus(`Failed to pause/resume one or more queues`, err);
     }
   }
 

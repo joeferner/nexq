@@ -1,4 +1,4 @@
-import { cursorTo } from "ansi-escapes";
+import { cursorTo, cursorHide, cursorShow } from "ansi-escapes";
 import * as ansis from "ansis";
 import * as R from "radash";
 import { Component } from "./Component.js";
@@ -10,6 +10,7 @@ const logger = createLogger("Renderer");
 interface Character {
   value: string;
   color: string;
+  bgColor?: string;
   inverse: boolean;
 }
 
@@ -17,7 +18,9 @@ function isCharacterEqual(ch1: Character, ch2: Character | undefined): boolean {
   if (ch2 === undefined) {
     return false;
   }
-  return ch1.value === ch2.value && ch1.color === ch2.color && ch1.inverse === ch2.inverse;
+  return (
+    ch1.value === ch2.value && ch1.bgColor === ch2.bgColor && ch1.color === ch2.color && ch1.inverse === ch2.inverse
+  );
 }
 
 export class Renderer {
@@ -57,6 +60,14 @@ export class Renderer {
     const secondaryBufferIndex = (this.bufferIndex + 1) % 2;
     renderBuffer(this.buffers[this.bufferIndex], this.buffers[secondaryBufferIndex]);
 
+    const cursorRenderItem = sortedRenderItems.find((r) => r.type === "cursor");
+    if (cursorRenderItem) {
+      process.stdout.write(cursorShow);
+      process.stdout.write(cursorTo(cursorRenderItem.geometry.left, cursorRenderItem.geometry.top));
+    } else {
+      process.stdout.write(cursorHide);
+    }
+
     this.previousWidth = this._width;
     this.previousHeight = this._height;
     this.bufferIndex = secondaryBufferIndex;
@@ -80,7 +91,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   const ansiCache: Record<string, ansis.Ansis> = {};
 
   const createColorKey = (ch: Character): string => {
-    return `${ch.color}${ch.inverse ? "t" : "f"}`;
+    return `${ch.color}${ch.bgColor}${ch.inverse ? "t" : "f"}`;
   };
 
   const getAnsi = (key: string, ch: Character): ansis.Ansis => {
@@ -89,6 +100,9 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
       return existing;
     }
     let ansi = ansis.hex(ch.color);
+    if (ch.bgColor) {
+      ansi = ansi.bgHex(ch.bgColor);
+    }
     if (ch.inverse) {
       ansi = ansi.inverse;
     }
@@ -140,7 +154,9 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
   const type = renderItem.type;
-  if (type === "text") {
+  if (type === "cursor") {
+    // nothing todo
+  } else if (type === "text") {
     renderTextItemToBuffer(buffer, renderItem);
   } else {
     throw new Error(`unhandled render item type "${type}"`);
@@ -167,6 +183,7 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
       const ch = line?.[chIndex];
       bufferCh.value = ch ?? " ";
       bufferCh.color = renderItem.color;
+      bufferCh.bgColor = renderItem.bgColor;
       bufferCh.inverse = renderItem.inverse ?? false;
     }
   }

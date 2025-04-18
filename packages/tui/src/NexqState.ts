@@ -2,9 +2,10 @@ import EventEmitter from "node:events";
 import https from "node:https";
 import { Key } from "readline";
 import { Api, GetInfoResponse } from "./client/NexqClientApi.js";
+import { ConfirmDialog } from "./components/ConfirmDialog.js";
+import { MoveMessagesDialog } from "./components/MoveMessagesDialog.js";
 import { Queues } from "./components/Queues.js";
 import { getErrorMessage } from "./utils/error.js";
-import { ConfirmDialog } from "./components/ConfirmDialog.js";
 
 export interface NexqStateOptions {
   tuiVersion: string;
@@ -30,7 +31,9 @@ export class NexqState extends EventEmitter {
   public readonly api: Api<unknown>;
   private info!: GetInfoResponse;
   private _screen: Screen = Screen.None;
-  public focus = Queues.ID;
+  private focusStack = [Queues.ID];
+  public readonly confirmDialog: ConfirmDialog;
+  public readonly moveMessagesDialog: MoveMessagesDialog;
   public readonly logoColor = "#fca321";
   public readonly headerNameColor = "#fca321";
   public readonly headerValueColor = "#ffffff";
@@ -40,13 +43,12 @@ export class NexqState extends EventEmitter {
   public readonly helpNameColor = "#80807f";
   public readonly tableViewTextColor = "#96ccf5";
   public readonly dialogBorderColor = "#97cdf5";
+  public readonly inputBoxFocusColor = "#ffffff";
+  public readonly inputBoxFocusBgColor = "#00332D";
   public readonly tuiVersion: string;
   public readonly refreshInterval = 5 * 1000;
   public readonly statusTimeout = 3 * 1000;
   private _status = "";
-  private _confirmOptions?: ConfirmOptions;
-  private confirmResolve?: (value: string | undefined) => unknown;
-  private confirmPreviousFocus?: string;
 
   public constructor(options: NexqStateOptions) {
     super();
@@ -63,6 +65,9 @@ export class NexqState extends EventEmitter {
       });
     }
     this.api = new Api({ baseURL: options.url, httpsAgent });
+
+    this.confirmDialog = new ConfirmDialog(this);
+    this.moveMessagesDialog = new MoveMessagesDialog(this);
   }
 
   public async init(): Promise<void> {
@@ -81,8 +86,20 @@ export class NexqState extends EventEmitter {
     return this._status;
   }
 
-  public get confirmOptions(): ConfirmOptions | undefined {
-    return this._confirmOptions;
+  public get focus(): string {
+    return this.focusStack[this.focusStack.length - 1];
+  }
+
+  public set focus(focus: string) {
+    this.focusStack[this.focusStack.length - 1] = focus;
+  }
+
+  public pushFocus(focus: string): void {
+    this.focusStack.push(focus);
+  }
+
+  public popFocus(): void {
+    this.focusStack.pop();
   }
 
   public set screen(screen: Screen) {
@@ -112,33 +129,4 @@ export class NexqState extends EventEmitter {
   public override emit<T extends keyof StateEvents>(event: T, ...args: Parameters<StateEvents[T]>): boolean {
     return super.emit(event, ...args);
   }
-
-  public confirm(options: ConfirmOptions): Promise<string | undefined> {
-    return new Promise<string | undefined>((resolve) => {
-      this._confirmOptions = options;
-      this.confirmResolve = resolve;
-      this.confirmPreviousFocus = this.focus;
-      this.focus = ConfirmDialog.ID;
-      this.emit("changed");
-    });
-  }
-
-  public exitConfirmDialog(result: string | undefined): void {
-    if (!this.confirmPreviousFocus) {
-      throw new Error("invalid state");
-    }
-    this.focus = this.confirmPreviousFocus;
-    this.confirmResolve?.(result);
-    this.confirmResolve = undefined;
-    this.confirmPreviousFocus = undefined;
-    this._confirmOptions = undefined;
-    this.emit("changed");
-  }
-}
-
-export interface ConfirmOptions {
-  title: string;
-  message: string;
-  options: string[];
-  defaultOption: string;
 }

@@ -1,7 +1,7 @@
 import * as R from "radash";
 import { Component } from "./Component.js";
 import { Geometry } from "./Geometry.js";
-import { RenderItem, TextRenderItem } from "./RenderItem.js";
+import { RenderItem } from "./RenderItem.js";
 
 export enum BoxDirection {
   Vertical = "Vertical",
@@ -224,7 +224,7 @@ export class BoxComponent extends Component {
     return renderItems;
   }
 
-  private renderBorder(renderItems: TextRenderItem[]): void {
+  private renderBorder(renderItems: RenderItem[]): void {
     if (!this.border) {
       return;
     }

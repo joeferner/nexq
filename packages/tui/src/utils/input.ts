@@ -39,3 +39,26 @@ export function isInputMatch(key: Key | undefined, shortcut: string): boolean {
 
   return true;
 }
+
+export function inputToChar(key: Key | undefined): string | undefined {
+  if (!key) {
+    return undefined;
+  }
+  if (key.meta || key.ctrl) {
+    return undefined;
+  }
+
+  if (key.name?.length === 1) {
+    let ch = key.name;
+    if (key.shift) {
+      ch = ch.toUpperCase();
+    }
+    return ch;
+  }
+
+  if (key.name === "space") {
+    return " ";
+  }
+
+  return undefined;
+}
