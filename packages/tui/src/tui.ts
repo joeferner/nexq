@@ -4,7 +4,9 @@ import * as R from "radash";
 import { App } from "./components/App.js";
 import { NexqState, NexqStateOptions, Screen } from "./NexqState.js";
 import { Renderer } from "./render/Renderer.js";
-import { logToFile } from "./utils/log.js";
+import { createLogger } from "./utils/logger.js";
+
+const logger = createLogger("tui");
 
 export async function start(options: NexqStateOptions): Promise<void> {
   const state = new NexqState(options);
@@ -40,7 +42,7 @@ export async function start(options: NexqStateOptions): Promise<void> {
     tryExitAlternativeScreen();
   });
   process.on("uncaughtException", (err) => {
-    logToFile(`uncaughtException: ${err.stack}`);
+    logger.error("uncaughtException", err);
     state.setStatus("Uncaught Exception", err);
   });
 
@@ -65,7 +67,7 @@ export async function start(options: NexqStateOptions): Promise<void> {
 
     let renderTimeout: NodeJS.Timeout | undefined;
     state.on("changed", () => {
-      logToFile("changed");
+      logger.debug("changed");
       if (renderTimeout) {
         clearTimeout(renderTimeout);
         renderTimeout = undefined;

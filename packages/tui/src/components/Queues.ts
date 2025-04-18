@@ -5,10 +5,12 @@ import { Component } from "../render/Component.js";
 import { Geometry } from "../render/Geometry.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
-import { logToFile } from "../utils/log.js";
+import { createLogger } from "../utils/logger.js";
 import { HelpItem } from "./Help.js";
 import { SortDirection, TableView } from "./TableView.js";
 import * as R from "radash";
+
+const logger = createLogger("Queues");
 
 export class Queues extends Component {
   public static readonly ID = "queues";
@@ -120,7 +122,7 @@ export class Queues extends Component {
       }
 
       if (!found) {
-        logToFile(JSON.stringify(key));
+        logger.debug("unhandled key press", JSON.stringify(key));
       }
 
       state.emit("changed");

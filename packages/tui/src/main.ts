@@ -7,6 +7,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { start } from "./tui.js";
 import { getErrorMessage } from "./utils/error.js";
+import { createLogger, DEFAULT_LOG_FILE, Logger } from "./utils/logger.js";
+
+const logger = createLogger("main");
 
 async function parseCommandLineAndStart(): Promise<void> {
   const root = findRoot(fileURLToPath(import.meta.url));
@@ -40,17 +43,39 @@ async function parseCommandLineAndStart(): Promise<void> {
         type: optional(string),
         description: "Private key used to connect",
       }),
+      logFile: option({
+        long: "log-file",
+        type: optional(string),
+        defaultValue: () => DEFAULT_LOG_FILE,
+        description: "File to write log messages to",
+      }),
+      debug: flag({
+        long: "debug",
+        type: boolean,
+        defaultValue: () => false,
+        description: "Increases verbosity of logging",
+      }),
       url: positional({ type: string, displayName: "url" }),
     },
     handler: async (args) => {
-      await start({
-        ...args,
-        rejectUnauthorized: !args.allowUnauthorized,
-        ca: await readFile(args.ca),
-        cert: await readFile(args.cert),
-        key: await readFile(args.key),
-        tuiVersion: packageJson.version,
-      });
+      try {
+        Logger.configure({
+          defaultLevel: args.debug ? "debug" : "info",
+          logFile: args.logFile,
+        });
+
+        await start({
+          ...args,
+          rejectUnauthorized: !args.allowUnauthorized,
+          ca: await readFile(args.ca),
+          cert: await readFile(args.cert),
+          key: await readFile(args.key),
+          tuiVersion: packageJson.version,
+        });
+      } catch (err) {
+        logger.error("start failed", err);
+        console.error(getErrorMessage(err));
+      }
     },
   });
 

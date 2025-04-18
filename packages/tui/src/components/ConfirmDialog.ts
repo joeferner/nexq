@@ -2,8 +2,10 @@ import { ConfirmOptions, NexqState } from "../NexqState.js";
 import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
-import { logToFile } from "../utils/log.js";
+import { createLogger } from "../utils/logger.js";
 import { Dialog } from "./Dialog.js";
+
+const logger = createLogger("ConfirmDialog");
 
 export class ConfirmDialog extends Dialog {
   public static readonly ID = "confirmDialog";
@@ -36,7 +38,7 @@ export class ConfirmDialog extends Dialog {
       } else if (isInputMatch(key, "return")) {
         state.exitConfirmDialog(this.selectedOption);
       } else {
-        logToFile(JSON.stringify(key));
+        logger.debug("unhandled key press", JSON.stringify(key));
       }
     });
   }

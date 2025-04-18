@@ -3,6 +3,9 @@ import * as ansis from "ansis";
 import * as R from "radash";
 import { Component } from "./Component.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger("Renderer");
 
 interface Character {
   value: string;
@@ -34,6 +37,7 @@ export class Renderer {
   }
 
   public render(component: Component): void {
+    const startTime = Date.now();
     this._width = process.stdout.columns ?? 80;
     this._height = process.stdout.rows ?? 40;
 
@@ -56,6 +60,10 @@ export class Renderer {
     this.previousWidth = this._width;
     this.previousHeight = this._height;
     this.bufferIndex = secondaryBufferIndex;
+
+    const endTime = Date.now();
+    const deltaT = endTime - startTime;
+    logger.debug(`render ${deltaT}ms, ${((1 / deltaT) * 1000).toFixed(2)}fps`);
   }
 }
 
