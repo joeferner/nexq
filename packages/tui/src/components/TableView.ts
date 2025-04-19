@@ -1,9 +1,9 @@
 import { Key } from "readline";
-import { FlexDirection } from "yoga-layout";
-import { BoxComponent } from "../render/BoxComponent.js";
+import { FlexDirection, Node as YogaNode } from "yoga-layout";
 import { Component } from "../render/Component.js";
-import { isInputMatch } from "../utils/input.js";
 import { RenderItem } from "../render/RenderItem.js";
+import { TextComponent } from "../render/TextComponent.js";
+import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger('TableView');
@@ -34,8 +34,6 @@ const COLUMN_MARGIN = 1;
 const COLUMN_SORT_WIDTH = 1;
 
 export class TableView<T> extends Component {
-  private readonly box = new BoxComponent({ children: [], direction: FlexDirection.Column });
-  private readonly _children: Component[] = [this.box];
   private _items: T[] = [];
   public selectedIndex = 0;
   public offset = 0;
@@ -48,6 +46,8 @@ export class TableView<T> extends Component {
   public constructor(options: TableViewOptions<T>) {
     super();
     this._columns = options.columns;
+    this.flexDirection = FlexDirection.Column;
+    this.children = [new TextComponent({ text: 'Loading' })];
     this.itemTextColor = options.itemTextColor ?? "#ffffff";
     this.updateColumnWidths();
   }
@@ -66,15 +66,13 @@ export class TableView<T> extends Component {
     return this._columns;
   }
 
-  public override render(): RenderItem[] {
-    if (!this.yogaNode) {
-      return [];
-    }
+  protected override getInitialRenderItems(_yogaNode: YogaNode): RenderItem[] {
+    const renderItems: RenderItem[] = [];
 
-    const height = this.yogaNode.getComputedHeight();
-    const width = this.yogaNode.getComputedWidth();
+    const height = this.computedHeight;
+    const width = this.computedWidth;
     logger.info(`${height} ${width}`);
-    return [];
+    return renderItems;
   }
 
   // if (this._children.length !== container.height) {
@@ -168,12 +166,12 @@ export class TableView<T> extends Component {
     }
 
     if (isInputMatch(key, "pagedown")) {
-      this.selectedIndex += this.box.computedHeight - 3;
+      this.selectedIndex += this.computedHeight - 3;
       return true;
     }
 
     if (isInputMatch(key, "pageup")) {
-      this.selectedIndex -= this.box.computedHeight - 3;
+      this.selectedIndex -= this.computedHeight - 3;
       return true;
     }
 

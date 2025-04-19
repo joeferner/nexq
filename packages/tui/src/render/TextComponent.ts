@@ -1,8 +1,7 @@
-import { Node as YogaNode } from "yoga-layout/load";
+import Yoga, { Node as YogaNode } from "yoga-layout";
 import { Component } from "./Component.js";
-import { RenderItem } from "./RenderItem.js";
-import Yoga from "yoga-layout";
 import { geometryFromYogaNode } from "./Geometry.js";
+import { RenderItem } from "./RenderItem.js";
 
 export interface TextComponentOptions {
   text: string;
@@ -37,14 +36,7 @@ export class TextComponent extends Component {
     container.insertChild(this.yogaNode, container.getChildCount());
   }
 
-  public override render(): RenderItem[] {
-    if (!this.yogaNode) {
-      return [];
-    }
-
-    this._computedWidth = this.yogaNode.getComputedWidth();
-    this._computedHeight = this.yogaNode.getComputedHeight();
-
+  protected override getInitialRenderItems(yogaNode: YogaNode): RenderItem[] {
     return [
       {
         type: "text",
@@ -52,7 +44,7 @@ export class TextComponent extends Component {
         color: this.color ?? "#ffffff",
         inverse: this.inverse,
         zIndex: this.zIndex,
-        geometry: geometryFromYogaNode(this.yogaNode),
+        geometry: geometryFromYogaNode(yogaNode),
       },
     ];
   }

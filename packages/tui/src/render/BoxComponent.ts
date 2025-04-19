@@ -1,4 +1,4 @@
-import Yoga, { Align, Edge, Justify, Node, PositionType } from "yoga-layout";
+import Yoga, { Align, Justify, PositionType, Node as YogaNode } from "yoga-layout";
 import { FlexDirection } from "yoga-layout/load";
 import { Component } from "./Component.js";
 import { BorderType, RenderItem } from "./RenderItem.js";
@@ -45,7 +45,7 @@ export class BoxComponent extends Component {
     this.margin = 1;
   }
 
-  public override populateLayout(container: Node): void {
+  public override populateLayout(container: YogaNode): void {
     super.populateLayout(container);
 
     if (this.title) {
@@ -56,22 +56,19 @@ export class BoxComponent extends Component {
     }
   }
 
-  public render(): RenderItem[] {
-    if (!this.yogaNode) {
-      return [];
-    }
+  protected override getInitialRenderItems(yogaNode: YogaNode): RenderItem[] {
+    const renderItems: RenderItem[] = [];
 
-    const renderItems = super.render();
     renderItems.push({
       type: 'box',
       borderType: this.borderType,
       color: this.borderColor,
       zIndex: this.zIndex - 0.001,
       geometry: {
-        left: this.yogaNode.getComputedLeft() - 1,
-        top: this.yogaNode.getComputedTop() - 1,
-        width: this.yogaNode.getComputedWidth() + 2,
-        height: this.yogaNode.getComputedHeight() + 2,
+        left: yogaNode.getComputedLeft() - 1,
+        top: yogaNode.getComputedTop() - 1,
+        width: yogaNode.getComputedWidth() + 2,
+        height: yogaNode.getComputedHeight() + 2,
       }
     });
 

@@ -39,7 +39,7 @@ export class Component {
     this._computedWidth = this.yogaNode.getComputedWidth();
     this._computedHeight = this.yogaNode.getComputedHeight();
 
-    const renderItems: RenderItem[] = [];
+    const renderItems: RenderItem[] = this.getInitialRenderItems(this.yogaNode);
     const x = this.yogaNode.getComputedLeft();
     const y = this.yogaNode.getComputedTop();
     for (const child of this.children) {
@@ -52,6 +52,10 @@ export class Component {
       }
     }
     return renderItems;
+  }
+
+  protected getInitialRenderItems(_yogaNode: YogaNode): RenderItem[] {
+    return [];
   }
 
   public get computedWidth(): number {

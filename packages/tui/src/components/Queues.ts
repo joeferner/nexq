@@ -1,5 +1,5 @@
 import * as R from "radash";
-import { Align } from "yoga-layout";
+import { Align, FlexDirection } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { NexqState, Screen } from "../NexqState.js";
 import { BoxComponent } from "../render/BoxComponent.js";
@@ -97,11 +97,13 @@ export class Queues extends Component {
       ],
     });
     this.tableView.flexGrow = 1;
+    this.tableView.width = '100%';
 
     const box = new BoxComponent();
     box.borderType = BorderType.Single;
     box.borderColor = state.borderColor;
     box.flexGrow = 1;
+    box.flexDirection = FlexDirection.Column;
     box.title = new TextComponent({ text: " Queues ", color: state.titleColor });
     box.children.push(this.tableView);
     this.children.push(box);
