@@ -1,5 +1,7 @@
 import { expect } from "vitest";
 import { isHttpError } from "./utils.js";
+import express from "express";
+import EventEmitter from "events";
 
 export async function expectHttpError(
   fn: () => Promise<unknown>,
@@ -19,4 +21,14 @@ export async function expectHttpError(
       throw new Error(`expected HttpError with status code ${expectedStatusCode}`, { cause: err });
     }
   }
+}
+
+export class MockRequest extends EventEmitter {
+  public close(): void {
+    this.emit("close");
+  }
+}
+
+export function createMockRequest(): express.Request & MockRequest {
+  return new MockRequest() as express.Request & MockRequest;
 }

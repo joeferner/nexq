@@ -1,4 +1,5 @@
 import {
+  AbortError,
   CreateQueueOptions,
   CreateUserOptions,
   QueueInfo,
@@ -307,6 +308,28 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const message = await recvPromise;
       expect(message).toBeUndefined();
       expect(time.getCurrentTime()).toEqual(new Date(recvTime.getTime() + 1000));
+    });
+
+    test("receive message abort", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      const abortController = new AbortController();
+      let receivedResponse = false;
+      let receivedError: unknown = undefined;
+      store
+        .receiveMessage(QUEUE1_NAME, { waitTimeMs: 1000, abortSignal: abortController.signal })
+        .then((_resp) => {
+          receivedResponse = true;
+        })
+        .catch((err) => {
+          receivedError = err;
+        });
+      await time.advance(1);
+      abortController.abort();
+      await time.advance(1);
+      expect(receivedResponse).toBeFalsy();
+      expect(receivedError).toEqual(new AbortError("receive aborted"));
     });
 
     test("receive message no-timeout", async () => {

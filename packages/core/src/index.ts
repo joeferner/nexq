@@ -1,3 +1,4 @@
+export { AbortError } from "./error/AbortError.js";
 export { DeleteDeadLetterQueueError } from "./error/DeleteDeadLetterQueueError.js";
 export { DeleteDeadLetterTopicError } from "./error/DeleteDeadLetterTopicError.js";
 export { InvalidQueueNameError } from "./error/InvalidQueueNameError.js";
@@ -19,8 +20,8 @@ export {
   DEFAULT_LOGGER_CONFIG,
   Logger,
   LoggerConfig,
-  LogLevelString,
   LogLevel,
+  LogLevelString,
   stringToLogLevel,
 } from "./logger.js";
 export { GetMessage, isAvailable, isDelayed, Message, ReceivedMessage } from "./Message.js";

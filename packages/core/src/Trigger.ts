@@ -7,7 +7,7 @@ export class Trigger<T> {
 
   public constructor(private readonly time: Time) {}
 
-  public wait(ms: number): Promise<T | "timeout"> {
+  public wait(ms: number, options?: { signal?: AbortSignal }): Promise<T | "timeout"> {
     if (this.triggered !== undefined) {
       return Promise.resolve(this.triggered.value);
     }
@@ -19,15 +19,19 @@ export class Trigger<T> {
     return new Promise<T | "timeout">((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
-      this.time.setTimeout(() => {
-        this.resolve = undefined;
-        this.reject = undefined;
-        resolve("timeout");
-      }, ms);
+      this.time.setTimeout(
+        () => {
+          this.resolve = undefined;
+          this.reject = undefined;
+          resolve("timeout");
+        },
+        ms,
+        options
+      );
     });
   }
 
-  public waitUntil(untilTime: Date): Promise<T | "timeout"> {
+  public waitUntil(untilTime: Date, options?: { signal?: AbortSignal }): Promise<T | "timeout"> {
     if (this.triggered !== undefined) {
       return Promise.resolve(this.triggered.value);
     }
@@ -39,11 +43,15 @@ export class Trigger<T> {
     return new Promise<T | "timeout">((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
-      this.time.setTimeoutUntil(() => {
-        this.resolve = undefined;
-        this.reject = undefined;
-        resolve("timeout");
-      }, untilTime);
+      this.time.setTimeoutUntil(
+        () => {
+          this.resolve = undefined;
+          this.reject = undefined;
+          resolve("timeout");
+        },
+        untilTime,
+        options
+      );
     });
   }
 

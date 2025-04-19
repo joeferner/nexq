@@ -1,4 +1,5 @@
 import {
+  AbortError,
   createLogger,
   DeleteDeadLetterQueueError,
   DurationParseError,
@@ -13,7 +14,22 @@ import {
   TopicNotFoundError,
 } from "@nexq/core";
 import createHttpError from "http-errors";
-import { Body, Controller, Delete, Get, Path, Post, Put, Query, Response, Route, SuccessResponse, Tags } from "tsoa";
+import express from "express";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Path,
+  Post,
+  Put,
+  Query,
+  Response,
+  Request,
+  Route,
+  SuccessResponse,
+  Tags,
+} from "tsoa";
 import { CreateQueueRequest } from "../dto/CreateQueueRequest.js";
 import { GetMessageResponse } from "../dto/GetMessageResponse.js";
 import { GetQueueResponse, queueInfoToGetQueueResponse } from "../dto/GetQueueResponse.js";
@@ -408,13 +424,20 @@ export class ApiV1QueueController extends Controller {
   @Response<void>(404, "queue not found")
   public async receiveMessages(
     @Path() queueName: string,
-    @Body() request: ReceiveMessagesRequest
+    @Body() request: ReceiveMessagesRequest,
+    @Request() expressRequest: express.Request
   ): Promise<ReceiveMessagesResponse> {
     try {
+      const abortController = new AbortController();
+      expressRequest.socket.on("close", () => {
+        abortController.abort();
+      });
+
       const messages = await this.store.receiveMessages(queueName, {
         maxNumberOfMessages: request.maxNumberOfMessages,
         visibilityTimeoutMs: parseOptionalDurationIntoMs(request.visibilityTimeout),
         waitTimeMs: parseOptionalDurationIntoMs(request.waitTime),
+        abortSignal: abortController.signal,
       });
       return {
         messages: messages.map((m) => {
@@ -431,6 +454,12 @@ export class ApiV1QueueController extends Controller {
     } catch (err) {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
+      }
+      if (err instanceof AbortError) {
+        logger.debug("receive aborted");
+        return {
+          messages: [],
+        };
       }
       logger.error(`failed to receive messages`, err);
       throw err;

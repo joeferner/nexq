@@ -4,8 +4,8 @@ export interface Timeout {
 
 export interface Time {
   getCurrentTime(): Date;
-  setTimeout(fn: () => void, ms: number): Timeout;
-  setTimeoutUntil(fn: () => void, untilTime: Date): unknown;
+  setTimeout(fn: () => void, ms: number, options?: { signal?: AbortSignal }): Timeout;
+  setTimeoutUntil(fn: () => void, untilTime: Date, options?: { signal?: AbortSignal }): unknown;
 }
 
 export class RealTime implements Time {
@@ -13,14 +13,20 @@ export class RealTime implements Time {
     return new Date();
   }
 
-  public setTimeout(fn: () => void, ms: number): Timeout {
+  public setTimeout(fn: () => void, ms: number, options?: { signal?: AbortSignal }): Timeout {
     const t = setTimeout(fn, ms);
+    if (options?.signal) {
+      options.signal.onabort = (): void => {
+        clearTimeout(t);
+        fn();
+      };
+    }
     return {
       clear: () => clearTimeout(t),
     };
   }
 
-  public setTimeoutUntil(fn: () => void, untilTime: Date): Timeout {
-    return this.setTimeout(fn, untilTime.getTime() - this.getCurrentTime().getTime());
+  public setTimeoutUntil(fn: () => void, untilTime: Date, options?: { signal?: AbortSignal }): Timeout {
+    return this.setTimeout(fn, untilTime.getTime() - this.getCurrentTime().getTime(), options);
   }
 }

@@ -1,8 +1,8 @@
-import { Store } from "@nexq/core";
+import { AbortError, Store } from "@nexq/core";
 import { MemoryStore } from "@nexq/store-memory";
 import { assertQueueEmpty, assertQueueSize, MockTime } from "@nexq/test";
 import { beforeEach, describe, expect, test } from "vitest";
-import { expectHttpError } from "../test-utils.js";
+import { createMockRequest, expectHttpError } from "../test-utils.js";
 import { ApiV1QueueController } from "./ApiV1QueueController.js";
 
 const QUEUE1_NAME = "test-queue1";
@@ -357,7 +357,7 @@ describe("ApiV1QueueController", async () => {
       await time.advance(1);
       await store.sendMessage(QUEUE1_NAME, "test2");
 
-      const resp = await controller.receiveMessages(QUEUE1_NAME, {});
+      const resp = await controller.receiveMessages(QUEUE1_NAME, {}, createMockRequest());
       expect(resp.messages.length).toBe(2);
       resp.messages.sort((a, b) => a.sentTime.localeCompare(b.sentTime));
 
@@ -370,6 +370,27 @@ describe("ApiV1QueueController", async () => {
       await controller.deleteMessage(QUEUE1_NAME, message2.id, message2.receiptHandle);
 
       await assertQueueEmpty(store, QUEUE1_NAME);
+    });
+
+    test("request closed", async () => {
+      await store.createQueue(QUEUE1_NAME);
+
+      const request = createMockRequest();
+      let receivedResponse = false;
+      let receivedError: unknown = undefined;
+      controller
+        .receiveMessages(QUEUE1_NAME, { waitTime: "10s" }, request)
+        .then((_resp) => {
+          receivedResponse = true;
+        })
+        .catch((err) => {
+          receivedError = err;
+        });
+      await time.advance(1);
+      request.close();
+      await time.advance(1);
+      expect(receivedResponse).toBeFalsy();
+      expect(receivedError).toEqual(new AbortError("receive aborted"));
     });
   });
 

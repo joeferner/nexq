@@ -1,4 +1,5 @@
 import {
+  AbortError,
   createId,
   createLogger,
   CreateQueueOptions,
@@ -185,7 +186,10 @@ export class MemoryQueue {
 
       const timeLeft = endTime - now.getTime();
       if (timeLeft > 0) {
-        await this.sleepOrWaitForEvent(timeLeft);
+        await this.sleepOrWaitForEvent(timeLeft, { signal: options?.abortSignal });
+        if (options?.abortSignal?.aborted) {
+          throw new AbortError("receive aborted");
+        }
       } else {
         return messages;
       }
@@ -236,10 +240,10 @@ export class MemoryQueue {
     throw new MessageNotFoundError(this.name, messageId);
   }
 
-  private async sleepOrWaitForEvent(ms: number): Promise<void> {
+  private async sleepOrWaitForEvent(ms: number, options?: { signal?: AbortSignal }): Promise<void> {
     const trigger = new Trigger<NewQueueMessageEvent>(this.time);
     this.triggers.push(trigger);
-    await trigger.wait(ms);
+    await trigger.wait(ms, options);
   }
 
   private sortMessages(): void {

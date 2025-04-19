@@ -1,4 +1,5 @@
 import {
+  AbortError,
   createId,
   createLogger,
   CreateQueueOptions,
@@ -333,7 +334,10 @@ export class SqlStore implements Store {
 
       const timeLeft = endTime - now.getTime();
       if (timeLeft > 0) {
-        const waitResult = await trigger.waitUntil(new Date(endTime));
+        const waitResult = await trigger.waitUntil(new Date(endTime), { signal: options?.abortSignal });
+        if (options?.abortSignal?.aborted) {
+          throw new AbortError("receive aborted");
+        }
         if (waitResult !== "timeout" && queueInfo.paused) {
           queueInfo = await this.getQueueInfo(queueName);
         }
