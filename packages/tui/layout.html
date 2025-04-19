@@ -1,0 +1,94 @@
+<html>
+<style>
+    body {
+        --line-height: 15px;
+
+        font-family: 'Courier New', Courier, monospace;
+        font-size: var(--line-height);
+        line-height: var(--line-height);
+    }
+
+    div {
+        display: flex;
+        align-items: flex-start;
+        flex-direction: row;
+        justify-content: flex-start;
+    }
+
+    #app {
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #header {
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+        height: calc(5 * var(--line-height));
+    }
+
+    #header-left {
+        flex-direction: column;
+        justify-content: flex-end;
+        height: 100%;
+    }
+
+    .header-left-item {}
+
+    #header-right {
+        white-space: pre;
+    }
+
+    #queues {
+        width: 100%;
+        flex-grow: 1;
+        align-items: stretch;
+    }
+
+    .box {
+        width: 100%;
+        border: 1px solid black;
+    }
+
+    .table-view {}
+</style>
+
+<body>
+    <div id="app">
+        <div id="header">
+            <div id="header-left">
+                <div class="header-left-item">
+                    <div>TUI Ver:&nbsp;&nbsp;</div>
+                    <div>v1.0.0</div>
+                </div>
+                <div class="header-left-item">
+                    <div>NexQ Ver:&nbsp;</div>
+                    <div>v1.0.0</div>
+                </div>
+            </div>
+            <div id="help"></div>
+            <div id="header-right"></div>
+        </div>
+
+        <div id="queues">
+            <div class="box">
+                <div class="table-view">
+                    asd
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+</body>
+
+<script>
+    document.getElementById('header-right').innerText = `     __            ____ 
+  /\\ \\ \\_____  __ /___ \\
+ /  \\/ / _ \\ \\/ ///  / /
+/ /\\  /  __/>  </ \\_/ / 
+\\_\\ \\/ \\___/_/\\_\\___,_\\`;
+</script>
+
+</html>

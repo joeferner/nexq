@@ -1,20 +1,20 @@
 import * as R from "radash";
-import { Align, FlexDirection } from "yoga-layout";
+import { Align } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { NexqState, Screen } from "../NexqState.js";
-import { BoxBorder, BoxComponent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { HelpItem } from "./Help.js";
 import { SortDirection, TableView } from "./TableView.js";
+import { BorderType } from "../render/RenderItem.js";
 
 const logger = createLogger("Queues");
 
 export class Queues extends Component {
   public static readonly ID = "queues";
-  private readonly _children: Component[];
   private readonly tableView: TableView<GetQueueResponse>;
   private refreshTimeout?: NodeJS.Timeout;
   public static readonly HELP_ITEMS: HelpItem[] = [
@@ -42,6 +42,7 @@ export class Queues extends Component {
 
   public constructor(private readonly state: NexqState) {
     super();
+    this.width = '100%';
     this.flexGrow = 1;
     this.alignItems = Align.Stretch;
     this.tableView = new TableView({
@@ -97,19 +98,14 @@ export class Queues extends Component {
     });
     this.tableView.flexGrow = 1;
 
-    this._children = [
-      new BoxComponent({
-        children: [this.tableView],
-        direction: FlexDirection.Column,
-        border: BoxBorder.Single,
-        borderColor: state.borderColor,
-        flexGrow: 1,
-        title: new BoxComponent({
-          direction: FlexDirection.Row,
-          children: [new TextComponent({ text: " Queues ", color: state.titleColor })],
-        }),
-      }),
-    ];
+    const box = new BoxComponent();
+    box.borderType = BorderType.Single;
+    box.borderColor = state.borderColor;
+    box.flexGrow = 1;
+    box.title = new TextComponent({ text: " Queues ", color: state.titleColor });
+    box.children.push(this.tableView);
+    this.children.push(box);
+
     state.on("keypress", (_chunk, key) => {
       if (state.focus !== Queues.ID) {
         return;
@@ -302,9 +298,5 @@ export class Queues extends Component {
       logger.error(`Failed to pause/resume one or more queues`, err);
       this.state.setStatus(`Failed to pause/resume one or more queues`, err);
     }
-  }
-
-  public get children(): Component[] {
-    return this._children;
   }
 }

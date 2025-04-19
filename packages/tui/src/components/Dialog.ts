@@ -2,9 +2,9 @@ import { Key } from "readline";
 import { FlexDirection } from "yoga-layout";
 import { Node as YogaNode } from "yoga-layout/load";
 import { NexqState } from "../NexqState.js";
-import { BoxBorder, BoxComponent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { RenderItem } from "../render/RenderItem.js";
+import { BorderType, RenderItem } from "../render/RenderItem.js";
 import { TextComponent } from "../render/TextComponent.js";
 
 export interface UpdateOptions {
@@ -48,17 +48,13 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
         direction: FlexDirection.Row,
         children: [new TextComponent({ text: ` ${options.title} ` })],
       }),
-      border: BoxBorder.Single,
+      border: BorderType.Single,
       borderColor: this.state.dialogBorderColor,
       background: true,
       zIndex: 100,
     });
     this._children = [this.box];
     this.state.emit("changed");
-  }
-
-  public get children(): Component[] {
-    return this._children;
   }
 
   public show(options: TShowOptions): Promise<TResults> {

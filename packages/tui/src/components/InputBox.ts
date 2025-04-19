@@ -79,10 +79,6 @@ export class InputBox extends Component {
     }
   }
 
-  public get children(): Component[] {
-    return [];
-  }
-
   public render(): RenderItem[] {
     const text = this.value.substring(this.offset, this.offset + this.width);
 

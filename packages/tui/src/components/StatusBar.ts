@@ -29,8 +29,4 @@ export class StatusBar extends Component {
       }, state.statusTimeout);
     });
   }
-
-  public get children(): Component[] {
-    return this._children;
-  }
 }

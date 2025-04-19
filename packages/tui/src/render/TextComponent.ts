@@ -22,10 +22,6 @@ export class TextComponent extends Component {
     this.inverse = options.inverse ?? false;
   }
 
-  public get children(): Component[] {
-    return [];
-  }
-
   public override populateLayout(container: YogaNode): void {
     // TODO wrap text
     const lines = this.text.split("\n");
@@ -42,6 +38,13 @@ export class TextComponent extends Component {
   }
 
   public override render(): RenderItem[] {
+    if (!this.yogaNode) {
+      return [];
+    }
+
+    this._computedWidth = this.yogaNode.getComputedWidth();
+    this._computedHeight = this.yogaNode.getComputedHeight();
+
     return [
       {
         type: "text",

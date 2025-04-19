@@ -62,10 +62,6 @@ export class TableView<T> extends Component {
     return this._items;
   }
 
-  public get children(): Component[] {
-    return this._children;
-  }
-
   public get columns(): TableViewColumn<T>[] {
     return this._columns;
   }
