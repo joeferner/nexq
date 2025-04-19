@@ -1,5 +1,6 @@
+import { FlexDirection, Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { Help } from "./Help.js";
@@ -15,10 +16,11 @@ export class Header extends Component {
 
   public constructor(state: NexqState) {
     super();
+    this.flexGrow = 0;
 
     const createLeftItem = (name: string, value: string): BoxComponent => {
       return new BoxComponent({
-        direction: BoxDirection.Horizontal,
+        direction: FlexDirection.Row,
         children: [
           new TextComponent({ text: name, color: state.headerNameColor }),
           new TextComponent({ text: value, color: state.headerValueColor }),
@@ -27,8 +29,8 @@ export class Header extends Component {
     };
 
     const left = new BoxComponent({
-      direction: BoxDirection.Vertical,
-      justifyContent: JustifyContent.End,
+      direction: FlexDirection.Column,
+      justifyContent: Justify.FlexEnd,
       children: [
         createLeftItem("TUI Ver:  ", `v${state.tuiVersion}`),
         createLeftItem("NexQ Ver: ", `v${state.nexqVersion}`),
@@ -37,8 +39,9 @@ export class Header extends Component {
 
     this._children = [
       new BoxComponent({
-        direction: BoxDirection.Horizontal,
-        justifyContent: JustifyContent.SpaceBetween,
+        direction: FlexDirection.Row,
+        justifyContent: Justify.SpaceBetween,
+        width: '100%',
         height: 5,
         children: [left, new Help(state), new TextComponent({ text: LOGO, color: state.logoColor })],
       }),

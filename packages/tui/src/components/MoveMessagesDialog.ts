@@ -1,11 +1,12 @@
 import { Key } from "readline";
+import { FlexDirection, Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { TextComponent } from "../render/TextComponent.js";
-import { Dialog } from "./Dialog.js";
-import { InputBox } from "./InputBox.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
+import { Dialog } from "./Dialog.js";
+import { InputBox } from "./InputBox.js";
 
 const logger = createLogger("MoveMessagesDialog");
 
@@ -119,17 +120,17 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
       title: "Move Messages",
       children: [
         new BoxComponent({
-          direction: BoxDirection.Vertical,
+          direction: FlexDirection.Column,
           width: Math.max(" To: ".length + this.inputBox.width + 1, message.length),
           height: 7,
-          justifyContent: JustifyContent.Center,
+          justifyContent: Justify.Center,
           children: [
             new TextComponent({
               text: `\n${message}\n`,
             }),
             new BoxComponent({
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.Start,
+              direction: FlexDirection.Row,
+              justifyContent: Justify.FlexStart,
               children: [new TextComponent({ text: " To: " }), this.inputBox],
             }),
             new TextComponent({
@@ -137,8 +138,8 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
             }),
             new BoxComponent({
               width: this.cancelButton.text.length + this.moveButton.text.length,
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.SpaceBetween,
+              direction: FlexDirection.Row,
+              justifyContent: Justify.SpaceBetween,
               children: [this.cancelButton, this.moveButton],
             }),
           ],

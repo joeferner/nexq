@@ -1,6 +1,7 @@
 import { Key } from "readline";
+import { FlexDirection, Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
@@ -77,18 +78,18 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
       title,
       children: [
         new BoxComponent({
-          direction: BoxDirection.Vertical,
+          direction: FlexDirection.Column,
           width: message.length + 4,
           height: 5,
-          justifyContent: JustifyContent.Center,
+          justifyContent: Justify.Center,
           children: [
             new TextComponent({
               text: `\n${message}\n`,
             }),
             new BoxComponent({
               width: optionsWidth,
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.SpaceBetween,
+              direction: FlexDirection.Row,
+              justifyContent: Justify.SpaceBetween,
               children: options.map((option) => {
                 return new TextComponent({ text: ` ${option} `, inverse: this.selectedOption === option });
               }),

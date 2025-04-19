@@ -1,5 +1,6 @@
+import { FlexDirection, Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
 import { TextComponent } from "../render/TextComponent.js";
 
@@ -13,8 +14,8 @@ export class StatusBar extends Component {
     this._children = [
       new BoxComponent({
         children: [this.textComponent],
-        direction: BoxDirection.Vertical,
-        justifyContent: JustifyContent.Center,
+        direction: FlexDirection.Column,
+        justifyContent: Justify.Center,
         width: "100%",
       }),
     ];

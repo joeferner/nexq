@@ -1,14 +1,14 @@
+import * as R from "radash";
+import { Align, FlexDirection } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { NexqState, Screen } from "../NexqState.js";
-import { BoxBorder, BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { BoxBorder, BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { HelpItem } from "./Help.js";
 import { SortDirection, TableView } from "./TableView.js";
-import * as R from "radash";
 
 const logger = createLogger("Queues");
 
@@ -42,6 +42,8 @@ export class Queues extends Component {
 
   public constructor(private readonly state: NexqState) {
     super();
+    this.flexGrow = 1;
+    this.alignItems = Align.Stretch;
     this.tableView = new TableView({
       columns: [
         {
@@ -93,17 +95,17 @@ export class Queues extends Component {
         },
       ],
     });
+    this.tableView.flexGrow = 1;
 
     this._children = [
       new BoxComponent({
         children: [this.tableView],
-        direction: BoxDirection.Vertical,
+        direction: FlexDirection.Column,
         border: BoxBorder.Single,
         borderColor: state.borderColor,
-        width: "100%",
-        height: "100%",
+        flexGrow: 1,
         title: new BoxComponent({
-          direction: BoxDirection.Horizontal,
+          direction: FlexDirection.Row,
           children: [new TextComponent({ text: " Queues ", color: state.titleColor })],
         }),
       }),
@@ -304,10 +306,5 @@ export class Queues extends Component {
 
   public get children(): Component[] {
     return this._children;
-  }
-
-  public override calculateGeometry(container: Geometry): void {
-    container.height--;
-    super.calculateGeometry(container);
   }
 }

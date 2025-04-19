@@ -4,6 +4,7 @@ import * as R from "radash";
 import { Component } from "./Component.js";
 import { RenderItem, TextRenderItem } from "./RenderItem.js";
 import { createLogger } from "../utils/logger.js";
+import Yoga, { Direction } from "yoga-layout";
 
 const logger = createLogger("Renderer");
 
@@ -44,8 +45,17 @@ export class Renderer {
     this._width = process.stdout.columns ?? 80;
     this._height = process.stdout.rows ?? 40;
 
-    component.calculateGeometry({ top: 0, left: 0, width: this.width, height: this.height });
-    const renderItems = component.render();
+    const root = Yoga.Node.create();
+    let renderItems;
+    try {
+      root.setWidth(this.width);
+      root.setHeight(this.height);
+      component.populateLayout(root);
+      root.calculateLayout(undefined, undefined, Direction.LTR);
+      renderItems = component.render();
+    } finally {
+      root.freeRecursive();
+    }
     const sortedRenderItems = R.sort(renderItems, (r) => r.zIndex);
 
     if (!this.buffers[this.bufferIndex] || this._width !== this.previousWidth || this._height !== this.previousHeight) {

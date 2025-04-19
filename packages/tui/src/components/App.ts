@@ -1,5 +1,6 @@
+import { Align, FlexDirection } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
 import { Header } from "./Header.js";
 import { Queues } from "./Queues.js";
@@ -16,10 +17,15 @@ export class App extends Component {
     this.header = new Header(state);
     this.queues = new Queues(state);
     this.statusBar = new StatusBar(state);
+    this.width = '100%';
+    this.height = '100%';
     this._children = [
       new BoxComponent({
-        direction: BoxDirection.Vertical,
-        children: [state.confirmDialog, state.moveMessagesDialog, this.header, this.queues, this.statusBar],
+        direction: FlexDirection.Column,
+        alignItems: Align.Stretch,
+        width: '100%',
+        height: '100%',
+        children: [/*state.confirmDialog, state.moveMessagesDialog, */this.header, this.queues, /*this.statusBar*/],
       }),
     ];
   }

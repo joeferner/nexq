@@ -1,7 +1,7 @@
-import { Screen, NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { FlexDirection } from "yoga-layout";
+import { NexqState, Screen } from "../NexqState.js";
+import { BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
 import { TextComponent } from "../render/TextComponent.js";
 import { Queues } from "./Queues.js";
 
@@ -20,7 +20,7 @@ export class Help extends Component {
     super();
     this.box = new BoxComponent({
       children: [],
-      direction: BoxDirection.Vertical,
+      direction: FlexDirection.Column,
     });
     this._children = [this.box];
     this.refreshChildren();
@@ -46,7 +46,7 @@ export class Help extends Component {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
       newChildren.push(
         new BoxComponent({
-          direction: BoxDirection.Horizontal,
+          direction: FlexDirection.Row,
           children: [
             new TextComponent({ text: `<${helpItem.shortcut}>${padding} `, color: this.state.helpHotkeyColor }),
             new TextComponent({ text: helpItem.name, color: this.state.helpNameColor }),
@@ -60,9 +60,5 @@ export class Help extends Component {
 
   public get children(): Component[] {
     return this._children;
-  }
-
-  public override calculateGeometry(container: Geometry): void {
-    super.calculateGeometry(container);
   }
 }

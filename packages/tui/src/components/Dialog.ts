@@ -1,8 +1,9 @@
 import { Key } from "readline";
+import { FlexDirection } from "yoga-layout";
+import { Node as YogaNode } from "yoga-layout/load";
 import { NexqState } from "../NexqState.js";
-import { BoxBorder, BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { BoxBorder, BoxComponent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
 import { RenderItem } from "../render/RenderItem.js";
 import { TextComponent } from "../render/TextComponent.js";
 
@@ -14,7 +15,7 @@ export interface UpdateOptions {
 export abstract class Dialog<TShowOptions, TResults> extends Component {
   private _children: Component[];
   private box: BoxComponent;
-  private lastContainer?: Geometry;
+  private lastParentYogaNode?: YogaNode;
   protected options?: TShowOptions;
   private resolve?: (value: TResults) => unknown;
 
@@ -25,7 +26,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
     super();
     this.box = new BoxComponent({
       children: [],
-      direction: BoxDirection.Vertical,
+      direction: FlexDirection.Column,
     });
     this._children = [this.box];
 
@@ -37,14 +38,14 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
     });
   }
 
-  protected handleKeyPress(_chunk: string, _key: Key | undefined): void {}
+  protected handleKeyPress(_chunk: string, _key: Key | undefined): void { }
 
   public update(options: UpdateOptions): void {
     this.box = new BoxComponent({
       children: options.children,
-      direction: BoxDirection.Vertical,
+      direction: FlexDirection.Column,
       title: new BoxComponent({
-        direction: BoxDirection.Horizontal,
+        direction: FlexDirection.Row,
         children: [new TextComponent({ text: ` ${options.title} ` })],
       }),
       border: BoxBorder.Single,
@@ -89,24 +90,20 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
     return this.state.focus.startsWith(this.id);
   }
 
-  public override calculateGeometry(container: Geometry): void {
-    this.lastContainer = { ...container };
-    super.calculateGeometry(container);
+  public override populateLayout(node: YogaNode): void {
+    this.lastParentYogaNode = node;
+    super.populateLayout(node);
   }
 
   public override render(): RenderItem[] {
-    if (!this.lastContainer) {
+    if (!this.lastParentYogaNode) {
       return super.render();
     }
     const renderItems = super.render();
     for (const renderItem of renderItems) {
-      renderItem.geometry.left += Math.floor((this.lastContainer.width - this.box.geometry.width) / 2);
-      renderItem.geometry.top += Math.floor((this.lastContainer.height - this.box.geometry.height) / 2);
+      renderItem.geometry.left += Math.floor((this.lastParentYogaNode.getComputedWidth() - this.box.computedWidth) / 2);
+      renderItem.geometry.top += Math.floor((this.lastParentYogaNode.getComputedHeight() - this.box.computedHeight) / 2);
     }
     return renderItems;
-  }
-
-  public override get geometry(): Geometry {
-    return { left: 0, top: 0, height: 0, width: 0 };
   }
 }

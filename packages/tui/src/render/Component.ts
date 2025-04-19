@@ -1,33 +1,48 @@
-import { Geometry } from "./Geometry.js";
+import Yoga, { Align, FlexDirection, Justify } from "yoga-layout";
+import { Node as YogaNode } from "yoga-layout/load";
 import { RenderItem } from "./RenderItem.js";
 
 export abstract class Component {
+  protected yogaNode?: YogaNode;
+  public height: number | 'auto' | `${number}%` | undefined;
+  public width: number | 'auto' | `${number}%` | undefined;
+  public flexGrow: number | undefined;
+  public alignItems = Align.Auto;
+  public direction = FlexDirection.Row;
+  public justifyContent = Justify.FlexStart;
+
   public render(): RenderItem[] {
+    if (!this.yogaNode) {
+      return [];
+    }
+
     const renderItems: RenderItem[] = [];
+    const x = this.yogaNode.getComputedLeft();
+    const y = this.yogaNode.getComputedTop();
     for (const child of this.children) {
       const childRenderItems = child.render();
       for (const childRenderItem of childRenderItems) {
         childRenderItem.zIndex += this.zIndex;
+        childRenderItem.geometry.left += x;
+        childRenderItem.geometry.top += y;
         renderItems.push(childRenderItem);
       }
     }
     return renderItems;
   }
 
-  public calculateGeometry(container: Geometry): void {
+  public populateLayout(container: YogaNode): void {
+    this.yogaNode = Yoga.Node.create();
+    this.yogaNode.setHeight(this.height);
+    this.yogaNode.setWidth(this.width);
+    this.yogaNode.setFlexGrow(this.flexGrow);
+    this.yogaNode.setAlignItems(this.alignItems);
+    this.yogaNode.setFlexDirection(this.direction);
+    this.yogaNode.setJustifyContent(this.justifyContent);
     for (const child of this.children) {
-      child.calculateGeometry(container);
+      child.populateLayout(this.yogaNode);
     }
-  }
-
-  public get geometry(): Geometry {
-    if (this.children.length === 0) {
-      return { left: 0, top: 0, height: 0, width: 0 };
-    }
-    if (this.children.length === 1) {
-      return this.children[0].geometry;
-    }
-    throw new Error("if children is greater that 1 you must implement get geometry");
+    container.insertChild(this.yogaNode, container.getChildCount());
   }
 
   public get zIndex(): number {
