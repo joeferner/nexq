@@ -23,6 +23,6 @@ export class App extends Component {
     // this.children.push(state.moveMessagesDialog);
     this.children.push(this.header);
     this.children.push(this.queues);
-    // this.children.push(this.statusBar);
+    this.children.push(this.statusBar);
   }
 }
