@@ -16,4 +16,16 @@ export interface CursorRenderItem {
   zIndex: number;
 }
 
-export type RenderItem = TextRenderItem | CursorRenderItem;
+export enum BorderType {
+  Single = "Single",
+}
+
+export interface BoxRenderItem {
+  type: "box";
+  borderType: BorderType;
+  geometry: Geometry;
+  color: string;
+  zIndex: number;
+}
+
+export type RenderItem = TextRenderItem | CursorRenderItem | BoxRenderItem;

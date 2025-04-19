@@ -1,8 +1,10 @@
-import { AbortError, Store } from "@nexq/core";
+import { Store } from "@nexq/core";
 import { MemoryStore } from "@nexq/store-memory";
 import { assertQueueEmpty, assertQueueSize, MockTime } from "@nexq/test";
 import { beforeEach, describe, expect, test } from "vitest";
+import { ReceiveMessagesResponse } from "../dto/ReceiveMessagesResponse.js";
 import { createMockRequest, expectHttpError } from "../test-utils.js";
+import { isHttpError } from "../utils.js";
 import { ApiV1QueueController } from "./ApiV1QueueController.js";
 
 const QUEUE1_NAME = "test-queue1";
@@ -376,12 +378,12 @@ describe("ApiV1QueueController", async () => {
       await store.createQueue(QUEUE1_NAME);
 
       const request = createMockRequest();
-      let receivedResponse = false;
+      let receivedResponse: ReceiveMessagesResponse | false = false;
       let receivedError: unknown = undefined;
       controller
         .receiveMessages(QUEUE1_NAME, { waitTime: "10s" }, request)
-        .then((_resp) => {
-          receivedResponse = true;
+        .then((resp) => {
+          receivedResponse = resp;
         })
         .catch((err) => {
           receivedError = err;
@@ -390,7 +392,11 @@ describe("ApiV1QueueController", async () => {
       request.close();
       await time.advance(1);
       expect(receivedResponse).toBeFalsy();
-      expect(receivedError).toEqual(new AbortError("receive aborted"));
+      if (isHttpError(receivedError)) {
+        expect(receivedError.statusCode).toEqual(408);
+      } else {
+        throw new Error("expected http error");
+      }
     });
   });
 

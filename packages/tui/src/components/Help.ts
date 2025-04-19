@@ -1,9 +1,8 @@
-import { Screen, NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { FlexDirection } from "yoga-layout";
+import { NexqState, Screen } from "../NexqState.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
-import { TextComponent } from "../render/TextComponent.js";
 import { Queues } from "./Queues.js";
+import { Text } from "./Text.js";
 
 export interface HelpItem {
   id: string;
@@ -12,17 +11,11 @@ export interface HelpItem {
 }
 
 export class Help extends Component {
-  private readonly box: BoxComponent;
-  private readonly _children: Component[];
   private lastFocus?: Screen;
 
   public constructor(private readonly state: NexqState) {
     super();
-    this.box = new BoxComponent({
-      children: [],
-      direction: BoxDirection.Vertical,
-    });
-    this._children = [this.box];
+    this.flexDirection = FlexDirection.Column;
     this.refreshChildren();
     state.on("changed", () => {
       this.refreshChildren();
@@ -42,27 +35,17 @@ export class Help extends Component {
     }
     const newChildren: Component[] = [];
     const maxShortcutWidth = helpItems.reduce((p, h) => Math.max(p, h.shortcut.length), 0);
+
     for (const helpItem of helpItems) {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
-      newChildren.push(
-        new BoxComponent({
-          direction: BoxDirection.Horizontal,
-          children: [
-            new TextComponent({ text: `<${helpItem.shortcut}>${padding} `, color: this.state.helpHotkeyColor }),
-            new TextComponent({ text: helpItem.name, color: this.state.helpNameColor }),
-          ],
-        })
-      );
+
+      const row = new Component();
+      row.flexDirection = FlexDirection.Row;
+      row.children.push(new Text({ text: `<${helpItem.shortcut}>${padding} `, color: this.state.helpHotkeyColor }));
+      row.children.push(new Text({ text: helpItem.name, color: this.state.helpNameColor }));
+      newChildren.push(row);
     }
-    this.box.children = newChildren;
+    this.children = newChildren;
     this.lastFocus = this.state.screen;
-  }
-
-  public get children(): Component[] {
-    return this._children;
-  }
-
-  public override calculateGeometry(container: Geometry): void {
-    super.calculateGeometry(container);
   }
 }

@@ -110,7 +110,7 @@ export class Logger {
       text += ` ${paramToString(optionalParam)}`;
     }
     try {
-      fs.appendFileSync(Logger.config.logFile ?? DEFAULT_LOG_FILE, `${new Date().toISOString()}: ${text}\n`);
+      fs.appendFileSync(Logger.config.logFile ?? DEFAULT_LOG_FILE, `${text}\n`);
     } catch (_err) {
       // failed to log
     }

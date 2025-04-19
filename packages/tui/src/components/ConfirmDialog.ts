@@ -1,12 +1,11 @@
 import { Key } from "readline";
+import { Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
-import { TextComponent } from "../render/TextComponent.js";
+import { Component } from "../render/Component.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
+import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
-
-const logger = createLogger("ConfirmDialog");
+import { Text } from "./Text.js";
 
 export interface ConfirmOptions {
   title: string;
@@ -22,80 +21,45 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
     super(state, ConfirmDialog.ID);
   }
 
-  protected override handleKeyPress(_chunk: string, key: Key | undefined): void {
+  protected override handleKeyPress(chunk: string, key: Key | undefined): void {
     if (isInputMatch(key, "escape")) {
       this.close(undefined);
-    } else if (isInputMatch(key, "left")) {
-      this.updateSelectedOption(-1);
-    } else if (isInputMatch(key, "right") || isInputMatch(key, "tab")) {
-      this.updateSelectedOption(1);
     } else if (isInputMatch(key, "return")) {
-      this.close(this.selectedOption);
+      const focusedComponent = this.box.getFocusedChild();
+      if (focusedComponent instanceof Button) {
+        this.close(focusedComponent.id);
+      } else {
+        this.state.setStatus("Failed to get focused option");
+      }
     } else {
-      logger.debug("unhandled key press", JSON.stringify(key));
+      super.handleKeyPress(chunk, key);
+      this.state.emit("changed");
     }
   }
 
-  public get selectedOption(): string | undefined {
-    if (this.state.focus === ConfirmDialog.ID) {
-      return this.options?.defaultOption;
+  public override show(options: ConfirmOptions): Promise<string | undefined> {
+    this.title = options.title;
+
+    const optionsContainer = new Component();
+    let focusedOption: Component | undefined;
+    optionsContainer.width = "100%";
+    optionsContainer.justifyContent = Justify.Center;
+    for (let i = 0; i < options.options.length; i++) {
+      const button = new Button({ text: `  ${options.options[i]}  ` });
+      button.id = options.options[i];
+      button.tabIndex = i + 1;
+      optionsContainer.children.push(button);
+      if (options.options[i] === options.defaultOption) {
+        focusedOption = button;
+      }
     }
+    this.setFocusedChild(focusedOption ?? optionsContainer.children[0]);
 
-    const prefix = `${ConfirmDialog.ID}:`;
-    if (this.state.focus.startsWith(prefix)) {
-      return this.state.focus.substring(prefix.length);
-    }
-    return undefined;
-  }
+    const message = new Text({ text: options.message });
+    message.margin = { bottom: 1 };
 
-  public set selectedOption(option: string | undefined) {
-    if (option) {
-      this.state.focus = `${ConfirmDialog.ID}:${option}`;
-    }
-  }
+    this.box.children = [message, optionsContainer];
 
-  private updateSelectedOption(dir: number): void {
-    if (!this.options) {
-      return;
-    }
-
-    let i = this.options.options.indexOf(this.selectedOption ?? "") ?? 0;
-    i += dir;
-    i = i % this.options.options.length;
-    this.selectedOption = this.options.options[i];
-    this.refresh();
-  }
-
-  protected override refresh(): void {
-    if (!this.options) {
-      return;
-    }
-
-    const { options, message, title } = this.options;
-    const optionsWidth = options.reduce((p, o) => p + o.length + 3, 0);
-    this.update({
-      title,
-      children: [
-        new BoxComponent({
-          direction: BoxDirection.Vertical,
-          width: message.length + 4,
-          height: 5,
-          justifyContent: JustifyContent.Center,
-          children: [
-            new TextComponent({
-              text: `\n${message}\n`,
-            }),
-            new BoxComponent({
-              width: optionsWidth,
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.SpaceBetween,
-              children: options.map((option) => {
-                return new TextComponent({ text: ` ${option} `, inverse: this.selectedOption === option });
-              }),
-            }),
-          ],
-        }),
-      ],
-    });
+    return super.show(options);
   }
 }

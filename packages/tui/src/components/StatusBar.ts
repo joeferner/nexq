@@ -1,23 +1,19 @@
+import { Align, FlexDirection } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { TextComponent } from "../render/TextComponent.js";
+import { Text } from "./Text.js";
 
 export class StatusBar extends Component {
-  private _children: Component[];
-  private textComponent = new TextComponent({ text: "" });
+  private textComponent = new Text({ text: "" });
   private clearStatusTimeout?: NodeJS.Timeout;
 
   public constructor(state: NexqState) {
     super();
-    this._children = [
-      new BoxComponent({
-        children: [this.textComponent],
-        direction: BoxDirection.Vertical,
-        justifyContent: JustifyContent.Center,
-        width: "100%",
-      }),
-    ];
+    this.flexDirection = FlexDirection.Column;
+    this.alignItems = Align.Center;
+    this.width = "100%";
+    this.children.push(this.textComponent);
+
     state.on("changed", () => {
       if (this.clearStatusTimeout) {
         clearTimeout(this.clearStatusTimeout);
@@ -27,9 +23,5 @@ export class StatusBar extends Component {
         state.setStatus("");
       }, state.statusTimeout);
     });
-  }
-
-  public get children(): Component[] {
-    return this._children;
   }
 }

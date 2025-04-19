@@ -23,9 +23,14 @@ export async function expectHttpError(
   }
 }
 
+export class MockRequestSocket extends EventEmitter {}
+
 export class MockRequest extends EventEmitter {
+  public readonly socket = new MockRequestSocket();
+
   public close(): void {
     this.emit("close");
+    this.socket.emit("close");
   }
 }
 

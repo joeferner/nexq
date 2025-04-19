@@ -28,7 +28,8 @@
     "axios": "^1.8.4",
     "cmd-ts": "^0.13.0",
     "find-root": "^1.1.0",
-    "radash": "^12.1.0"
+    "radash": "^12.1.0",
+    "yoga-layout": "^3.2.1"
   },
   "devDependencies": {
     "@types/find-root": "^1.1.4",

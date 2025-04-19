@@ -1,10 +1,9 @@
-import { Key } from "readline";
+import { Display, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout/load";
 import { NexqState } from "../NexqState.js";
-import { BoxBorder, BoxComponent, BoxDirection } from "../render/BoxComponent.js";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
 import { RenderItem } from "../render/RenderItem.js";
-import { TextComponent } from "../render/TextComponent.js";
+import { Box } from "./Box.js";
+import { Text } from "./Text.js";
 
 export interface UpdateOptions {
   title: string;
@@ -12,22 +11,33 @@ export interface UpdateOptions {
 }
 
 export abstract class Dialog<TShowOptions, TResults> extends Component {
-  private _children: Component[];
-  private box: BoxComponent;
-  private lastContainer?: Geometry;
+  protected box: Box;
+  private lastParentYogaNode?: YogaNode;
   protected options?: TShowOptions;
   private resolve?: (value: TResults) => unknown;
 
   protected constructor(
     protected readonly state: NexqState,
-    protected readonly id: string
+    id: string
   ) {
     super();
-    this.box = new BoxComponent({
-      children: [],
-      direction: BoxDirection.Vertical,
-    });
-    this._children = [this.box];
+
+    this.id = id;
+    this.zIndex = 100;
+    this.positionType = PositionType.Absolute;
+    this.display = Display.None;
+
+    this.box = new Box();
+    this.box.borderColor = state.borderColor;
+    this.box.flexDirection = FlexDirection.Column;
+    this.box.justifyContent = Justify.Center;
+    this.box.padding = {
+      left: 2,
+      right: 2,
+      top: 1,
+      bottom: 1,
+    };
+    this.children.push(this.box);
 
     state.on("keypress", (chunk, key) => {
       if (!this.isFocused) {
@@ -37,76 +47,58 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
     });
   }
 
-  protected handleKeyPress(_chunk: string, _key: Key | undefined): void {}
-
-  public update(options: UpdateOptions): void {
-    this.box = new BoxComponent({
-      children: options.children,
-      direction: BoxDirection.Vertical,
-      title: new BoxComponent({
-        direction: BoxDirection.Horizontal,
-        children: [new TextComponent({ text: ` ${options.title} ` })],
-      }),
-      border: BoxBorder.Single,
-      borderColor: this.state.dialogBorderColor,
-      background: true,
-      zIndex: 100,
-    });
-    this._children = [this.box];
-    this.state.emit("changed");
-  }
-
-  public get children(): Component[] {
-    return this._children;
+  public set title(title: string) {
+    this.box.title = new Text({ text: ` ${title} ` });
   }
 
   public show(options: TShowOptions): Promise<TResults> {
+    this.display = Display.Flex;
     this.options = options;
 
     return new Promise<TResults>((resolve) => {
       this.resolve = resolve;
-      this.state.pushFocus(this.id);
-      this.refresh();
+      if (this.id) {
+        this.state.pushFocus(this.id);
+      }
       this.state.emit("changed");
     });
   }
-
-  protected abstract refresh(): void;
 
   public close(result: TResults): void {
     if (!this.isFocused) {
       throw new Error("invalid state");
     }
+    this.display = Display.None;
     this.state.popFocus();
     this.resolve?.(result);
     this.resolve = undefined;
     this.options = undefined;
-    this._children = [];
     this.state.emit("changed");
   }
 
   public get isFocused(): boolean {
+    if (!this.id) {
+      return false;
+    }
     return this.state.focus.startsWith(this.id);
   }
 
-  public override calculateGeometry(container: Geometry): void {
-    this.lastContainer = { ...container };
-    super.calculateGeometry(container);
+  public override populateLayout(node: YogaNode): void {
+    this.lastParentYogaNode = node;
+    super.populateLayout(node);
   }
 
   public override render(): RenderItem[] {
-    if (!this.lastContainer) {
+    if (!this.lastParentYogaNode) {
       return super.render();
     }
     const renderItems = super.render();
     for (const renderItem of renderItems) {
-      renderItem.geometry.left += Math.floor((this.lastContainer.width - this.box.geometry.width) / 2);
-      renderItem.geometry.top += Math.floor((this.lastContainer.height - this.box.geometry.height) / 2);
+      renderItem.geometry.left += Math.floor((this.lastParentYogaNode.getComputedWidth() - this.box.computedWidth) / 2);
+      renderItem.geometry.top += Math.floor(
+        (this.lastParentYogaNode.getComputedHeight() - this.box.computedHeight) / 2
+      );
     }
     return renderItems;
-  }
-
-  public override get geometry(): Geometry {
-    return { left: 0, top: 0, height: 0, width: 0 };
   }
 }

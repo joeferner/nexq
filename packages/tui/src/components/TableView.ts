@@ -1,8 +1,7 @@
 import { Key } from "readline";
-import { BoxComponent, BoxDirection } from "../render/BoxComponent.js";
+import { FlexDirection, Node as YogaNode } from "yoga-layout";
 import { Component } from "../render/Component.js";
-import { Geometry } from "../render/Geometry.js";
-import { TextComponent } from "../render/TextComponent.js";
+import { Text } from "./Text.js";
 import { isInputMatch } from "../utils/input.js";
 
 export interface TableViewOptions<T> {
@@ -31,8 +30,6 @@ const COLUMN_MARGIN = 1;
 const COLUMN_SORT_WIDTH = 1;
 
 export class TableView<T> extends Component {
-  private readonly box = new BoxComponent({ children: [], direction: BoxDirection.Vertical });
-  private readonly _children: Component[] = [this.box];
   private _items: T[] = [];
   public selectedIndex = 0;
   public offset = 0;
@@ -45,6 +42,8 @@ export class TableView<T> extends Component {
   public constructor(options: TableViewOptions<T>) {
     super();
     this._columns = options.columns;
+    this.flexDirection = FlexDirection.Column;
+    this.children = [new Text({ text: "Loading" })];
     this.itemTextColor = options.itemTextColor ?? "#ffffff";
     this.updateColumnWidths();
   }
@@ -59,37 +58,36 @@ export class TableView<T> extends Component {
     return this._items;
   }
 
-  public get children(): Component[] {
-    return this._children;
-  }
-
   public get columns(): TableViewColumn<T>[] {
     return this._columns;
   }
 
-  public override calculateGeometry(container: Geometry): void {
-    if (this._children.length !== container.height) {
-      const children: TextComponent[] = [];
-      for (let i = 0; i < container.height; i++) {
-        children.push(new TextComponent({ text: "", color: this.itemTextColor }));
-      }
-      this.box.children = children;
-    }
+  public override populateLayout(container: YogaNode): void {
+    const height = Math.max(1, this.computedHeight);
+    const width = this.computedWidth;
 
-    const children = this.box.children as TextComponent[];
+    this.children.splice(height, this.children.length);
+    while (this.children.length < height) {
+      this.children.push(new Text({ text: "item", color: this.itemTextColor }));
+    }
 
     this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.items.length - 1));
     if (this.selectedIndex < this.offset) {
       this.offset = this.selectedIndex;
-    } else if (this.selectedIndex >= this.offset + container.height - 1) {
-      this.offset = this.selectedIndex - container.height + 2;
+    } else if (this.selectedIndex >= this.offset + height - 1) {
+      this.offset = this.selectedIndex - height + 2;
     }
 
-    for (let i = 0; i < container.height - 1; i++) {
+    const children = this.children as Text[];
+    for (let i = 0; i < height - 1; i++) {
+      const child = children[i + 1];
+      if (!child) {
+        continue;
+      }
       const index = this.offset + i;
-      children[i + 1].inverse = this.selectedIndex === index;
+      child.inverse = this.selectedIndex === index;
       const item = this.items[index];
-      children[i + 1].text = item ? this.createRowText(item, container.width) : "";
+      child.text = item ? this.createRowText(item, width) : "";
     }
 
     let header = "";
@@ -103,8 +101,9 @@ export class TableView<T> extends Component {
       header += " ".repeat(Math.max(0, this.columnWidths[i] - columnTitle.length));
     }
     children[0].text = header;
+    children[0].text.substring(0, width);
 
-    super.calculateGeometry(container);
+    super.populateLayout(container);
   }
 
   private createRowText(row: T, maxWidth: number): string {
@@ -120,7 +119,7 @@ export class TableView<T> extends Component {
       }
     }
     text += " ".repeat(Math.max(0, maxWidth - text.length));
-    return text;
+    return text.substring(0, maxWidth);
   }
 
   private updateColumnWidths(): void {
@@ -150,7 +149,7 @@ export class TableView<T> extends Component {
     return [];
   }
 
-  public handleKeyPress(key: Key | undefined): boolean {
+  public override handleKeyPress(_chunk: string, key: Key | undefined): boolean {
     if (isInputMatch(key, "down")) {
       this.selectedIndex++;
       return true;
@@ -162,12 +161,12 @@ export class TableView<T> extends Component {
     }
 
     if (isInputMatch(key, "pagedown")) {
-      this.selectedIndex += this.geometry.height - 3;
+      this.selectedIndex += this.computedHeight - 3;
       return true;
     }
 
     if (isInputMatch(key, "pageup")) {
-      this.selectedIndex -= this.geometry.height - 3;
+      this.selectedIndex -= this.computedHeight - 3;
       return true;
     }
 

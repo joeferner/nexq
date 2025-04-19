@@ -1,13 +1,12 @@
 import { Key } from "readline";
+import { FlexDirection, Justify } from "yoga-layout";
 import { NexqState } from "../NexqState.js";
-import { BoxComponent, BoxDirection, JustifyContent } from "../render/BoxComponent.js";
-import { TextComponent } from "../render/TextComponent.js";
+import { Component } from "../render/Component.js";
+import { isInputMatch } from "../utils/input.js";
+import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 import { InputBox } from "./InputBox.js";
-import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
-
-const logger = createLogger("MoveMessagesDialog");
+import { Text } from "./Text.js";
 
 export interface MoveMessagesDialogOptions {
   sourceQueueName: string;
@@ -19,131 +18,76 @@ export interface MoveMessagesDialogResults {
 
 export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMessagesDialogResults | undefined> {
   public static readonly ID = "moveMessagesDialog";
+  private readonly message = new Text({ text: "" });
   private readonly inputBox: InputBox;
-  private readonly cancelButton = new TextComponent({ text: "  Cancel  " });
-  private readonly moveButton = new TextComponent({ text: "  Move  " });
+  private readonly cancelButton: Button;
+  private readonly moveButton: Button;
 
   public constructor(state: NexqState) {
     super(state, MoveMessagesDialog.ID);
-    this.inputBox = new InputBox(state, { width: 40 });
+
+    this.inputBox = new InputBox({
+      width: 40,
+      inputBoxFocusColor: state.inputBoxFocusColor,
+      inputBoxFocusBgColor: state.inputBoxFocusBgColor,
+    });
+    this.inputBox.tabIndex = 1;
+    this.inputBox.margin = { bottom: 1 };
+
+    this.cancelButton = new Button({ text: "  Cancel  " });
+    this.cancelButton.tabIndex = 2;
+
+    this.moveButton = new Button({ text: "  Move  " });
+    this.moveButton.tabIndex = 3;
+
+    this.message.margin = { bottom: 1 };
+
+    this.title = "Move Messages";
+
+    const inputContainer = new Component();
+    inputContainer.flexDirection = FlexDirection.Row;
+    inputContainer.children = [new Text({ text: "To: " }), this.inputBox];
+
+    const optionsContainer = new Component();
+    optionsContainer.width = "100%";
+    optionsContainer.justifyContent = Justify.Center;
+    optionsContainer.children.push(this.cancelButton);
+    optionsContainer.children.push(this.moveButton);
+
+    this.box.children = [this.message, inputContainer, optionsContainer];
   }
 
-  public show(options: MoveMessagesDialogOptions): Promise<MoveMessagesDialogResults | undefined> {
+  public override show(options: MoveMessagesDialogOptions): Promise<MoveMessagesDialogResults | undefined> {
     this.inputBox.value = "";
+    this.message.text = `Move messages from "${options.sourceQueueName}"`;
+    this.setFocusedChild(this.inputBox);
     return super.show(options);
   }
 
-  protected override handleKeyPress(_chunk: string, key: Key | undefined): void {
-    if (isInputMatch(key, "tab")) {
-      this.focusNext();
-      this.state.emit("changed");
-    } else if (isInputMatch(key, "escape")) {
+  protected override handleKeyPress(chunk: string, key: Key | undefined): void {
+    if (isInputMatch(key, "escape")) {
       this.close(undefined);
-    } else if (isInputMatch(key, "right") || isInputMatch(key, "left")) {
-      const focusedId = this.focusedControlId;
-      if (focusedId === "cancel") {
-        this.state.focus = `${MoveMessagesDialog.ID}:move`;
-        this.updateFocus();
-        this.state.emit("changed");
-      } else if (focusedId === "move") {
-        this.state.focus = `${MoveMessagesDialog.ID}:cancel`;
-        this.updateFocus();
-        this.state.emit("changed");
-      }
-    } else if (isInputMatch(key, "up")) {
-      const focusedId = this.focusedControlId;
-      if (focusedId === "cancel" || focusedId === "move") {
-        this.state.focus = `${MoveMessagesDialog.ID}:input`;
-        this.updateFocus();
-        this.state.emit("changed");
-      }
-    } else if (isInputMatch(key, "return")) {
-      const focusedId = this.focusedControlId;
-      if (focusedId === "move" || focusedId === "input") {
-        this.close({
-          targetQueueName: this.inputBox.value,
-        });
-      } else {
-        this.close(undefined);
-      }
-    } else {
-      logger.info("unhandled key", JSON.stringify(key));
-    }
-  }
-
-  private get focusedControlId(): string {
-    const id = this.state.focus.substring(MoveMessagesDialog.ID.length + ":".length);
-    if (id.length > 0) {
-      return id;
-    }
-    return "move";
-  }
-
-  private focusNext(): void {
-    const focusedId = this.focusedControlId;
-    if (focusedId === "input") {
-      this.state.focus = `${MoveMessagesDialog.ID}:cancel`;
-    } else if (focusedId === "cancel") {
-      this.state.focus = `${MoveMessagesDialog.ID}:move`;
-    } else {
-      this.state.focus = `${MoveMessagesDialog.ID}:input`;
-    }
-
-    this.updateFocus();
-  }
-
-  private updateFocus(): void {
-    const focusedId = this.focusedControlId;
-    this.inputBox.focus = false;
-    this.cancelButton.inverse = false;
-    this.moveButton.inverse = false;
-    if (focusedId === "input") {
-      this.inputBox.focus = true;
-    } else if (focusedId === "cancel") {
-      this.cancelButton.inverse = true;
-    } else {
-      this.moveButton.inverse = true;
-    }
-  }
-
-  protected refresh(): void {
-    if (!this.options) {
       return;
     }
 
-    this.focusNext();
+    if (this.inputBox.focused && this.inputBox.handleKeyPress(chunk, key)) {
+      this.state.emit("changed");
+      return;
+    }
 
-    const message = ` Move messages from "${this.options.sourceQueueName}" `;
+    if (this.cancelButton.focused && isInputMatch(key, "return")) {
+      this.close(undefined);
+      return;
+    }
 
-    this.update({
-      title: "Move Messages",
-      children: [
-        new BoxComponent({
-          direction: BoxDirection.Vertical,
-          width: Math.max(" To: ".length + this.inputBox.width + 1, message.length),
-          height: 7,
-          justifyContent: JustifyContent.Center,
-          children: [
-            new TextComponent({
-              text: `\n${message}\n`,
-            }),
-            new BoxComponent({
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.Start,
-              children: [new TextComponent({ text: " To: " }), this.inputBox],
-            }),
-            new TextComponent({
-              text: ``,
-            }),
-            new BoxComponent({
-              width: this.cancelButton.text.length + this.moveButton.text.length,
-              direction: BoxDirection.Horizontal,
-              justifyContent: JustifyContent.SpaceBetween,
-              children: [this.cancelButton, this.moveButton],
-            }),
-          ],
-        }),
-      ],
-    });
+    if ((this.inputBox.focused || this.moveButton.focused) && isInputMatch(key, "return")) {
+      this.close({
+        targetQueueName: this.inputBox.value,
+      });
+      return;
+    }
+
+    super.handleKeyPress(chunk, key);
+    this.state.emit("changed");
   }
 }

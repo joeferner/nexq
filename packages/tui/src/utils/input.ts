@@ -27,6 +27,7 @@ export function isInputMatch(key: Key | undefined, shortcut: string): boolean {
       text = undefined;
       continue;
     }
+    return false;
   }
 
   if (text !== undefined) {

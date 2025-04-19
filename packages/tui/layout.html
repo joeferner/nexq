@@ -1,0 +1,176 @@
+<html>
+
+<head>
+    <title>NexQ: TUI</title>
+</head>
+<style>
+    body {
+        --line-height: 15px;
+        --character-width: 10px;
+        --logoColor: #fca321;
+        --headerNameColor: #fca321;
+        --headerValueColor: #ffffff;
+        --borderColor: #97cdf5;
+        --titleColor: #74fbfc;
+        --helpHotkeyColor: #448ef7;
+        --helpNameColor: #80807f;
+        --tableViewTextColor: #96ccf5;
+        --dialogBorderColor: #97cdf5;
+        --inputBoxFocusColor: #ffffff;
+        --inputBoxFocusBgColor: #00332D;
+
+        font-family: 'Courier New', Courier, monospace;
+        font-size: var(--line-height);
+        line-height: var(--line-height);
+        background-color: black;
+        color: white;
+    }
+
+    div {
+        display: flex;
+        align-items: flex-start;
+        flex-direction: row;
+        justify-content: flex-start;
+    }
+
+    #app {
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #header {
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+        height: calc(5 * var(--line-height));
+    }
+
+    #header-left {
+        flex-direction: column;
+        justify-content: flex-end;
+        height: 100%;
+    }
+
+    .header-left-item {}
+
+    #header-right {
+        white-space: pre;
+        color: var(--logoColor);
+    }
+
+    #queues {
+        width: 100%;
+        flex-grow: 1;
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    #queues-box {
+        border-color: var(--borderColor);
+        flex-grow: 1;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #queues-table-view {
+        flex-grow: 1;
+    }
+
+    .box {
+        border: 1px solid white;
+        margin-top: calc(var(--line-height) / 2);
+        margin-bottom: calc(var(--line-height) / 2);
+        padding-top: calc(var(--line-height) / 2);
+        padding-bottom: calc(var(--line-height) / 2);
+        margin-left: calc(var(--character-width) / 2);
+        margin-right: calc(var(--character-width) / 2);
+        padding-left: calc(var(--character-width) / 2);
+        padding-right: calc(var(--character-width) / 2);
+    }
+
+    .table-view {
+        flex-grow: 1;
+    }
+
+    #status-bar {
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+    }
+
+    .dialog {
+        position: absolute;
+        flex-direction: column;
+        left: calc(var(--character-width) * 30);
+        top: calc(var(--line-height) * 10);
+        padding-top: calc(var(--line-height) * 1);
+        padding-bottom: calc(var(--line-height) * 1);
+        padding-left: calc(var(--character-width) * 2);
+        padding-right: calc(var(--character-width) * 2);
+    }
+
+    .dialog-message {
+        margin-bottom: var(--line-height);
+    }
+
+    .confirm-dialog-options {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .button {}
+</style>
+
+<body>
+    <div id="app">
+        <div id="header">
+            <div id="header-left">
+                <div class="header-left-item">
+                    <div>TUI Ver:&nbsp;&nbsp;</div>
+                    <div>v1.0.0</div>
+                </div>
+                <div class="header-left-item">
+                    <div>NexQ Ver:&nbsp;</div>
+                    <div>v1.0.0</div>
+                </div>
+            </div>
+            <div id="help"></div>
+            <div id="header-right"></div>
+        </div>
+
+        <div id="queues">
+            <div id="queues-box" class="box">
+                <div id="queues-table-view" class="table-view">
+                    asd
+                </div>
+            </div>
+        </div>
+
+        <div id="status-bar">
+            Current Status
+        </div>
+
+        <div class="dialog box">
+            <div class="dialog-message">
+                Are you sure you want to delete "queue0"?
+            </div>
+            <div class="confirm-dialog-options">
+                <div class="button">&nbsp;&nbsp;Cancel&nbsp;&nbsp;</div>
+                <div class="button">&nbsp;&nbsp;Delete&nbsp;&nbsp;</div>
+            </div>
+        </div>
+    </div>
+    </div>
+</body>
+
+<script>
+    document.getElementById('header-right').innerText = `     __            ____ 
+  /\\ \\ \\_____  __ /___ \\
+ /  \\/ / _ \\ \\/ ///  / /
+/ /\\  /  __/>  </ \\_/ / 
+\\_\\ \\/ \\___/_/\\_\\___,_\\`;
+</script>
+
+</html>

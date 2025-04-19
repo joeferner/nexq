@@ -457,9 +457,7 @@ export class ApiV1QueueController extends Controller {
       }
       if (err instanceof AbortError) {
         logger.debug("receive aborted");
-        return {
-          messages: [],
-        };
+        throw createHttpError.RequestTimeout();
       }
       logger.error(`failed to receive messages`, err);
       throw err;
