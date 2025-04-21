@@ -24,19 +24,17 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
 
     this.id = id;
     this.zIndex = 100;
-    this.positionType = PositionType.Absolute;
-    this.display = Display.None;
+    this.style.positionType = PositionType.Absolute;
+    this.style.display = Display.None;
 
     this.box = new Box();
     this.box.borderColor = state.borderColor;
-    this.box.flexDirection = FlexDirection.Column;
-    this.box.justifyContent = Justify.Center;
-    this.box.padding = {
-      left: 2,
-      right: 2,
-      top: 1,
-      bottom: 1,
-    };
+    this.box.style.flexDirection = FlexDirection.Column;
+    this.box.style.justifyContent = Justify.Center;
+    this.box.style.paddingLeft = 2;
+    this.box.style.paddingRight = 2;
+    this.box.style.paddingTop = 1;
+    this.box.style.paddingBottom = 1;
     this.children.push(this.box);
 
     state.on("keypress", (chunk, key) => {
@@ -52,7 +50,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
   }
 
   public show(options: TShowOptions): Promise<TResults> {
-    this.display = Display.Flex;
+    this.style.display = Display.Flex;
     this.options = options;
 
     return new Promise<TResults>((resolve) => {
@@ -68,7 +66,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Component {
     if (!this.isFocused) {
       throw new Error("invalid state");
     }
-    this.display = Display.None;
+    this.style.display = Display.None;
     this.state.popFocus();
     this.resolve?.(result);
     this.resolve = undefined;

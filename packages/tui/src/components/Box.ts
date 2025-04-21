@@ -9,7 +9,7 @@ export class Box extends Component {
 
   public constructor() {
     super();
-    this.margin = { left: 1, bottom: 1, right: 1, top: 1 };
+    this.style.margin = 1;
   }
 
   public override populateLayout(container: YogaNode): void {

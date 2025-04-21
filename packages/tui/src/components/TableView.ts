@@ -42,7 +42,7 @@ export class TableView<T> extends Component {
   public constructor(options: TableViewOptions<T>) {
     super();
     this._columns = options.columns;
-    this.flexDirection = FlexDirection.Column;
+    this.style.flexDirection = FlexDirection.Column;
     this.children = [new Text({ text: "Loading" })];
     this.itemTextColor = options.itemTextColor ?? "#ffffff";
     this.updateColumnWidths();

@@ -13,7 +13,7 @@ const LOGO = `     __            ____
 export class Header extends Component {
   public constructor(state: NexqState) {
     super();
-    this.flexGrow = 0;
+    this.style.flexGrow = 0;
 
     const createLeftItem = (name: string, value: string): Component => {
       const item = new Component();
@@ -25,16 +25,16 @@ export class Header extends Component {
     };
 
     const left = new Component();
-    left.flexDirection = FlexDirection.Column;
-    left.justifyContent = Justify.FlexEnd;
-    left.height = "100%";
+    left.style.flexDirection = FlexDirection.Column;
+    left.style.justifyContent = Justify.FlexEnd;
+    left.style.height = "100%";
     left.children.push(createLeftItem("TUI Ver:  ", `v${state.tuiVersion}`));
     left.children.push(createLeftItem("NexQ Ver: ", `v${state.nexqVersion}`));
 
-    this.flexDirection = FlexDirection.Row;
-    this.justifyContent = Justify.SpaceBetween;
-    this.width = "100%";
-    this.height = 5;
+    this.style.flexDirection = FlexDirection.Row;
+    this.style.justifyContent = Justify.SpaceBetween;
+    this.style.width = "100%";
+    this.style.height = 5;
 
     this.children.push(left);
     this.children.push(new Help(state));

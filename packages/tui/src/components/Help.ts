@@ -15,7 +15,7 @@ export class Help extends Component {
 
   public constructor(private readonly state: NexqState) {
     super();
-    this.flexDirection = FlexDirection.Column;
+    this.style.flexDirection = FlexDirection.Column;
     this.refreshChildren();
     state.on("changed", () => {
       this.refreshChildren();
@@ -40,7 +40,7 @@ export class Help extends Component {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
 
       const row = new Component();
-      row.flexDirection = FlexDirection.Row;
+      row.style.flexDirection = FlexDirection.Row;
       row.children.push(new Text({ text: `<${helpItem.shortcut}>${padding} `, color: this.state.helpHotkeyColor }));
       row.children.push(new Text({ text: helpItem.name, color: this.state.helpNameColor }));
       newChildren.push(row);

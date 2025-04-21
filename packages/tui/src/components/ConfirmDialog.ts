@@ -42,8 +42,8 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
 
     const optionsContainer = new Component();
     let focusedOption: Component | undefined;
-    optionsContainer.width = "100%";
-    optionsContainer.justifyContent = Justify.Center;
+    optionsContainer.style.width = "100%";
+    optionsContainer.style.justifyContent = Justify.Center;
     for (let i = 0; i < options.options.length; i++) {
       const button = new Button({ text: `  ${options.options[i]}  ` });
       button.id = options.options[i];
@@ -53,12 +53,13 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
         focusedOption = button;
       }
     }
-    this.setFocusedChild(focusedOption ?? optionsContainer.children[0]);
 
     const message = new Text({ text: options.message });
-    message.margin = { bottom: 1 };
+    message.style.marginBottom = 1;
 
     this.box.children = [message, optionsContainer];
+
+    this.setFocusedChild(focusedOption ?? optionsContainer.children[0]);
 
     return super.show(options);
   }

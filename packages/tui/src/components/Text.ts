@@ -24,8 +24,8 @@ export class Text extends Component {
   public override populateLayout(container: YogaNode): void {
     // TODO wrap text
     const lines = this.text.split("\n");
-    this.height = lines.length;
-    this.width = Math.max(...lines.map((l) => l.length));
+    this.style.height = lines.length;
+    this.style.width = Math.max(...lines.map((l) => l.length));
     super.populateLayout(container);
   }
 

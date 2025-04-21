@@ -42,18 +42,18 @@ export class Queues extends Component {
 
   public constructor(private readonly state: NexqState) {
     super();
-    this.width = "100%";
-    this.flexGrow = 1;
-    this.alignItems = Align.Stretch;
-    this.flexDirection = FlexDirection.Column;
+    this.style.width = "100%";
+    this.style.flexGrow = 1;
+    this.style.alignItems = Align.Stretch;
+    this.style.flexDirection = FlexDirection.Column;
 
     const box = new Box();
     box.borderType = BorderType.Single;
     box.borderColor = state.borderColor;
-    box.flexGrow = 1;
-    box.flexDirection = FlexDirection.Column;
+    box.style.flexGrow = 1;
+    box.style.flexDirection = FlexDirection.Column;
     box.title = new Text({ text: " Queues ", color: state.titleColor });
-    box.alignItems = Align.Stretch;
+    box.style.alignItems = Align.Stretch;
     this.children.push(box);
 
     this.tableView = new TableView({
@@ -107,7 +107,7 @@ export class Queues extends Component {
         },
       ],
     });
-    this.tableView.flexGrow = 1;
+    this.tableView.style.flexGrow = 1;
     box.children.push(this.tableView);
 
     state.on("keypress", (chunk, key) => {

@@ -1,35 +1,17 @@
 import * as R from "radash";
 import { Key } from "readline";
-import Yoga, { Align, Display, Edge, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout";
+import Yoga, { Display, Node as YogaNode } from "yoga-layout";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { RenderItem } from "./RenderItem.js";
+import { Styles } from "./Styles.js";
 
 const logger = createLogger("Component");
 
 export class Component {
   protected yogaNode?: YogaNode;
   public id: string | undefined;
-  public height: number | "auto" | `${number}%` | undefined;
-  public width: number | "auto" | `${number}%` | undefined;
-  public flexGrow: number | undefined;
-  public alignItems = Align.FlexStart;
-  public flexDirection = FlexDirection.Row;
-  public justifyContent = Justify.FlexStart;
-  public positionType = PositionType.Relative;
-  public display = Display.Flex;
-  public margin?: {
-    left?: number | "auto" | `${number}%` | undefined;
-    right?: number | "auto" | `${number}%` | undefined;
-    top?: number | "auto" | `${number}%` | undefined;
-    bottom?: number | "auto" | `${number}%` | undefined;
-  };
-  public padding?: {
-    left?: number | `${number}%` | undefined;
-    right?: number | `${number}%` | undefined;
-    top?: number | `${number}%` | undefined;
-    bottom?: number | `${number}%` | undefined;
-  };
+  public readonly style = new Styles();
   public children: Component[] = [];
   public zIndex = 0;
   public tabIndex: number | undefined;
@@ -39,22 +21,7 @@ export class Component {
 
   public populateLayout(container: YogaNode): void {
     this.yogaNode = Yoga.Node.create();
-    this.yogaNode.setHeight(this.height);
-    this.yogaNode.setWidth(this.width);
-    this.yogaNode.setFlexGrow(this.flexGrow);
-    this.yogaNode.setAlignItems(this.alignItems);
-    this.yogaNode.setFlexDirection(this.flexDirection);
-    this.yogaNode.setJustifyContent(this.justifyContent);
-    this.yogaNode.setPositionType(this.positionType);
-    this.yogaNode.setMargin(Edge.Left, this.margin?.left);
-    this.yogaNode.setMargin(Edge.Right, this.margin?.right);
-    this.yogaNode.setMargin(Edge.Top, this.margin?.top);
-    this.yogaNode.setMargin(Edge.Bottom, this.margin?.bottom);
-    this.yogaNode.setPadding(Edge.Left, this.padding?.left);
-    this.yogaNode.setPadding(Edge.Right, this.padding?.right);
-    this.yogaNode.setPadding(Edge.Top, this.padding?.top);
-    this.yogaNode.setPadding(Edge.Bottom, this.padding?.bottom);
-    this.yogaNode.setDisplay(this.display);
+    this.style.apply(this.yogaNode);
     for (const child of this.children) {
       child.populateLayout(this.yogaNode);
     }
@@ -66,7 +33,7 @@ export class Component {
       return [];
     }
 
-    if (this.display === Display.None) {
+    if (this.style.display === Display.None) {
       return [];
     }
 

@@ -15,10 +15,10 @@ export class App extends Component {
     this.header = new Header(state);
     this.queues = new Queues(state);
     this.statusBar = new StatusBar(state);
-    this.width = "100%";
-    this.height = "100%";
-    this.flexDirection = FlexDirection.Column;
-    this.alignItems = Align.Stretch;
+    this.style.width = "100%";
+    this.style.height = "100%";
+    this.style.flexDirection = FlexDirection.Column;
+    this.style.alignItems = Align.Stretch;
     this.children.push(state.confirmDialog);
     this.children.push(state.moveMessagesDialog);
     this.children.push(this.header);

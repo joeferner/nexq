@@ -18,8 +18,8 @@ export class InputBox extends Component {
 
   public constructor(private readonly options: InputBoxOptions) {
     super();
-    this.width = options.width;
-    this.height = 1;
+    this.style.width = options.width;
+    this.style.height = 1;
   }
 
   public override handleKeyPress(_chunk: string, key: Key | undefined): boolean {

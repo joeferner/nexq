@@ -32,7 +32,7 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
       inputBoxFocusBgColor: state.inputBoxFocusBgColor,
     });
     this.inputBox.tabIndex = 1;
-    this.inputBox.margin = { bottom: 1 };
+    this.inputBox.style.marginBottom = 1;
 
     this.cancelButton = new Button({ text: "  Cancel  " });
     this.cancelButton.tabIndex = 2;
@@ -40,17 +40,17 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
     this.moveButton = new Button({ text: "  Move  " });
     this.moveButton.tabIndex = 3;
 
-    this.message.margin = { bottom: 1 };
+    this.message.style.marginBottom = 1;
 
     this.title = "Move Messages";
 
     const inputContainer = new Component();
-    inputContainer.flexDirection = FlexDirection.Row;
+    inputContainer.style.flexDirection = FlexDirection.Row;
     inputContainer.children = [new Text({ text: "To: " }), this.inputBox];
 
     const optionsContainer = new Component();
-    optionsContainer.width = "100%";
-    optionsContainer.justifyContent = Justify.Center;
+    optionsContainer.style.width = "100%";
+    optionsContainer.style.justifyContent = Justify.Center;
     optionsContainer.children.push(this.cancelButton);
     optionsContainer.children.push(this.moveButton);
 

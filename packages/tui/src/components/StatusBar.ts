@@ -9,9 +9,9 @@ export class StatusBar extends Component {
 
   public constructor(state: NexqState) {
     super();
-    this.flexDirection = FlexDirection.Column;
-    this.alignItems = Align.Center;
-    this.width = "100%";
+    this.style.flexDirection = FlexDirection.Column;
+    this.style.alignItems = Align.Center;
+    this.style.width = "100%";
     this.children.push(this.textComponent);
 
     state.on("changed", () => {
