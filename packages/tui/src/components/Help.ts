@@ -1,8 +1,11 @@
 import { FlexDirection } from "yoga-layout";
-import { NexqState, Screen } from "../NexqState.js";
-import { Component } from "../render/Component.js";
+import { NexqStyles } from "../NexqStyles.js";
+import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
+import { Text } from "../render/Text.js";
+import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
-import { Text } from "./Text.js";
+import { isPathMatch } from "../render/RouterElement.js";
 
 export interface HelpItem {
   id: string;
@@ -10,42 +13,57 @@ export interface HelpItem {
   shortcut: string;
 }
 
-export class Help extends Component {
-  private lastFocus?: Screen;
+export class Help extends Element {
+  private lastFocus?: string;
+  private readonly boundRefreshChildren = this.refreshChildren.bind(this);
 
-  public constructor(private readonly state: NexqState) {
-    super();
+  public constructor(document: Document) {
+    super(document);
     this.style.flexDirection = FlexDirection.Column;
+  }
+
+  protected override elementDidMount(): void {
     this.refreshChildren();
-    state.on("changed", () => {
-      this.refreshChildren();
-    });
+    this.window.addEventListener("popstate", this.boundRefreshChildren);
+    this.window.addEventListener("pushstate", this.boundRefreshChildren);
+  }
+
+  protected override elementWillUnmount(): void {
+    this.window.removeEventListener("popstate", this.boundRefreshChildren);
+    this.window.removeEventListener("pushstate", this.boundRefreshChildren);
   }
 
   private refreshChildren(): void {
-    if (this.lastFocus === this.state.screen) {
+    const pathname = this.window.location.pathname;
+    if (this.lastFocus === pathname) {
       return;
     }
 
     let helpItems: HelpItem[];
-    if (this.state.screen === Screen.Queues) {
+    if (isPathMatch(QueueMessages.PATH, pathname)) {
+      helpItems = QueueMessages.HELP_ITEMS;
+    } else if (isPathMatch(Queues.PATH, pathname)) {
       helpItems = Queues.HELP_ITEMS;
     } else {
       helpItems = [];
     }
-    const newChildren: Component[] = [];
     const maxShortcutWidth = helpItems.reduce((p, h) => Math.max(p, h.shortcut.length), 0);
+
+    while (this.lastElementChild) {
+      this.removeChild(this.lastElementChild);
+    }
 
     for (const helpItem of helpItems) {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
 
-      const row = new Component();
+      const row = new Element(this.document);
       row.style.flexDirection = FlexDirection.Row;
-      row.children.push(new Text({ text: `<${helpItem.shortcut}>${padding} `, color: this.state.helpHotkeyColor }));
-      row.children.push(new Text({ text: helpItem.name, color: this.state.helpNameColor }));
-      newChildren.push(row);
+      row.appendChild(
+        new Text(this.document, { text: `<${helpItem.shortcut}>${padding} `, color: NexqStyles.helpHotkeyColor })
+      );
+      row.appendChild(new Text(this.document, { text: helpItem.name, color: NexqStyles.helpNameColor }));
+      this.appendChild(row);
     }
-    this.children = newChildren;
-    this.lastFocus = this.state.screen;
+    this.lastFocus = pathname;
   }
 }

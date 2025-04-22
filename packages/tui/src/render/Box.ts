@@ -1,14 +1,15 @@
 import Yoga, { PositionType, Node as YogaNode } from "yoga-layout";
-import { Component } from "../render/Component.js";
-import { BorderType, RenderItem } from "../render/RenderItem.js";
+import { Element } from "./Element.js";
+import { BorderType, RenderItem } from "./RenderItem.js";
+import { Document } from "./Document.js";
 
-export class Box extends Component {
+export class Box extends Element {
   public borderType = BorderType.Single;
   public borderColor = "#ffffff";
-  public title: Component | undefined;
+  public title: Element | undefined;
 
-  public constructor() {
-    super();
+  public constructor(document: Document) {
+    super(document);
     this.style.margin = 1;
   }
 

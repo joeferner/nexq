@@ -11,6 +11,7 @@
     "format": "prettier src --write",
     "start": "node --enable-source-maps build/main.js",
     "start:debug": "node --inspect --enable-source-maps build/main.js",
+    "start:debug:wait": "node --inspect-brk --enable-source-maps build/main.js",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "generate": "swagger-typescript-api generate --axios -o src/client -n NexqClientApi -p http://localhost:7887/swagger.json"
@@ -28,6 +29,7 @@
     "axios": "^1.8.4",
     "cmd-ts": "^0.13.0",
     "find-root": "^1.1.0",
+    "node-match-path": "^0.6.3",
     "radash": "^12.1.0",
     "yoga-layout": "^3.2.1"
   },

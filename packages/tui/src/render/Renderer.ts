@@ -3,7 +3,7 @@ import * as ansis from "ansis";
 import * as R from "radash";
 import Yoga, { Direction } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
-import { Component } from "./Component.js";
+import { Element } from "./Element.js";
 import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
 
 const logger = createLogger("Renderer");
@@ -40,7 +40,7 @@ export class Renderer {
     return this._height;
   }
 
-  public render(component: Component): void {
+  public render(element: Element): void {
     const startTime = Date.now();
     this._width = process.stdout.columns ?? 80;
     this._height = process.stdout.rows ?? 40;
@@ -50,9 +50,9 @@ export class Renderer {
     try {
       root.setWidth(this.width);
       root.setHeight(this.height);
-      component.populateLayout(root);
+      element.populateLayout(root);
       root.calculateLayout(undefined, undefined, Direction.LTR);
-      renderItems = component.render();
+      renderItems = element.render();
     } finally {
       root.freeRecursive();
     }
@@ -95,6 +95,7 @@ function clearBuffer(buffer: Character[][], ch?: string): void {
     const row = buffer[y];
     for (let x = 0; x < row.length; x++) {
       row[x].value = ch ?? " ";
+      row[x].inverse = false;
     }
   }
 }
@@ -167,7 +168,7 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
   const type = renderItem.type;
   if (type === "cursor") {
-    // nothing todo
+    // do nothing
   } else if (type === "text") {
     renderTextItemToBuffer(buffer, renderItem);
   } else if (type === "box") {

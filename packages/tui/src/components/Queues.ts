@@ -1,22 +1,27 @@
 import * as R from "radash";
 import { Align, FlexDirection } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
-import { NexqState, Screen } from "../NexqState.js";
-import { Box } from "./Box.js";
-import { Component } from "../render/Component.js";
-import { Text } from "./Text.js";
+import { NexqStyles } from "../NexqStyles.js";
+import { Box } from "../render/Box.js";
+import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
+import { KeyboardEvent } from "../render/KeyboardEvent.js";
+import { BorderType } from "../render/RenderItem.js";
+import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
+import { App } from "./App.js";
 import { HelpItem } from "./Help.js";
+import { StatusBar } from "./StatusBar.js";
 import { SortDirection, TableView } from "./TableView.js";
-import { BorderType } from "../render/RenderItem.js";
 
 const logger = createLogger("Queues");
 
-export class Queues extends Component {
-  public static readonly ID = "queues";
+export class Queues extends Element {
+  public static readonly PATH = "/queue";
   private readonly tableView: TableView<GetQueueResponse>;
   private refreshTimeout?: NodeJS.Timeout;
+  private inRefreshQueues = false;
   public static readonly HELP_ITEMS: HelpItem[] = [
     {
       id: "purge",
@@ -40,23 +45,23 @@ export class Queues extends Component {
     },
   ];
 
-  public constructor(private readonly state: NexqState) {
-    super();
+  public constructor(document: Document) {
+    super(document);
     this.style.width = "100%";
     this.style.flexGrow = 1;
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
 
-    const box = new Box();
+    const box = new Box(document);
     box.borderType = BorderType.Single;
-    box.borderColor = state.borderColor;
+    box.borderColor = NexqStyles.borderColor;
     box.style.flexGrow = 1;
     box.style.flexDirection = FlexDirection.Column;
-    box.title = new Text({ text: " Queues ", color: state.titleColor });
+    box.title = new Text(document, { text: " Queues ", color: NexqStyles.titleColor });
     box.style.alignItems = Align.Stretch;
-    this.children.push(box);
+    this.appendChild(box);
 
-    this.tableView = new TableView({
+    this.tableView = new TableView(document, {
       columns: [
         {
           title: "NAME",
@@ -108,59 +113,69 @@ export class Queues extends Component {
       ],
     });
     this.tableView.style.flexGrow = 1;
-    box.children.push(this.tableView);
+    box.appendChild(this.tableView);
+  }
 
-    state.on("keypress", (chunk, key) => {
-      if (state.focus !== Queues.ID) {
+  protected override elementDidMount(): void {
+    const run = async (): Promise<void> => {
+      await this.window.refresh();
+      await this.refreshQueues();
+      if (this.window.activeElement !== this.tableView) {
+        this.tableView.focus();
+      }
+    };
+    void run();
+  }
+
+  protected override elementWillUnmount(): void {
+    if (this.refreshTimeout) {
+      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout = undefined;
+    }
+  }
+
+  protected override onKeyDown(event: KeyboardEvent): void {
+    for (const helpItem of Queues.HELP_ITEMS) {
+      if (isInputMatch(event, helpItem.shortcut)) {
+        this.handleHelpShortcut(helpItem);
         return;
       }
-      let found = false;
+    }
 
-      for (const helpItem of Queues.HELP_ITEMS) {
-        if (isInputMatch(key, helpItem.shortcut)) {
-          this.handleHelpShortcut(helpItem);
-          found = true;
-          break;
-        }
+    if (isInputMatch(event, "return")) {
+      const currentItem = this.tableView.getCurrentItem();
+      if (currentItem) {
+        this.window.history.pushState({}, "", `/queue/${encodeURIComponent(currentItem.name)}`);
       }
+      return;
+    }
 
-      if (this.tableView.handleKeyPress(chunk, key)) {
-        found = true;
-      }
-
-      if (!found) {
-        logger.debug("unhandled key press", JSON.stringify(key));
-      }
-
-      state.emit("changed");
-    });
-    state.on("screenChange", (newScreen: Screen) => {
-      if (newScreen === Screen.Queues) {
-        void this.refreshQueues();
-      } else {
-        if (this.refreshTimeout) {
-          clearTimeout(this.refreshTimeout);
-          this.refreshTimeout = undefined;
-        }
-      }
-    });
+    super.onKeyDown(event);
   }
 
   private async refreshQueues(): Promise<void> {
+    const app = App.getApp(this);
+
+    if (this.inRefreshQueues) {
+      return;
+    }
     try {
+      this.inRefreshQueues = true;
       if (this.refreshTimeout) {
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = undefined;
       }
-      const resp = await this.state.api.api.getQueues();
+      logger.info("refreshQueues");
+      const resp = await app.api.api.getQueues();
       this.tableView.items = resp.data.queues;
-      this.state.emit("changed");
+      await this.window.refresh();
     } catch (err) {
-      this.state.setStatus(`Failed to get queues`, err);
+      StatusBar.setStatus(this.document, `Failed to get queues`, err);
     } finally {
       this.refreshTimeout = setTimeout(() => {
         void this.refreshQueues();
-      }, this.state.refreshInterval);
+      }, app.refreshInterval);
+      this.inRefreshQueues = false;
     }
   }
 
@@ -181,26 +196,28 @@ export class Queues extends Component {
   private async moveMessagesFromSelectedQueue(): Promise<void> {
     const queues = this.tableView.getSelectedItems();
     if (queues.length === 0) {
-      this.state.setStatus("No selected queues to move messages");
+      StatusBar.setStatus(this.document, "No selected queues to move messages");
       return;
     }
     if (queues.length > 1) {
-      this.state.setStatus("Can only move messages from one queue at a time");
+      StatusBar.setStatus(this.document, "Can only move messages from one queue at a time");
       return;
     }
 
+    const app = App.getApp(this);
+
     const sourceQueueName = queues[0].name;
-    const result = await this.state.moveMessagesDialog.show({
+    const result = await app.moveMessagesDialog.show({
       sourceQueueName,
     });
     if (result) {
       try {
-        await this.state.api.api.moveMessages(sourceQueueName, { targetQueueName: result.targetQueueName });
-        this.state.setStatus(`Messages moved from "${sourceQueueName}" to "${result.targetQueueName}"`);
+        await app.api.api.moveMessages(sourceQueueName, { targetQueueName: result.targetQueueName });
+        StatusBar.setStatus(this.document, `Messages moved from "${sourceQueueName}" to "${result.targetQueueName}"`);
         void this.refreshQueues();
       } catch (err) {
         logger.error(`failed to move messages from "${sourceQueueName}" to "${result.targetQueueName}"`, err);
-        this.state.setStatus(`Failed to move messages`, err);
+        StatusBar.setStatus(this.document, `Failed to move messages`, err);
       }
     }
   }
@@ -208,7 +225,7 @@ export class Queues extends Component {
   private async purgeSelectedQueues(): Promise<void> {
     const queues = this.tableView.getSelectedItems();
     if (queues.length === 0) {
-      this.state.setStatus("No selected queues to purge");
+      StatusBar.setStatus(this.document, "No selected queues to purge");
       return;
     }
 
@@ -217,7 +234,9 @@ export class Queues extends Component {
       queueNames = queueNames.substring(0, 40) + "…";
     }
 
-    const confirm = await this.state.confirmDialog.show({
+    const app = App.getApp(this);
+
+    const confirm = await app.confirmDialog.show({
       title: "Purge Queue",
       message: `Are you sure you want to purge ${queueNames}?`,
       options: ["Cancel", "Purge"],
@@ -225,12 +244,12 @@ export class Queues extends Component {
     });
     if (confirm === "Purge") {
       try {
-        await Promise.all(queues.map((r) => this.state.api.api.purgeQueue(r.name)));
-        this.state.setStatus(`${queueNames} purged`);
+        await Promise.all(queues.map((r) => app.api.api.purgeQueue(r.name)));
+        StatusBar.setStatus(this.document, `${queueNames} purged`);
         void this.refreshQueues();
       } catch (err) {
         logger.error(`Failed to purge one or more queues`, err);
-        this.state.setStatus(`Failed to purge one or more queues`, err);
+        StatusBar.setStatus(this.document, `Failed to purge one or more queues`, err);
       }
     }
   }
@@ -238,7 +257,7 @@ export class Queues extends Component {
   private async deleteSelectedQueues(): Promise<void> {
     const queues = this.tableView.getSelectedItems();
     if (queues.length === 0) {
-      this.state.setStatus("No selected queues to delete");
+      StatusBar.setStatus(this.document, "No selected queues to delete");
       return;
     }
 
@@ -247,7 +266,9 @@ export class Queues extends Component {
       queueNames = queueNames.substring(0, 40) + "…";
     }
 
-    const confirm = await this.state.confirmDialog.show({
+    const app = App.getApp(this);
+
+    const confirm = await app.confirmDialog.show({
       title: "Delete Queue",
       message: `Are you sure you want to delete ${queueNames}?`,
       options: ["Cancel", "Delete"],
@@ -255,12 +276,12 @@ export class Queues extends Component {
     });
     if (confirm === "Delete") {
       try {
-        await Promise.all(queues.map((r) => this.state.api.api.deleteQueue(r.name)));
-        this.state.setStatus(`${queueNames} deleted!`);
+        await Promise.all(queues.map((r) => app.api.api.deleteQueue(r.name)));
+        StatusBar.setStatus(this.document, `${queueNames} deleted!`);
         void this.refreshQueues();
       } catch (err) {
         logger.error(`Failed to delete one or more queues`, err);
-        this.state.setStatus(`Failed to delete one or more queues`, err);
+        StatusBar.setStatus(this.document, `Failed to delete one or more queues`, err);
       }
     }
   }
@@ -268,9 +289,11 @@ export class Queues extends Component {
   private async pauseResumeSelectedQueues(): Promise<void> {
     const queues = this.tableView.getSelectedItems();
     if (queues.length === 0) {
-      this.state.setStatus("No selected queues to pause/resume");
+      StatusBar.setStatus(this.document, "No selected queues to pause/resume");
       return;
     }
+
+    const app = App.getApp(this);
 
     try {
       let pausedCount = 0;
@@ -279,28 +302,28 @@ export class Queues extends Component {
         queues.map((q) => {
           if (q.paused) {
             resumedCount++;
-            return this.state.api.api.resumeQueue(q.name);
+            return app.api.api.resumeQueue(q.name);
           } else {
             pausedCount++;
-            return this.state.api.api.pauseQueue(q.name);
+            return app.api.api.pauseQueue(q.name);
           }
         })
       );
       if (queues.length === 1) {
-        this.state.setStatus(`${queues[0].name} ${pausedCount > 0 ? "paused" : "resumed"}!`);
+        StatusBar.setStatus(this.document, `${queues[0].name} ${pausedCount > 0 ? "paused" : "resumed"}!`);
       } else {
         if (pausedCount > 0 && resumedCount > 0) {
-          this.state.setStatus(`${pausedCount} queues paused and ${resumedCount} queues resumed!`);
+          StatusBar.setStatus(this.document, `${pausedCount} queues paused and ${resumedCount} queues resumed!`);
         } else if (pausedCount > 0) {
-          this.state.setStatus(`${pausedCount} queues paused!`);
+          StatusBar.setStatus(this.document, `${pausedCount} queues paused!`);
         } else {
-          this.state.setStatus(`${resumedCount} queues resumed!`);
+          StatusBar.setStatus(this.document, `${resumedCount} queues resumed!`);
         }
       }
       void this.refreshQueues();
     } catch (err) {
       logger.error(`Failed to pause/resume one or more queues`, err);
-      this.state.setStatus(`Failed to pause/resume one or more queues`, err);
+      StatusBar.setStatus(this.document, `Failed to pause/resume one or more queues`, err);
     }
   }
 }

@@ -1,17 +1,14 @@
-import { Key } from "readline";
+import { KeyboardEvent } from "../render/KeyboardEvent.js";
 
-export function isInputMatch(key: Key | undefined, shortcut: string): boolean {
-  if (!key) {
-    return false;
-  }
-  let text: string | undefined = key.name?.toLocaleLowerCase();
+export function isInputMatch(event: KeyboardEvent, shortcut: string): boolean {
+  let text: string | undefined = event.key.toLocaleLowerCase();
   if (!text) {
     return false;
   }
   const keys = {
-    shift: key.shift,
-    ctrl: key.ctrl,
-    meta: key.meta,
+    shift: event.shiftKey,
+    ctrl: event.ctrlKey,
+    meta: event.metaKey,
   };
   const shortcutParts = shortcut.split("-");
   for (const shortcutPart of shortcutParts) {
@@ -41,23 +38,20 @@ export function isInputMatch(key: Key | undefined, shortcut: string): boolean {
   return true;
 }
 
-export function inputToChar(key: Key | undefined): string | undefined {
-  if (!key) {
-    return undefined;
-  }
-  if (key.meta || key.ctrl) {
+export function inputToChar(event: KeyboardEvent): string | undefined {
+  if (event.metaKey || event.ctrlKey) {
     return undefined;
   }
 
-  if (key.name?.length === 1) {
-    let ch = key.name;
-    if (key.shift) {
+  if (event.key.length === 1) {
+    let ch = event.key;
+    if (event.shiftKey) {
       ch = ch.toUpperCase();
     }
     return ch;
   }
 
-  if (key.name === "space") {
+  if (event.key === "space") {
     return " ";
   }
 

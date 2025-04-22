@@ -1,11 +1,12 @@
-import { Key } from "readline";
 import { Justify } from "yoga-layout";
-import { NexqState } from "../NexqState.js";
-import { Component } from "../render/Component.js";
+import { Button } from "../render/Button.js";
+import { Dialog } from "../render/Dialog.js";
+import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
+import { KeyboardEvent } from "../render/KeyboardEvent.js";
+import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
-import { Button } from "./Button.js";
-import { Dialog } from "./Dialog.js";
-import { Text } from "./Text.js";
+import { StatusBar } from "./StatusBar.js";
 
 export interface ConfirmOptions {
   title: string;
@@ -15,52 +16,58 @@ export interface ConfirmOptions {
 }
 
 export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
-  public static readonly ID = "confirmDialog";
-
-  public constructor(state: NexqState) {
-    super(state, ConfirmDialog.ID);
+  public constructor(document: Document) {
+    super(document);
   }
 
-  protected override handleKeyPress(chunk: string, key: Key | undefined): void {
-    if (isInputMatch(key, "escape")) {
+  protected override onKeyDown(event: KeyboardEvent): void {
+    if (isInputMatch(event, "escape")) {
       this.close(undefined);
-    } else if (isInputMatch(key, "return")) {
-      const focusedComponent = this.box.getFocusedChild();
-      if (focusedComponent instanceof Button) {
-        this.close(focusedComponent.id);
+    } else if (isInputMatch(event, "return")) {
+      const focusedElement = this.box.activeElement;
+      if (focusedElement instanceof Button) {
+        this.close(focusedElement.id);
       } else {
-        this.state.setStatus("Failed to get focused option");
+        StatusBar.setStatus(this.document, "Failed to get focused option");
       }
     } else {
-      super.handleKeyPress(chunk, key);
-      this.state.emit("changed");
+      super.onKeyDown(event);
     }
   }
 
-  public override show(options: ConfirmOptions): Promise<string | undefined> {
+  public override async onShow(options: ConfirmOptions): Promise<void> {
     this.title = options.title;
 
-    const optionsContainer = new Component();
-    let focusedOption: Component | undefined;
+    while (this.box.lastElementChild) {
+      this.box.removeChild(this.box.lastElementChild);
+    }
+
+    const optionsContainer = new Element(this.document);
+    let focusedOption: Element | undefined;
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
     for (let i = 0; i < options.options.length; i++) {
-      const button = new Button({ text: `  ${options.options[i]}  ` });
+      const button = new Button(this.document, { text: `  ${options.options[i]}  ` });
       button.id = options.options[i];
       button.tabIndex = i + 1;
-      optionsContainer.children.push(button);
+      button.addEventListener("click", () => {
+        this.close(button.id);
+      });
+      optionsContainer.appendChild(button);
       if (options.options[i] === options.defaultOption) {
         focusedOption = button;
       }
     }
 
-    const message = new Text({ text: options.message });
+    const message = new Text(this.document, { text: options.message });
     message.style.marginBottom = 1;
 
-    this.box.children = [message, optionsContainer];
+    this.box.appendChild(message);
+    this.box.appendChild(optionsContainer);
 
-    this.setFocusedChild(focusedOption ?? optionsContainer.children[0]);
+    const focusedChild = focusedOption ?? optionsContainer.firstElementChild;
+    focusedChild?.focus();
 
-    return super.show(options);
+    return super.onShow(options);
   }
 }

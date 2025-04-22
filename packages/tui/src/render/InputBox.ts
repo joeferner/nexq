@@ -1,74 +1,74 @@
-import { Key } from "readline";
 import { Node as YogaNode } from "yoga-layout";
-import { Component } from "../render/Component.js";
-import { geometryFromYogaNode } from "../render/Geometry.js";
-import { RenderItem } from "../render/RenderItem.js";
 import { inputToChar, isInputMatch } from "../utils/input.js";
+import { Document } from "./Document.js";
+import { Element } from "./Element.js";
+import { geometryFromYogaNode } from "./Geometry.js";
+import { KeyboardEvent } from "./KeyboardEvent.js";
+import { RenderItem } from "./RenderItem.js";
 
 export interface InputBoxOptions {
   width: number;
-  inputBoxFocusColor: string;
-  inputBoxFocusBgColor: string;
+  inputBoxFocusColor?: string;
+  inputBoxFocusBgColor?: string;
 }
 
-export class InputBox extends Component {
+export class InputBox extends Element {
   private _value = "";
   private offset = 0;
   private _cursorPosition = 0;
 
-  public constructor(private readonly options: InputBoxOptions) {
-    super();
+  public constructor(
+    document: Document,
+    private readonly options: InputBoxOptions
+  ) {
+    super(document);
     this.style.width = options.width;
     this.style.height = 1;
   }
 
-  public override handleKeyPress(_chunk: string, key: Key | undefined): boolean {
-    if (!this.focused || !key) {
-      return false;
-    }
-
-    const ch = inputToChar(key);
+  public override onKeyDown(event: KeyboardEvent): void {
+    const ch = inputToChar(event);
     if (ch) {
       this.value = this.value.substring(0, this.cursorPosition) + ch + this.value.substring(this.cursorPosition);
       this.cursorPosition++;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "backspace")) {
+    if (isInputMatch(event, "backspace")) {
       const atEnd = this.cursorPosition === this.value.length;
       this.value = this.value.substring(0, this.cursorPosition - 1) + this.value.substring(this.cursorPosition);
       if (!atEnd) {
         this.cursorPosition--;
       }
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "delete")) {
+    if (isInputMatch(event, "delete")) {
       this.value = this.value.substring(0, this.cursorPosition) + this.value.substring(this.cursorPosition + 1);
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "left")) {
+    if (isInputMatch(event, "left")) {
       this.cursorPosition--;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "right")) {
+    if (isInputMatch(event, "right")) {
       this.cursorPosition++;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "home")) {
+    if (isInputMatch(event, "home")) {
       this.cursorPosition = 0;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "end")) {
+    if (isInputMatch(event, "end")) {
       this.cursorPosition = this.value.length;
-      return true;
+      return;
     }
 
-    return false;
+    super.onKeyDown(event);
   }
 
   public get value(): string {
@@ -103,7 +103,7 @@ export class InputBox extends Component {
     results.push({
       type: "text",
       text: text + " ".repeat(geometry.width - text.length),
-      color: this.options.inputBoxFocusColor,
+      color: this.options.inputBoxFocusColor ?? "#ffffff",
       bgColor: this.focused ? this.options.inputBoxFocusBgColor : undefined,
       geometry,
       zIndex: this.zIndex,

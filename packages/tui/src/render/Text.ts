@@ -1,7 +1,8 @@
 import { Node as YogaNode } from "yoga-layout";
-import { Component } from "../render/Component.js";
-import { geometryFromYogaNode } from "../render/Geometry.js";
-import { RenderItem } from "../render/RenderItem.js";
+import { Element } from "./Element.js";
+import { geometryFromYogaNode } from "./Geometry.js";
+import { RenderItem } from "./RenderItem.js";
+import { Document } from "./Document.js";
 
 export interface TextOptions {
   text: string;
@@ -9,13 +10,13 @@ export interface TextOptions {
   inverse?: boolean;
 }
 
-export class Text extends Component {
+export class Text extends Element {
   public text: string;
   public color: string | undefined;
   public inverse: boolean;
 
-  public constructor(options: TextOptions) {
-    super();
+  public constructor(document: Document, options: TextOptions) {
+    super(document);
     this.text = options.text;
     this.color = options.color;
     this.inverse = options.inverse ?? false;

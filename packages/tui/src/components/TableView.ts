@@ -1,7 +1,8 @@
-import { Key } from "readline";
 import { FlexDirection, Node as YogaNode } from "yoga-layout";
-import { Component } from "../render/Component.js";
-import { Text } from "./Text.js";
+import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
+import { KeyboardEvent } from "../render/KeyboardEvent.js";
+import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 
 export interface TableViewOptions<T> {
@@ -29,7 +30,7 @@ export interface TableViewColumn<T> {
 const COLUMN_MARGIN = 1;
 const COLUMN_SORT_WIDTH = 1;
 
-export class TableView<T> extends Component {
+export class TableView<T> extends Element {
   private _items: T[] = [];
   public selectedIndex = 0;
   public offset = 0;
@@ -39,11 +40,11 @@ export class TableView<T> extends Component {
   public sortedColumnIndex = 0;
   public sortedColumnDirection = SortDirection.Ascending;
 
-  public constructor(options: TableViewOptions<T>) {
-    super();
+  public constructor(document: Document, options: TableViewOptions<T>) {
+    super(document);
     this._columns = options.columns;
     this.style.flexDirection = FlexDirection.Column;
-    this.children = [new Text({ text: "Loading" })];
+    this.appendChild(new Text(document, { text: "Loading" }));
     this.itemTextColor = options.itemTextColor ?? "#ffffff";
     this.updateColumnWidths();
   }
@@ -66,9 +67,11 @@ export class TableView<T> extends Component {
     const height = Math.max(1, this.computedHeight);
     const width = this.computedWidth;
 
-    this.children.splice(height, this.children.length);
-    while (this.children.length < height) {
-      this.children.push(new Text({ text: "item", color: this.itemTextColor }));
+    while (this.childElementCount > height && this.lastElementChild !== null) {
+      this.removeChild(this.lastElementChild);
+    }
+    while (this.childElementCount < height) {
+      this.appendChild(new Text(this.document, { text: "item", color: this.itemTextColor }));
     }
 
     this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.items.length - 1));
@@ -149,40 +152,44 @@ export class TableView<T> extends Component {
     return [];
   }
 
-  public override handleKeyPress(_chunk: string, key: Key | undefined): boolean {
-    if (isInputMatch(key, "down")) {
+  public getCurrentItem(): T | undefined {
+    return this.items[this.selectedIndex];
+  }
+
+  public override onKeyDown(event: KeyboardEvent): void {
+    if (isInputMatch(event, "down")) {
       this.selectedIndex++;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "up")) {
+    if (isInputMatch(event, "up")) {
       this.selectedIndex--;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "pagedown")) {
+    if (isInputMatch(event, "pagedown")) {
       this.selectedIndex += this.computedHeight - 3;
-      return true;
+      return;
     }
 
-    if (isInputMatch(key, "pageup")) {
+    if (isInputMatch(event, "pageup")) {
       this.selectedIndex -= this.computedHeight - 3;
-      return true;
+      return;
     }
 
     for (let i = 0; i < this.columns.length; i++) {
       const column = this.columns[i];
-      if (isInputMatch(key, column.sortKeyboardShortcut)) {
+      if (isInputMatch(event, column.sortKeyboardShortcut)) {
         this.sortedColumnDirection =
           this.sortedColumnIndex === i ? flipSortDirection(this.sortedColumnDirection) : SortDirection.Ascending;
         this.sortedColumnIndex = i;
         this.sortItems();
         this.updateColumnWidths();
-        return true;
+        return;
       }
     }
 
-    return false;
+    super.onKeyDown(event);
   }
 
   private sortItems(): void {
