@@ -8,8 +8,10 @@ import { RenderItem } from "./RenderItem.js";
 
 export interface InputBoxOptions {
   width: number;
-  inputBoxFocusColor?: string;
-  inputBoxFocusBgColor?: string;
+  color?: string;
+  bgColor?: string;
+  focusColor?: string;
+  focusBgColor?: string;
 }
 
 export class InputBox extends Element {
@@ -103,8 +105,8 @@ export class InputBox extends Element {
     results.push({
       type: "text",
       text: text + " ".repeat(geometry.width - text.length),
-      color: this.options.inputBoxFocusColor ?? "#ffffff",
-      bgColor: this.focused ? this.options.inputBoxFocusBgColor : undefined,
+      color: this.focused ? (this.options.focusColor ?? "#ffffff") : (this.options.color ?? "#ffffff"),
+      bgColor: this.focused ? this.options.focusBgColor : this.options.bgColor,
       geometry,
       zIndex: this.zIndex,
     });

@@ -85,6 +85,7 @@ export class Element {
         tabElements.push(child);
       }
       if (child.focused) {
+        child.onBlur();
         if (currentTabElement) {
           logger.warn("multiple focused elements");
         } else {
@@ -102,9 +103,15 @@ export class Element {
           nextIndex += sortedTabElements.length;
         }
         nextIndex = nextIndex % sortedTabElements.length;
-        sortedTabElements[nextIndex].focused = true;
+        if (!sortedTabElements[nextIndex].focused) {
+          sortedTabElements[nextIndex].focused = true;
+          sortedTabElements[nextIndex].onFocus();
+        }
       } else {
-        sortedTabElements[0].focused = true;
+        if (!sortedTabElements[0].focused) {
+          sortedTabElements[0].focused = true;
+          sortedTabElements[0].onFocus();
+        }
       }
     }
   }
@@ -161,12 +168,22 @@ export class Element {
   public focus(): void {
     this.window.walkChildrenDeep((child) => {
       if (child === this) {
-        child.focused = true;
+        if (!child.focused) {
+          child.focused = true;
+          this.onFocus();
+        }
       } else {
-        child.focused = false;
+        if (child.focused) {
+          child.focused = false;
+          child.onBlur();
+        }
       }
     });
   }
+
+  protected onFocus(): void {}
+
+  protected onBlur(): void {}
 
   public get isMounted(): boolean {
     if (!this.parent) {

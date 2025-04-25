@@ -52,6 +52,7 @@ export class QueueMessages extends Element {
     this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
+      ...NexqStyles.tableViewStyles,
       columns: [
         {
           title: "INDEX",

@@ -22,23 +22,22 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
   private readonly moveButton: Button;
 
   public constructor(document: Document) {
-    super(document);
+    super(document, { ...NexqStyles.dialogStyles });
 
     this.inputBox = new InputBox(document, {
       width: 40,
-      inputBoxFocusColor: NexqStyles.inputBoxFocusColor,
-      inputBoxFocusBgColor: NexqStyles.inputBoxFocusBgColor,
+      ...NexqStyles.inputStyles,
     });
     this.inputBox.tabIndex = 1;
     this.inputBox.style.marginBottom = 1;
 
-    this.cancelButton = new Button(document, { text: "  Cancel  " });
+    this.cancelButton = new Button(document, { text: "  Cancel  ", ...NexqStyles.buttonStyles });
     this.cancelButton.tabIndex = 2;
     this.cancelButton.addEventListener("click", () => {
       this.close(undefined);
     });
 
-    this.moveButton = new Button(document, { text: "  Move  " });
+    this.moveButton = new Button(document, { text: "  Move  ", ...NexqStyles.buttonStyles });
     this.moveButton.tabIndex = 3;
     this.moveButton.addEventListener("click", () => {
       this.close({

@@ -62,6 +62,7 @@ export class Queues extends Element {
     this.appendChild(box);
 
     this.tableView = new TableView(document, {
+      ...NexqStyles.tableViewStyles,
       columns: [
         {
           title: "NAME",

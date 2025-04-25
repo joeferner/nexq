@@ -7,6 +7,7 @@ import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { StatusBar } from "./StatusBar.js";
+import { NexqStyles } from "../NexqStyles.js";
 
 export interface ConfirmOptions {
   title: string;
@@ -17,7 +18,7 @@ export interface ConfirmOptions {
 
 export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
   public constructor(document: Document) {
-    super(document);
+    super(document, { ...NexqStyles.dialogStyles });
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {
@@ -47,7 +48,7 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
     for (let i = 0; i < options.options.length; i++) {
-      const button = new Button(this.document, { text: `  ${options.options[i]}  ` });
+      const button = new Button(this.document, { text: `  ${options.options[i]}  `, ...NexqStyles.buttonStyles });
       button.id = options.options[i];
       button.tabIndex = i + 1;
       button.addEventListener("click", () => {

@@ -1,5 +1,4 @@
 import { Display, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout/load";
-import { NexqStyles } from "../NexqStyles.js";
 import { isInputMatch } from "../utils/input.js";
 import { Box } from "./Box.js";
 import { Document } from "./Document.js";
@@ -7,6 +6,11 @@ import { Element } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
 import { Text } from "./Text.js";
+
+export interface DialogOptions {
+  borderColor?: string;
+  titleColor?: string;
+}
 
 export interface UpdateOptions {
   title: string;
@@ -19,16 +23,19 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
   protected options?: TShowOptions;
   private resolve?: (value: TResults | undefined) => unknown;
   private lastFocus?: Element;
+  public titleColor: string;
 
-  protected constructor(document: Document) {
+  protected constructor(document: Document, options?: DialogOptions) {
     super(document);
 
     this.zIndex = 100;
     this.style.positionType = PositionType.Absolute;
     this.style.display = Display.None;
 
+    this.titleColor = options?.titleColor ?? "#ffffff";
+
     this.box = new Box(document);
-    this.box.borderColor = NexqStyles.borderColor;
+    this.box.borderColor = options?.borderColor ?? "#ffffff";
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.style.justifyContent = Justify.Center;
     this.box.style.paddingLeft = 2;
@@ -39,7 +46,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
   }
 
   public set title(title: string) {
-    this.box.title = new Text(this.document, { text: ` ${title} ` });
+    this.box.title = new Text(this.document, { text: `<${title}>`, color: this.titleColor });
   }
 
   public async show(options: TShowOptions): Promise<TResults | undefined> {

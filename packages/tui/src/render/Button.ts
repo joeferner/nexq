@@ -1,4 +1,3 @@
-import { Node } from "yoga-layout";
 import { isInputMatch } from "../utils/input.js";
 import { Document } from "./Document.js";
 import { Element, ElementEvents } from "./Element.js";
@@ -7,6 +6,8 @@ import { Text } from "./Text.js";
 
 export interface ButtonOptions {
   text: string;
+  color?: string;
+  selectedColor?: string;
 }
 
 export interface ButtonEvents extends ElementEvents {
@@ -15,16 +16,15 @@ export interface ButtonEvents extends ElementEvents {
 
 export class Button extends Element {
   private readonly textElement: Text;
+  public color: string;
+  public selectedColor: string;
 
   public constructor(document: Document, options: ButtonOptions) {
     super(document);
-    this.textElement = new Text(document, { text: options.text });
+    this.color = options.color ?? "#ffffff";
+    this.selectedColor = options.selectedColor ?? "#ffffff";
+    this.textElement = new Text(document, { text: options.text, color: this.color });
     this.appendChild(this.textElement);
-  }
-
-  public override populateLayout(container: Node): void {
-    this.textElement.inverse = this.focused;
-    super.populateLayout(container);
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {
@@ -34,6 +34,18 @@ export class Button extends Element {
     }
 
     super.onKeyDown(event);
+  }
+
+  protected override onFocus(): void {
+    this.textElement.color = this.selectedColor;
+    this.textElement.inverse = true;
+    super.onFocus();
+  }
+
+  protected override onBlur(): void {
+    this.textElement.color = this.color;
+    this.textElement.inverse = false;
+    super.onBlur();
   }
 
   public addEventListener<T extends keyof ButtonEvents>(event: T, listener: ButtonEvents[T]): void {

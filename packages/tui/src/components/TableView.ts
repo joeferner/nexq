@@ -8,6 +8,7 @@ import { isInputMatch } from "../utils/input.js";
 export interface TableViewOptions<T> {
   columns: TableViewColumn<T>[];
   itemTextColor?: string;
+  headerTextColor?: string;
 }
 
 export enum SortDirection {
@@ -37,6 +38,7 @@ export class TableView<T> extends Element {
   public _columns: TableViewColumn<T>[];
   private readonly columnWidths: number[] = [];
   public itemTextColor: string;
+  public headerTextColor: string;
   public sortedColumnIndex = 0;
   public sortedColumnDirection = SortDirection.Ascending;
 
@@ -46,6 +48,7 @@ export class TableView<T> extends Element {
     this.style.flexDirection = FlexDirection.Column;
     this.appendChild(new Text(document, { text: "Loading" }));
     this.itemTextColor = options.itemTextColor ?? "#ffffff";
+    this.headerTextColor = options.headerTextColor ?? "#ffffff";
     this.updateColumnWidths();
   }
 
@@ -105,6 +108,7 @@ export class TableView<T> extends Element {
     }
     children[0].text = header;
     children[0].text.substring(0, width);
+    children[0].color = this.headerTextColor;
 
     super.populateLayout(container);
   }
