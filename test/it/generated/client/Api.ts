@@ -1,5 +1,6 @@
 /* eslint-disable */
 /* tslint:disable */
+// @ts-nocheck
 /*
  * ---------------------------------------------------------------
  * ## THIS FILE WAS GENERATED VIA SWAGGER-TYPESCRIPT-API        ##
@@ -8,6 +9,10 @@
  * ## SOURCE: https://github.com/acacode/swagger-typescript-api ##
  * ---------------------------------------------------------------
  */
+
+export enum TopicProtocolQueue {
+  Queue = "Queue",
+}
 
 /** Construct a type with a set of properties K of type T */
 export type RecordStringString = Record<string, string>;
@@ -20,10 +25,6 @@ export interface CreateTopicRequest {
   name: string;
   /** tags to apply to this topic */
   tags?: RecordStringString;
-}
-
-export enum TopicProtocolQueue {
-  Queue = "Queue",
 }
 
 export interface TopicInfoQueueSubscription {
@@ -90,8 +91,7 @@ export interface DecreasePriorityByNakExpireBehavior {
 export type NakExpireBehaviorOptions =
   | DecreasePriorityByNakExpireBehavior
   | "retry"
-  | "moveToEnd"
-  | ((DecreasePriorityByNakExpireBehavior & "retry") | "moveToEnd");
+  | "moveToEnd";
 
 export interface CreateQueueRequest {
   /** If true the queue will either be updated or created (default: false) */
@@ -115,7 +115,7 @@ export interface CreateQueueRequest {
    * the limit of how many bytes a message can contain
    * @example "10mb"
    */
-  maximumMessageSize?: any;
+  maximumMessageSize?: string | number;
   /**
    * the length of time, retains a message
    * @example "1d"
@@ -298,11 +298,19 @@ export interface GetInfoResponse {
   version: string;
 }
 
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, HeadersDefaults, ResponseType } from "axios";
+import type {
+  AxiosInstance,
+  AxiosRequestConfig,
+  AxiosResponse,
+  HeadersDefaults,
+  ResponseType,
+} from "axios";
+import axios from "axios";
 
 export type QueryParamsType = Record<string | number, any>;
 
-export interface FullRequestParams extends Omit<AxiosRequestConfig, "data" | "params" | "url" | "responseType"> {
+export interface FullRequestParams
+  extends Omit<AxiosRequestConfig, "data" | "params" | "url" | "responseType"> {
   /** set parameter to `true` for call `securityWorker` for this request */
   secure?: boolean;
   /** request path */
@@ -317,11 +325,15 @@ export interface FullRequestParams extends Omit<AxiosRequestConfig, "data" | "pa
   body?: unknown;
 }
 
-export type RequestParams = Omit<FullRequestParams, "body" | "method" | "query" | "path">;
+export type RequestParams = Omit<
+  FullRequestParams,
+  "body" | "method" | "query" | "path"
+>;
 
-export interface ApiConfig<SecurityDataType = unknown> extends Omit<AxiosRequestConfig, "data" | "cancelToken"> {
+export interface ApiConfig<SecurityDataType = unknown>
+  extends Omit<AxiosRequestConfig, "data" | "cancelToken"> {
   securityWorker?: (
-    securityData: SecurityDataType | null
+    securityData: SecurityDataType | null,
   ) => Promise<AxiosRequestConfig | void> | AxiosRequestConfig | void;
   secure?: boolean;
   format?: ResponseType;
@@ -341,8 +353,16 @@ export class HttpClient<SecurityDataType = unknown> {
   private secure?: boolean;
   private format?: ResponseType;
 
-  constructor({ securityWorker, secure, format, ...axiosConfig }: ApiConfig<SecurityDataType> = {}) {
-    this.instance = axios.create({ ...axiosConfig, baseURL: axiosConfig.baseURL || "/" });
+  constructor({
+    securityWorker,
+    secure,
+    format,
+    ...axiosConfig
+  }: ApiConfig<SecurityDataType> = {}) {
+    this.instance = axios.create({
+      ...axiosConfig,
+      baseURL: axiosConfig.baseURL || "/",
+    });
     this.secure = secure;
     this.format = format;
     this.securityWorker = securityWorker;
@@ -352,7 +372,10 @@ export class HttpClient<SecurityDataType = unknown> {
     this.securityData = data;
   };
 
-  protected mergeRequestParams(params1: AxiosRequestConfig, params2?: AxiosRequestConfig): AxiosRequestConfig {
+  protected mergeRequestParams(
+    params1: AxiosRequestConfig,
+    params2?: AxiosRequestConfig,
+  ): AxiosRequestConfig {
     const method = params1.method || (params2 && params2.method);
 
     return {
@@ -360,7 +383,11 @@ export class HttpClient<SecurityDataType = unknown> {
       ...params1,
       ...(params2 || {}),
       headers: {
-        ...((method && this.instance.defaults.headers[method.toLowerCase() as keyof HeadersDefaults]) || {}),
+        ...((method &&
+          this.instance.defaults.headers[
+            method.toLowerCase() as keyof HeadersDefaults
+          ]) ||
+          {}),
         ...(params1.headers || {}),
         ...((params2 && params2.headers) || {}),
       },
@@ -376,13 +403,20 @@ export class HttpClient<SecurityDataType = unknown> {
   }
 
   protected createFormData(input: Record<string, unknown>): FormData {
+    if (input instanceof FormData) {
+      return input;
+    }
     return Object.keys(input || {}).reduce((formData, key) => {
       const property = input[key];
-      const propertyContent: any[] = property instanceof Array ? property : [property];
+      const propertyContent: any[] =
+        property instanceof Array ? property : [property];
 
       for (const formItem of propertyContent) {
         const isFileType = formItem instanceof Blob || formItem instanceof File;
-        formData.append(key, isFileType ? formItem : this.stringifyFormItem(formItem));
+        formData.append(
+          key,
+          isFileType ? formItem : this.stringifyFormItem(formItem),
+        );
       }
 
       return formData;
@@ -406,11 +440,21 @@ export class HttpClient<SecurityDataType = unknown> {
     const requestParams = this.mergeRequestParams(params, secureParams);
     const responseFormat = format || this.format || undefined;
 
-    if (type === ContentType.FormData && body && body !== null && typeof body === "object") {
+    if (
+      type === ContentType.FormData &&
+      body &&
+      body !== null &&
+      typeof body === "object"
+    ) {
       body = this.createFormData(body as Record<string, unknown>);
     }
 
-    if (type === ContentType.Text && body && body !== null && typeof body !== "string") {
+    if (
+      type === ContentType.Text &&
+      body &&
+      body !== null &&
+      typeof body !== "string"
+    ) {
       body = JSON.stringify(body);
     }
 
@@ -418,7 +462,7 @@ export class HttpClient<SecurityDataType = unknown> {
       ...requestParams,
       headers: {
         ...(requestParams.headers || {}),
-        ...(type && type !== ContentType.FormData ? { "Content-Type": type } : {}),
+        ...(type ? { "Content-Type": type } : {}),
       },
       params: query,
       responseType: responseFormat,
@@ -437,7 +481,9 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * NexQ REST Protocol
  */
-export class NexqApi<SecurityDataType extends unknown> extends HttpClient<SecurityDataType> {
+export class NexqApi<
+  SecurityDataType extends unknown,
+> extends HttpClient<SecurityDataType> {
   api = {
     /**
      * @description create a topic
@@ -506,7 +552,11 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @name Publish
      * @request POST:/api/v1/topic/{topicName}/message
      */
-    publish: (topicName: string, data: SendMessageRequest, params: RequestParams = {}) =>
+    publish: (
+      topicName: string,
+      data: SendMessageRequest,
+      params: RequestParams = {},
+    ) =>
       this.request<void, void>({
         path: `/api/v1/topic/${topicName}/message`,
         method: "POST",
@@ -522,7 +572,11 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @name SubscribeQueue
      * @request POST:/api/v1/topic/{topicName}/subscribe
      */
-    subscribeQueue: (topicName: string, data: SubscribeQueueRequest, params: RequestParams = {}) =>
+    subscribeQueue: (
+      topicName: string,
+      data: SubscribeQueueRequest,
+      params: RequestParams = {},
+    ) =>
       this.request<SubscribeResponse, void>({
         path: `/api/v1/topic/${topicName}/subscribe`,
         method: "POST",
@@ -599,7 +653,11 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @name SendMessage
      * @request POST:/api/v1/queue/{queueName}/message
      */
-    sendMessage: (queueName: string, data: SendMessageRequest, params: RequestParams = {}) =>
+    sendMessage: (
+      queueName: string,
+      data: SendMessageRequest,
+      params: RequestParams = {},
+    ) =>
       this.request<SendMessageResponse, void>({
         path: `/api/v1/queue/${queueName}/message`,
         method: "POST",
@@ -613,10 +671,10 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @description pauses the queue, all new receive message calls will return 0 messages until the queue is resumed
      *
      * @tags queue
-     * @name Pause
+     * @name PauseQueue
      * @request POST:/api/v1/queue/{queueName}/pause
      */
-    pause: (queueName: string, params: RequestParams = {}) =>
+    pauseQueue: (queueName: string, params: RequestParams = {}) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/pause`,
         method: "POST",
@@ -627,10 +685,10 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @description resumes the queue
      *
      * @tags queue
-     * @name Resume
+     * @name ResumeQueue
      * @request POST:/api/v1/queue/{queueName}/resume
      */
-    resume: (queueName: string, params: RequestParams = {}) =>
+    resumeQueue: (queueName: string, params: RequestParams = {}) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/resume`,
         method: "POST",
@@ -653,7 +711,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
          */
         targetQueueName: string;
       },
-      params: RequestParams = {}
+      params: RequestParams = {},
     ) =>
       this.request<MoveMessagesResponse, void>({
         path: `/api/v1/queue/${sourceQueueName}/message/move`,
@@ -677,7 +735,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         /** optional receipt handle */
         receiptHandle?: string;
       },
-      params: RequestParams = {}
+      params: RequestParams = {},
     ) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/message/${messageId}`,
@@ -704,7 +762,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         receiptHandle: string;
       },
       data: UpdateMessageRequest,
-      params: RequestParams = {}
+      params: RequestParams = {},
     ) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/message/${messageId}`,
@@ -722,7 +780,11 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @name GetMessage
      * @request GET:/api/v1/queue/{queueName}/message/{messageId}
      */
-    getMessage: (queueName: string, messageId: string, params: RequestParams = {}) =>
+    getMessage: (
+      queueName: string,
+      messageId: string,
+      params: RequestParams = {},
+    ) =>
       this.request<GetMessageResponse, void>({
         path: `/api/v1/queue/${queueName}/message/${messageId}`,
         method: "GET",
@@ -749,7 +811,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         /** optional reason for nak'ing the message */
         reason?: string;
       },
-      params: RequestParams = {}
+      params: RequestParams = {},
     ) =>
       this.request<void, void>({
         path: `/api/v1/queue/${queueName}/message/${messageId}/nak`,
@@ -779,7 +841,11 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
      * @name ReceiveMessages
      * @request POST:/api/v1/queue/{queueName}/receive
      */
-    receiveMessages: (queueName: string, data: ReceiveMessagesRequest, params: RequestParams = {}) =>
+    receiveMessages: (
+      queueName: string,
+      data: ReceiveMessagesRequest,
+      params: RequestParams = {},
+    ) =>
       this.request<ReceiveMessagesResponse, void>({
         path: `/api/v1/queue/${queueName}/receive`,
         method: "POST",
@@ -809,7 +875,7 @@ export class NexqApi<SecurityDataType extends unknown> extends HttpClient<Securi
         /** true, to include delayed messages */
         includeDelayed?: boolean;
       },
-      params: RequestParams = {}
+      params: RequestParams = {},
     ) =>
       this.request<PeekMessagesResponse, void>({
         path: `/api/v1/queue/${queueName}/peek`,
