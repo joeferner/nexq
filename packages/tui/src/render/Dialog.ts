@@ -1,3 +1,4 @@
+import { hex } from "ansis";
 import { Display, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout/load";
 import { isInputMatch } from "../utils/input.js";
 import { Box } from "./Box.js";
@@ -5,7 +6,6 @@ import { Document } from "./Document.js";
 import { Element } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
-import { Text } from "./Text.js";
 
 export interface DialogOptions {
   borderColor?: string;
@@ -46,7 +46,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
   }
 
   public set title(title: string) {
-    this.box.title = new Text(this.document, { text: `<${title}>`, color: this.titleColor });
+    this.box.title = hex(this.titleColor)`<${title}>`;
   }
 
   public async show(options: TShowOptions): Promise<TResults | undefined> {
@@ -62,7 +62,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
     });
   }
 
-  protected async onShow(_options: TShowOptions): Promise<void> {}
+  protected async onShow(_options: TShowOptions): Promise<void> { }
 
   public close(result: TResults | undefined): void {
     this.style.display = Display.None;

@@ -1,3 +1,4 @@
+import { hex } from "ansis";
 import matchPath from "node-match-path";
 import * as R from "radash";
 import { Align, FlexDirection } from "yoga-layout";
@@ -8,7 +9,6 @@ import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { BorderType } from "../render/RenderItem.js";
-import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
@@ -47,7 +47,7 @@ export class QueueMessages extends Element {
     this.box.borderColor = NexqStyles.borderColor;
     this.box.style.flexGrow = 1;
     this.box.style.flexDirection = FlexDirection.Column;
-    this.box.title = new Text(document, { text: ` Messages `, color: NexqStyles.titleColor });
+    this.box.title = hex(NexqStyles.titleColor)` Messages `;
     this.box.style.alignItems = Align.Stretch;
     this.appendChild(this.box);
 
@@ -94,7 +94,7 @@ export class QueueMessages extends Element {
     }
 
     this.queueName = queueName;
-    this.box.title = new Text(this.document, { text: ` "${this.queueName}" Messages `, color: NexqStyles.titleColor });
+    this.box.title = hex(NexqStyles.titleColor)` "${this.queueName}" Messages `;
 
     const run = async (): Promise<void> => {
       await this.window.refresh();

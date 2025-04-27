@@ -2,11 +2,28 @@ import Yoga, { PositionType, Node as YogaNode } from "yoga-layout";
 import { Element } from "./Element.js";
 import { BorderType, RenderItem } from "./RenderItem.js";
 import { Document } from "./Document.js";
+import { Text } from "./Text.js";
 
 export class Box extends Element {
   public borderType = BorderType.Single;
   public borderColor = "#ffffff";
-  public title: Element | undefined;
+  private titleText: Text | undefined;
+
+  public get title(): string | undefined {
+    return this.titleText?.text;
+  }
+
+  public set title(title: string | undefined) {
+    if (title === undefined) {
+      this.titleText = undefined;
+    } else {
+      if (!this.titleText) {
+        this.titleText = new Text(this.document, { text: title });
+      } else {
+        this.titleText.text = title;
+      }
+    }
+  }
 
   public constructor(document: Document) {
     super(document);
@@ -16,10 +33,10 @@ export class Box extends Element {
   public override populateLayout(container: YogaNode): void {
     super.populateLayout(container);
 
-    if (this.title) {
+    if (this.titleText) {
       const titleContainer = Yoga.Node.create();
       titleContainer.setPositionType(PositionType.Absolute);
-      this.title.populateLayout(titleContainer);
+      this.titleText.populateLayout(titleContainer);
       container.insertChild(titleContainer, container.getChildCount());
     }
   }
@@ -40,9 +57,9 @@ export class Box extends Element {
       },
     });
 
-    if (this.title) {
-      const titleRenderItems = this.title.render();
-      const titleWidth = this.title.computedWidth;
+    if (this.titleText) {
+      const titleRenderItems = this.titleText.render();
+      const titleWidth = this.titleText.computedWidth;
       const offset = Math.floor((this.computedWidth - titleWidth) / 2);
       for (const titleRenderItem of titleRenderItems) {
         titleRenderItem.geometry.left += offset;

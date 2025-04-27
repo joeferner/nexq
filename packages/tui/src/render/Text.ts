@@ -3,6 +3,7 @@ import { Element } from "./Element.js";
 import { geometryFromYogaNode } from "./Geometry.js";
 import { RenderItem } from "./RenderItem.js";
 import { Document } from "./Document.js";
+import { createAnsiSequenceParser } from "ansi-sequence-parser";
 
 export interface TextOptions {
   text: string;
@@ -24,9 +25,11 @@ export class Text extends Element {
 
   public override populateLayout(container: YogaNode): void {
     // TODO wrap text
-    const lines = this.text.split("\n");
+    const parser = createAnsiSequenceParser();
+
+    const lines = this.text.split("\n").map((line) => parser.parse(line));
     this.style.height = lines.length;
-    this.style.width = Math.max(...lines.map((l) => l.length));
+    this.style.width = Math.max(...lines.map((tokens) => tokens.reduce((prev, token) => prev + token.value.length, 0)));
     super.populateLayout(container);
   }
 

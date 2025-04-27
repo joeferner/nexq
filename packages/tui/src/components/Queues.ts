@@ -1,3 +1,4 @@
+import { hex } from "ansis";
 import * as R from "radash";
 import { Align, FlexDirection } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
@@ -7,7 +8,6 @@ import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { BorderType } from "../render/RenderItem.js";
-import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
@@ -57,7 +57,7 @@ export class Queues extends Element {
     box.borderColor = NexqStyles.borderColor;
     box.style.flexGrow = 1;
     box.style.flexDirection = FlexDirection.Column;
-    box.title = new Text(document, { text: " Queues ", color: NexqStyles.titleColor });
+    box.title = hex(NexqStyles.titleColor)` Queues `;
     box.style.alignItems = Align.Stretch;
     this.appendChild(box);
 

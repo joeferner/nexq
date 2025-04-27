@@ -5,6 +5,7 @@ import Yoga, { Direction } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
 import { Element } from "./Element.js";
 import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
+import { Color as AnsiSequenceColor, createAnsiSequenceParser } from "ansi-sequence-parser";
 
 const logger = createLogger("Renderer");
 
@@ -179,7 +180,8 @@ function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void
 }
 
 function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderItem): void {
-  const lines = renderItem.text.split("\n");
+  const parser = createAnsiSequenceParser();
+  const lines = renderItem.text.split("\n").map((line) => parser.parse(line));
   let y = renderItem.geometry.top;
   for (let lineIndex = 0; lineIndex < renderItem.geometry.height; lineIndex++, y++) {
     const bufferRow = buffer[y];
@@ -188,19 +190,31 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
     }
 
     let x = renderItem.geometry.left;
-    const line = lines[lineIndex];
-    for (let chIndex = 0; chIndex < renderItem.geometry.width; chIndex++, x++) {
-      const bufferCh = bufferRow[x];
-      if (!bufferCh) {
-        continue;
+    const tokens = lines[lineIndex];
+    for (const token of tokens) {
+      for (const ch of token.value) {
+        const bufferCh = bufferRow[x];
+        if (bufferCh) {
+          bufferCh.value = ch ?? " ";
+          bufferCh.color = token.foreground ? ansiColorToColorString(token.foreground) : renderItem.color;
+          bufferCh.bgColor = token.background ? ansiColorToColorString(token.background) : renderItem.bgColor;
+          bufferCh.inverse = renderItem.inverse ?? false;
+        }
+        x++;
       }
-
-      const ch = line?.[chIndex];
-      bufferCh.value = ch ?? " ";
-      bufferCh.color = renderItem.color;
-      bufferCh.bgColor = renderItem.bgColor;
-      bufferCh.inverse = renderItem.inverse ?? false;
     }
+  }
+}
+
+function ansiColorToColorString(color: AnsiSequenceColor): string {
+  const hex = (n: number): string => {
+    return n.toString(16).padStart(2, "0");
+  };
+
+  if (color.type === "rgb") {
+    return `#${hex(color.rgb[0])}${hex(color.rgb[1])}${hex(color.rgb[2])}`;
+  } else {
+    throw new Error(`color type not supported "${color.type}"`);
   }
 }
 
