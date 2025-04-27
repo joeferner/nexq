@@ -3,7 +3,7 @@ set -u
 set -e
 
 DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-cd "${DIR}/../packages/app"
+cd "${DIR}/../packages/server"
 
 CANAME=nexq-rootca
 MYCERT=nexq.local

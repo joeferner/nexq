@@ -3,7 +3,7 @@ see [NexQ](https://github.com/joeferner/nexq)
 # Running
 
 ```bash
-cd packages/app/
+cd packages/server/
 npm run start
 
 # in another terminal

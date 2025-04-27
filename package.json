@@ -10,7 +10,7 @@
     "packages/proto-rest",
     "packages/proto-keda",
     "packages/proto-prometheus",
-    "packages/app",
+    "packages/server",
     "packages/tui",
     "test/it"
   ]
