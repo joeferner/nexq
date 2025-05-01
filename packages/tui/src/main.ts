@@ -64,6 +64,13 @@ async function parseCommandLineAndStart(): Promise<void> {
           logFile: args.logFile,
         });
 
+        try {
+          new URL(args.url);
+        } catch (_err) {
+          console.error('invalid url');
+          process.exit(1);
+        }
+
         await start({
           ...args,
           rejectUnauthorized: !args.allowUnauthorized,
