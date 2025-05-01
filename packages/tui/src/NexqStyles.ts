@@ -28,6 +28,10 @@ export class NexqStyles {
   public static readonly inputBoxFocusColor = "#ffffff";
   public static readonly inputBoxFocusBgColor = "#00332D";
 
+  public static readonly detailsTitleColor = "#4182B2";
+  public static readonly detailsTitleColonColor = "#FFFFFF";
+  public static readonly detailsValueColor = "#FFEFD6";
+
   public static readonly tableViewStyles: Partial<TableViewOptions<unknown>> = {
     headerTextColor: NexqStyles.tableViewHeaderTextColor,
     itemTextColor: NexqStyles.tableViewTextColor,

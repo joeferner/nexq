@@ -3,7 +3,7 @@ import readline from "node:readline";
 import { Key } from "readline";
 import { Document } from "./Document.js";
 import { Element, ElementEvents } from "./Element.js";
-import { History } from "./History.js";
+import { History, PopStateEvent, PushStateEvent } from "./History.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { EditableLocation, Location } from "./Location.js";
 import { Renderer } from "./Renderer.js";
@@ -24,11 +24,11 @@ export class Window extends Element {
     getLocation: (): Location => {
       return this.location;
     },
-    pushUrl: (url): void => {
-      this.pushUrlFromHistory(url);
+    pushUrl: (url, event): void => {
+      this.pushUrlFromHistory(url, event);
     },
-    popUrl: (url): void => {
-      this.popUrlFromHistory(url);
+    popUrl: (url, event): void => {
+      this.popUrlFromHistory(url, event);
     },
   });
   private readonly renderer = new Renderer();
@@ -109,7 +109,7 @@ export class Window extends Element {
         void this.refresh();
       }
     });
-    process.stdin.on("keypress", (chunk: string, key: Key | undefined) => {
+    process.stdin.on("keypress", (_chunk: string, key: Key | undefined) => {
       if (key && key.ctrl && key.name === "c") {
         this.tryExitAlternativeScreen();
         process.exit(0);
@@ -150,14 +150,14 @@ export class Window extends Element {
     return true;
   }
 
-  private pushUrlFromHistory(url: URL): void {
+  private pushUrlFromHistory(url: URL, event: PushStateEvent): void {
     this.setUrl(url);
-    this.eventEmitter.emit("pushstate");
+    this.eventEmitter.emit("pushstate", event);
   }
 
-  private popUrlFromHistory(url: URL): void {
+  private popUrlFromHistory(url: URL, event: PopStateEvent): void {
     this.setUrl(url);
-    this.eventEmitter.emit("popstate");
+    this.eventEmitter.emit("popstate", event);
   }
 
   private setUrl(url: URL): void {

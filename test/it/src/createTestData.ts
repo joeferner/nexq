@@ -12,8 +12,13 @@ async function run(): Promise<void> {
       name: queueName,
     });
     for (let m = 0; m < Math.floor(Math.random() * 50); m++) {
+      const attributes: Record<string, string> = {};
+      for (let a = 0; a < Math.floor(Math.random() * 5) + 2; a++) {
+        attributes[`attr${a}`] = `attribute value ${a}`;
+      }
       await client.api.sendMessage(queueName, {
         body: `data ${m}`,
+        attributes,
       });
     }
   }

@@ -10,6 +10,7 @@ import { createLogger } from "../utils/logger.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Header } from "./Header.js";
 import { MoveMessagesDialog } from "./MoveMessagesDialog.js";
+import { QueueMessage } from "./QueueMessage.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { StatusBar } from "./StatusBar.js";
@@ -32,6 +33,7 @@ export class App extends Element {
   public readonly refreshInterval = 5 * 1000;
   private readonly header: Header;
   private readonly queues: Queues;
+  private readonly queueMessage: QueueMessage;
   private readonly queueMessages: QueueMessages;
   private readonly statusBar: StatusBar;
   public readonly confirmDialog: ConfirmDialog;
@@ -55,6 +57,7 @@ export class App extends Element {
 
     this.header = new Header(document);
     this.queues = new Queues(document);
+    this.queueMessage = new QueueMessage(document);
     this.queueMessages = new QueueMessages(document);
     this.confirmDialog = new ConfirmDialog(document);
     this.moveMessagesDialog = new MoveMessagesDialog(document);
@@ -69,6 +72,10 @@ export class App extends Element {
 
     const routerElement = new RouterElement(document, {
       routes: [
+        {
+          pathname: QueueMessage.PATH,
+          element: this.queueMessage,
+        },
         {
           pathname: QueueMessages.PATH,
           element: this.queueMessages,

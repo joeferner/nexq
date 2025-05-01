@@ -62,7 +62,7 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
     });
   }
 
-  protected async onShow(_options: TShowOptions): Promise<void> { }
+  protected async onShow(_options: TShowOptions): Promise<void> {}
 
   public close(result: TResults | undefined): void {
     this.style.display = Display.None;

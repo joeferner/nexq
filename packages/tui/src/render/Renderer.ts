@@ -191,7 +191,7 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
 
     let x = renderItem.geometry.left;
     const tokens = lines[lineIndex];
-    for (const token of tokens) {
+    for (const token of tokens ?? []) {
       for (const ch of token.value) {
         const bufferCh = bufferRow[x];
         if (bufferCh) {

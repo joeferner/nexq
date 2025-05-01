@@ -125,7 +125,7 @@ export class QueueMessages extends Element {
       const currentItem = this.tableView.getCurrentItem();
       if (currentItem) {
         this.window.history.pushState(
-          {},
+          currentItem,
           "",
           `/queue/${encodeURIComponent(this.queueName)}/${encodeURIComponent(currentItem.id)}`
         );
