@@ -7,6 +7,9 @@ import { History, PopStateEvent, PushStateEvent } from "./History.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { EditableLocation, Location } from "./Location.js";
 import { Renderer } from "./Renderer.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger('window');
 
 export interface WindowOptions {
   url?: string;
@@ -96,39 +99,55 @@ export class Window extends Element {
     readline.emitKeypressEvents(process.stdin);
     // windows command line only gets escape key through data and now keypress
     process.stdin.on("data", (key) => {
-      if (key.length === 1 && key[0] === 27) {
-        this.handleKeyDown(
-          new KeyboardEvent({
-            altKey: false,
-            ctrlKey: false,
-            metaKey: false,
-            shiftKey: false,
-            key: "Escape",
-          })
-        );
-        void this.refresh();
+      try {
+        if (key.length === 1 && key[0] === 27) {
+          this.handleKeyDown(
+            new KeyboardEvent({
+              altKey: false,
+              ctrlKey: false,
+              metaKey: false,
+              shiftKey: false,
+              key: "Escape",
+            })
+          );
+          void this.refresh();
+        }
+      } catch (err) {
+        logger.error('failed to process stdin.data', err);
       }
     });
-    process.stdin.on("keypress", (_chunk: string, key: Key | undefined) => {
-      if (key && key.ctrl && key.name === "c") {
-        this.tryExitAlternativeScreen();
-        process.exit(0);
-      }
-      // handled in process.stdin.on("data", ...) to support windows
-      if (key?.name?.toLocaleLowerCase() === "escape") {
-        return;
-      }
-      if (key) {
-        this.handleKeyDown(
-          new KeyboardEvent({
-            altKey: false,
-            ctrlKey: key.ctrl ?? false,
-            metaKey: key.meta ?? false,
-            shiftKey: key.shift ?? false,
-            key: key.name ?? "",
-          })
-        );
-        void this.refresh();
+    process.stdin.on("keypress", (chunk: string | undefined, key: Key | undefined) => {
+      try {
+        if (key && key.ctrl && key.name === "c") {
+          this.tryExitAlternativeScreen();
+          process.exit(0);
+        }
+        // handled in process.stdin.on("data", ...) to support windows
+        if (key?.name?.toLocaleLowerCase() === "escape") {
+          return;
+        }
+        if (key) {
+          const ctrlKey = key.ctrl ?? false;
+          const metaKey = key.meta ?? false;
+          let translatedKey = key.name ?? "";
+
+          if (chunk && !key.name && !ctrlKey && !metaKey && chunk.length === 1) {
+            translatedKey = chunk;
+          }
+
+          this.handleKeyDown(
+            new KeyboardEvent({
+              altKey: false,
+              ctrlKey,
+              metaKey,
+              shiftKey: key.shift ?? false,
+              key: translatedKey,
+            })
+          );
+          void this.refresh();
+        }
+      } catch (err) {
+        logger.error('failed to process stdin.keypress', err);
       }
     });
     process.stdin.resume();
