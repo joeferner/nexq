@@ -13,6 +13,8 @@ export class NexqStyles {
 
   public static readonly borderColor = "#3288FF";
   public static readonly titleColor = "#4AB9DD";
+  public static readonly titleAltColor = "#FF00FA";
+  public static readonly titleCountColor = "#FFFFFF";
 
   public static readonly tableViewHeaderTextColor = "#E5E5E5";
   public static readonly tableViewTextColor = "#92D7FF";

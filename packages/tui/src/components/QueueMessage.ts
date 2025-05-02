@@ -78,7 +78,7 @@ export class QueueMessage extends Element {
     ];
     this.text.text = detailsToString(details);
 
-    this.box.title = hex(NexqStyles.titleColor)` Message "${this.queueName}/${this.messageId}" `;
+    this.box.title = hex(NexqStyles.titleColor)` Message(` + hex(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` + hex(NexqStyles.titleColor)`) `;
 
     const run = async (): Promise<void> => {
       await this.window.refresh();

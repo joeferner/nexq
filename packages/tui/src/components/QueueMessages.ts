@@ -94,7 +94,7 @@ export class QueueMessages extends Element {
     }
 
     this.queueName = queueName;
-    this.box.title = hex(NexqStyles.titleColor)` "${this.queueName}" Messages `;
+    this.refreshTitle();
 
     const run = async (): Promise<void> => {
       await this.window.refresh();
@@ -104,6 +104,10 @@ export class QueueMessages extends Element {
       }
     };
     void run();
+  }
+
+  private refreshTitle(): void {
+    this.box.title = hex(NexqStyles.titleColor)` Messages(` + hex(NexqStyles.titleAltColor)`${this.queueName}` + hex(NexqStyles.titleColor)`)[` + hex(NexqStyles.titleCountColor)`${this.tableView.items.length}` + hex(NexqStyles.titleColor)`] `;
   }
 
   protected override elementWillUnmount(): void {
@@ -151,6 +155,7 @@ export class QueueMessages extends Element {
       logger.info("refreshMessages");
       const resp = await app.api.api.peekMessages(this.queueName, { maxNumberOfMessages: 100 });
       this.tableView.items = resp.data.messages.map((m, index) => ({ ...m, index }));
+      this.refreshTitle();
       await this.window.refresh();
     } catch (err) {
       StatusBar.setStatus(this.document, `Failed to peek messages`, err);

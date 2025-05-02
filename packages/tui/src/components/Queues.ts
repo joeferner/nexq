@@ -19,6 +19,7 @@ const logger = createLogger("Queues");
 
 export class Queues extends Element {
   public static readonly PATH = "/queue";
+  private readonly box: Box;
   private readonly tableView: TableView<GetQueueResponse>;
   private refreshTimeout?: NodeJS.Timeout;
   private inRefreshQueues = false;
@@ -52,14 +53,14 @@ export class Queues extends Element {
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
 
-    const box = new Box(document);
-    box.borderType = BorderType.Single;
-    box.borderColor = NexqStyles.borderColor;
-    box.style.flexGrow = 1;
-    box.style.flexDirection = FlexDirection.Column;
-    box.title = hex(NexqStyles.titleColor)` Queues `;
-    box.style.alignItems = Align.Stretch;
-    this.appendChild(box);
+    this.box = new Box(document);
+    this.box.borderType = BorderType.Single;
+    this.box.borderColor = NexqStyles.borderColor;
+    this.box.style.flexGrow = 1;
+    this.box.style.flexDirection = FlexDirection.Column;
+    this.box.title = hex(NexqStyles.titleColor)` Queues `;
+    this.box.style.alignItems = Align.Stretch;
+    this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
       ...NexqStyles.tableViewStyles,
@@ -114,7 +115,7 @@ export class Queues extends Element {
       ],
     });
     this.tableView.style.flexGrow = 1;
-    box.appendChild(this.tableView);
+    this.box.appendChild(this.tableView);
   }
 
   protected override elementDidMount(): void {
@@ -168,7 +169,9 @@ export class Queues extends Element {
       }
       logger.info("refreshQueues");
       const resp = await app.api.api.getQueues();
-      this.tableView.items = resp.data.queues;
+      const queues = resp.data.queues;
+      this.box.title = hex(NexqStyles.titleColor)` Queues[` + hex(NexqStyles.titleCountColor)`${queues.length}` + hex(NexqStyles.titleColor)`] `;
+      this.tableView.items = queues;
       await this.window.refresh();
     } catch (err) {
       StatusBar.setStatus(this.document, `Failed to get queues`, err);
