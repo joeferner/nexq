@@ -16,6 +16,9 @@ export class StatusBar extends Element {
     this.style.flexDirection = FlexDirection.Column;
     this.style.alignItems = Align.Center;
     this.style.width = "100%";
+    this.style.height = 1;
+    this.style.minHeight = 1;
+    this.style.maxHeight = 1;
     this.appendChild(this.textElement);
   }
 

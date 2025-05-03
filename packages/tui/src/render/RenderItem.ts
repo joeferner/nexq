@@ -3,6 +3,7 @@ import { Geometry } from "./Geometry.js";
 export interface TextRenderItem {
   type: "text";
   text: string;
+  container: Geometry;
   geometry: Geometry;
   color: string;
   bgColor?: string;
@@ -23,6 +24,7 @@ export enum BorderType {
 export interface BoxRenderItem {
   type: "box";
   borderType: BorderType;
+  container: Geometry;
   geometry: Geometry;
   color: string;
   zIndex: number;

@@ -67,7 +67,7 @@ async function parseCommandLineAndStart(): Promise<void> {
         try {
           new URL(args.url);
         } catch (_err) {
-          console.error('invalid url');
+          console.error("invalid url");
           process.exit(1);
         }
 

@@ -25,9 +25,9 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
     super(document, { ...NexqStyles.dialogStyles });
 
     this.inputBox = new InputBox(document, {
-      width: 40,
       ...NexqStyles.inputStyles,
     });
+    this.inputBox.style.width = 40;
     this.inputBox.tabIndex = 1;
     this.inputBox.style.marginBottom = 1;
 

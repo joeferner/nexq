@@ -1,9 +1,14 @@
-import { Align, Display, Edge, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout";
+import { Align, Display, Edge, FlexDirection, Justify, Overflow, PositionType, Node as YogaNode } from "yoga-layout";
 
 export class Styles {
   public height: number | "auto" | `${number}%` | undefined;
+  public minHeight: number | `${number}%` | undefined;
+  public maxHeight: number | `${number}%` | undefined;
   public width: number | "auto" | `${number}%` | undefined;
+  public minWidth: number | `${number}%` | undefined;
+  public maxWidth: number | `${number}%` | undefined;
   public flexGrow: number | undefined;
+  public flexShrink: number | undefined;
   public alignItems = Align.FlexStart;
   public flexDirection = FlexDirection.Row;
   public justifyContent = Justify.FlexStart;
@@ -17,6 +22,7 @@ export class Styles {
   public paddingRight?: number | `${number}%` | undefined;
   public paddingTop?: number | `${number}%` | undefined;
   public paddingBottom?: number | `${number}%` | undefined;
+  public overflow?: Overflow;
 
   public set margin(margin: number | "auto" | `${number}%` | undefined) {
     this.marginLeft = margin;
@@ -26,9 +32,18 @@ export class Styles {
   }
 
   public apply(node: YogaNode): void {
+    node.setOverflow(this.overflow ?? Overflow.Visible);
+
     node.setHeight(this.height);
+    node.setMinHeight(this.minHeight);
+    node.setMaxHeight(this.maxHeight);
+
     node.setWidth(this.width);
+    node.setMinWidth(this.minWidth);
+    node.setMaxWidth(this.maxWidth);
+
     node.setFlexGrow(this.flexGrow);
+    node.setFlexShrink(this.flexShrink);
     node.setAlignItems(this.alignItems);
     node.setFlexDirection(this.flexDirection);
     node.setJustifyContent(this.justifyContent);

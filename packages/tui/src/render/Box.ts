@@ -1,7 +1,7 @@
 import Yoga, { PositionType, Node as YogaNode } from "yoga-layout";
-import { Element } from "./Element.js";
-import { BorderType, RenderItem } from "./RenderItem.js";
 import { Document } from "./Document.js";
+import { Element, PreRenderOptions } from "./Element.js";
+import { BorderType, RenderItem } from "./RenderItem.js";
 import { Text } from "./Text.js";
 
 export class Box extends Element {
@@ -41,7 +41,8 @@ export class Box extends Element {
     }
   }
 
-  protected override preRender(yogaNode: YogaNode): RenderItem[] {
+  protected override preRender(options: PreRenderOptions): RenderItem[] {
+    const { container, geometry } = options;
     const renderItems: RenderItem[] = [];
 
     renderItems.push({
@@ -49,16 +50,17 @@ export class Box extends Element {
       borderType: this.borderType,
       color: this.borderColor,
       zIndex: this.zIndex - 0.001,
+      container,
       geometry: {
-        left: yogaNode.getComputedLeft() - 1,
-        top: yogaNode.getComputedTop() - 1,
-        width: yogaNode.getComputedWidth() + 2,
-        height: yogaNode.getComputedHeight() + 2,
+        top: geometry.top - 1,
+        left: geometry.left - 1,
+        height: geometry.height + 2,
+        width: geometry.width + 2,
       },
     });
 
     if (this.titleText) {
-      const titleRenderItems = this.titleText.render();
+      const titleRenderItems = this.titleText.render({ ...container, top: container.top });
       const titleWidth = this.titleText.computedWidth;
       const offset = Math.floor((this.computedWidth - titleWidth) / 2);
       for (const titleRenderItem of titleRenderItems) {

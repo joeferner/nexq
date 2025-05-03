@@ -6,6 +6,7 @@ import { createLogger } from "../utils/logger.js";
 import { Element } from "./Element.js";
 import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
 import { Color as AnsiSequenceColor, createAnsiSequenceParser } from "ansi-sequence-parser";
+import { geometryFromYogaNode } from "./Geometry.js";
 
 const logger = createLogger("Renderer");
 
@@ -53,7 +54,8 @@ export class Renderer {
       root.setHeight(this.height);
       element.populateLayout(root);
       root.calculateLayout(undefined, undefined, Direction.LTR);
-      renderItems = element.render();
+      const container = geometryFromYogaNode(root);
+      renderItems = element.render(container);
     } finally {
       root.freeRecursive();
     }
@@ -184,6 +186,10 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
   const lines = renderItem.text.split("\n").map((line) => parser.parse(line));
   let y = renderItem.geometry.top;
   for (let lineIndex = 0; lineIndex < renderItem.geometry.height; lineIndex++, y++) {
+    if (y < renderItem.container.top || y >= renderItem.container.top + renderItem.container.height) {
+      continue;
+    }
+
     const bufferRow = buffer[y];
     if (!bufferRow) {
       continue;
@@ -193,12 +199,14 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
     const tokens = lines[lineIndex];
     for (const token of tokens ?? []) {
       for (const ch of token.value) {
-        const bufferCh = bufferRow[x];
-        if (bufferCh) {
-          bufferCh.value = ch ?? " ";
-          bufferCh.color = token.foreground ? ansiColorToColorString(token.foreground) : renderItem.color;
-          bufferCh.bgColor = token.background ? ansiColorToColorString(token.background) : renderItem.bgColor;
-          bufferCh.inverse = renderItem.inverse ?? false;
+        if (x >= renderItem.container.left && x < renderItem.container.left + renderItem.container.width) {
+          const bufferCh = bufferRow[x];
+          if (bufferCh) {
+            bufferCh.value = ch ?? " ";
+            bufferCh.color = token.foreground ? ansiColorToColorString(token.foreground) : renderItem.color;
+            bufferCh.bgColor = token.background ? ansiColorToColorString(token.background) : renderItem.bgColor;
+            bufferCh.inverse = renderItem.inverse ?? false;
+          }
         }
         x++;
       }

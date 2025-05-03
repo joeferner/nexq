@@ -1,13 +1,10 @@
-import { Node as YogaNode } from "yoga-layout";
 import { inputToChar, isInputMatch } from "../utils/input.js";
 import { Document } from "./Document.js";
-import { Element } from "./Element.js";
-import { geometryFromYogaNode } from "./Geometry.js";
+import { Element, PreRenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
 
 export interface InputBoxOptions {
-  width: number;
   color?: string;
   bgColor?: string;
   focusColor?: string;
@@ -24,7 +21,6 @@ export class InputBox extends Element {
     private readonly options: InputBoxOptions
   ) {
     super(document);
-    this.style.width = options.width;
     this.style.height = 1;
   }
 
@@ -97,9 +93,9 @@ export class InputBox extends Element {
     }
   }
 
-  protected preRender(yogaNode: YogaNode): RenderItem[] {
-    const results = super.preRender(yogaNode);
-    const geometry = geometryFromYogaNode(yogaNode);
+  protected preRender(options: PreRenderOptions): RenderItem[] {
+    const { container, geometry } = options;
+    const results = super.preRender(options);
     const text = this.value.substring(this.offset, this.offset + geometry.width);
 
     results.push({
@@ -107,6 +103,7 @@ export class InputBox extends Element {
       text: text + " ".repeat(geometry.width - text.length),
       color: this.focused ? (this.options.focusColor ?? "#ffffff") : (this.options.color ?? "#ffffff"),
       bgColor: this.focused ? this.options.focusBgColor : this.options.bgColor,
+      container,
       geometry,
       zIndex: this.zIndex,
     });

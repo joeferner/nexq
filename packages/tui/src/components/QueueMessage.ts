@@ -1,6 +1,6 @@
 import { hex } from "ansis";
 import matchPath from "node-match-path";
-import { Align, FlexDirection } from "yoga-layout";
+import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
 import { Document } from "../render/Document.js";
@@ -36,16 +36,20 @@ export class QueueMessage extends Element {
     super(document);
     this.style.width = "100%";
     this.style.flexGrow = 1;
+    this.style.flexShrink = 1;
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
+    this.style.overflow = Overflow.Hidden;
 
     this.box = new Box(document);
     this.box.borderType = BorderType.Single;
     this.box.borderColor = NexqStyles.borderColor;
     this.box.style.flexGrow = 1;
+    this.box.style.flexShrink = 1;
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.title = hex(NexqStyles.titleColor)` Messages `;
     this.box.style.alignItems = Align.Stretch;
+    this.box.style.overflow = Overflow.Hidden;
     this.appendChild(this.box);
 
     this.text = new Text(document, { text: "" });
@@ -78,7 +82,10 @@ export class QueueMessage extends Element {
     ];
     this.text.text = detailsToString(details);
 
-    this.box.title = hex(NexqStyles.titleColor)` Message(` + hex(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` + hex(NexqStyles.titleColor)`) `;
+    this.box.title =
+      hex(NexqStyles.titleColor)` Message(` +
+      hex(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` +
+      hex(NexqStyles.titleColor)`) `;
 
     const run = async (): Promise<void> => {
       await this.window.refresh();

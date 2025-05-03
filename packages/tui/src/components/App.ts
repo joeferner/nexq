@@ -1,5 +1,5 @@
 import https from "node:https";
-import { Align, FlexDirection } from "yoga-layout";
+import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { Api, GetInfoResponse } from "../client/NexqClientApi.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
@@ -14,6 +14,8 @@ import { QueueMessage } from "./QueueMessage.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { StatusBar } from "./StatusBar.js";
+import { Command } from "./Command.js";
+import { Topics } from "./Topics.js";
 
 const logger = createLogger("App");
 
@@ -32,12 +34,15 @@ export class App extends Element {
   public readonly tuiVersion: string;
   public readonly refreshInterval = 5 * 1000;
   private readonly header: Header;
+  private readonly command: Command;
   private readonly queues: Queues;
+  private readonly topics: Topics;
   private readonly queueMessage: QueueMessage;
   private readonly queueMessages: QueueMessages;
   private readonly statusBar: StatusBar;
   public readonly confirmDialog: ConfirmDialog;
   public readonly moveMessagesDialog: MoveMessagesDialog;
+  private readonly routerElement: RouterElement;
 
   public constructor(document: Document, options: AppOptions) {
     super(document);
@@ -56,9 +61,12 @@ export class App extends Element {
     this.api = new Api({ baseURL: options.url, httpsAgent });
 
     this.header = new Header(document);
+    this.command = new Command(document);
+    this.command.onCommand = this.handleCommand.bind(this);
     this.queues = new Queues(document);
     this.queueMessage = new QueueMessage(document);
     this.queueMessages = new QueueMessages(document);
+    this.topics = new Topics(document);
     this.confirmDialog = new ConfirmDialog(document);
     this.moveMessagesDialog = new MoveMessagesDialog(document);
     this.statusBar = new StatusBar(document);
@@ -66,11 +74,13 @@ export class App extends Element {
     this.style.height = "100%";
     this.style.flexDirection = FlexDirection.Column;
     this.style.alignItems = Align.Stretch;
+    this.style.overflow = Overflow.Hidden;
     this.appendChild(this.confirmDialog);
     this.appendChild(this.moveMessagesDialog);
     this.appendChild(this.header);
+    this.appendChild(this.command);
 
-    const routerElement = new RouterElement(document, {
+    this.routerElement = new RouterElement(document, {
       routes: [
         {
           pathname: QueueMessage.PATH,
@@ -84,12 +94,18 @@ export class App extends Element {
           pathname: Queues.PATH,
           element: this.queues,
         },
+        {
+          pathname: Topics.PATH,
+          element: this.topics,
+        },
       ],
     });
-    routerElement.style.flexDirection = FlexDirection.Column;
-    routerElement.style.alignItems = Align.Stretch;
-    routerElement.style.flexGrow = 1;
-    this.appendChild(routerElement);
+    this.routerElement.style.flexDirection = FlexDirection.Column;
+    this.routerElement.style.alignItems = Align.Stretch;
+    this.routerElement.style.flexGrow = 1;
+    this.routerElement.style.flexShrink = 1;
+    this.routerElement.style.overflow = Overflow.Hidden;
+    this.appendChild(this.routerElement);
     this.appendChild(this.statusBar);
 
     this.info = this.api.api.getInfo().then((i) => i.data);
@@ -110,6 +126,11 @@ export class App extends Element {
       return;
     }
 
+    if (isInputMatch(event, ":")) {
+      this.command.show();
+      return;
+    }
+
     return super.onKeyDown(event);
   }
 
@@ -119,5 +140,26 @@ export class App extends Element {
       throw new Error("can't find app");
     }
     return app;
+  }
+
+  private handleCommand(value: string): boolean {
+    if (value === "queues") {
+      if (this.window.location.pathname === Queues.PATH) {
+        StatusBar.setStatus(this.document, "Already on Queues");
+        return false;
+      }
+      this.window.history.pushState({}, "", Queues.PATH);
+      return true;
+    }
+    if (value === "topics") {
+      if (this.window.location.pathname === Topics.PATH) {
+        StatusBar.setStatus(this.document, "Already on Topics");
+        return false;
+      }
+      this.window.history.pushState({}, "", Topics.PATH);
+      return true;
+    }
+    StatusBar.setStatus(this.document, "Invalid command");
+    return false;
   }
 }

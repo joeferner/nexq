@@ -70,9 +70,6 @@ export class TableView<T> extends Element {
     const height = Math.max(1, this.computedHeight);
     const width = this.computedWidth;
 
-    while (this.childElementCount > height && this.lastElementChild !== null) {
-      this.removeChild(this.lastElementChild);
-    }
     while (this.childElementCount < height) {
       this.appendChild(new Text(this.document, { text: "item", color: this.itemTextColor }));
     }
@@ -172,12 +169,12 @@ export class TableView<T> extends Element {
     }
 
     if (isInputMatch(event, "pagedown")) {
-      this.selectedIndex += this.computedHeight - 3;
+      this.selectedIndex += this.computedHeight - 2;
       return;
     }
 
     if (isInputMatch(event, "pageup")) {
-      this.selectedIndex -= this.computedHeight - 3;
+      this.selectedIndex -= this.computedHeight - 2;
       return;
     }
 

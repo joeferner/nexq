@@ -11,10 +11,11 @@ export function geometryFromYogaNode(node: YogaNode | undefined): Geometry {
   if (!node) {
     return { left: 0, top: 0, width: 0, height: 0 };
   }
+  const layout = node.getComputedLayout();
   return {
-    left: node.getComputedLeft(),
-    top: node.getComputedTop(),
-    width: node.getComputedWidth(),
-    height: node.getComputedHeight(),
+    left: layout.left,
+    top: layout.top,
+    width: layout.width,
+    height: layout.height,
   };
 }

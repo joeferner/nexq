@@ -1,7 +1,7 @@
 import { hex } from "ansis";
 import matchPath from "node-match-path";
 import * as R from "radash";
-import { Align, FlexDirection } from "yoga-layout";
+import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
@@ -39,16 +39,20 @@ export class QueueMessages extends Element {
     super(document);
     this.style.width = "100%";
     this.style.flexGrow = 1;
+    this.style.flexShrink = 1;
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
+    this.style.overflow = Overflow.Hidden;
 
     this.box = new Box(document);
     this.box.borderType = BorderType.Single;
     this.box.borderColor = NexqStyles.borderColor;
     this.box.style.flexGrow = 1;
+    this.box.style.flexShrink = 1;
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.title = hex(NexqStyles.titleColor)` Messages `;
     this.box.style.alignItems = Align.Stretch;
+    this.box.style.overflow = Overflow.Hidden;
     this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
@@ -80,6 +84,7 @@ export class QueueMessages extends Element {
       ],
     });
     this.tableView.style.flexGrow = 1;
+    this.tableView.style.flexShrink = 1;
     this.box.appendChild(this.tableView);
   }
 
@@ -107,7 +112,12 @@ export class QueueMessages extends Element {
   }
 
   private refreshTitle(): void {
-    this.box.title = hex(NexqStyles.titleColor)` Messages(` + hex(NexqStyles.titleAltColor)`${this.queueName}` + hex(NexqStyles.titleColor)`)[` + hex(NexqStyles.titleCountColor)`${this.tableView.items.length}` + hex(NexqStyles.titleColor)`] `;
+    this.box.title =
+      hex(NexqStyles.titleColor)` Messages(` +
+      hex(NexqStyles.titleAltColor)`${this.queueName}` +
+      hex(NexqStyles.titleColor)`)[` +
+      hex(NexqStyles.titleCountColor)`${this.tableView.items.length}` +
+      hex(NexqStyles.titleColor)`] `;
   }
 
   protected override elementWillUnmount(): void {

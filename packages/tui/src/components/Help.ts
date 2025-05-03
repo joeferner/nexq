@@ -6,6 +6,7 @@ import { Text } from "../render/Text.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { isPathMatch } from "../render/RouterElement.js";
+import { Topics } from "./Topics.js";
 
 export interface HelpItem {
   id: string;
@@ -44,6 +45,8 @@ export class Help extends Element {
       helpItems = QueueMessages.HELP_ITEMS;
     } else if (isPathMatch(Queues.PATH, pathname)) {
       helpItems = Queues.HELP_ITEMS;
+    } else if (isPathMatch(Topics.PATH, pathname)) {
+      helpItems = Topics.HELP_ITEMS;
     } else {
       helpItems = [];
     }

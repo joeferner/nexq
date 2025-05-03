@@ -9,7 +9,7 @@ import { EditableLocation, Location } from "./Location.js";
 import { Renderer } from "./Renderer.js";
 import { createLogger } from "../utils/logger.js";
 
-const logger = createLogger('window');
+const logger = createLogger("window");
 
 export interface WindowOptions {
   url?: string;
@@ -89,6 +89,14 @@ export class Window extends Element {
     return this;
   }
 
+  public get innerHeight(): number {
+    return process.stdout.rows ?? 40;
+  }
+
+  public get innerWidth(): number {
+    return process.stdout.columns ?? 80;
+  }
+
   public show(): void {
     process.stdout.write(enterAlternativeScreen);
     if (process.stdin.setRawMode) {
@@ -113,7 +121,7 @@ export class Window extends Element {
           void this.refresh();
         }
       } catch (err) {
-        logger.error('failed to process stdin.data', err);
+        logger.error("failed to process stdin.data", err);
       }
     });
     process.stdin.on("keypress", (chunk: string | undefined, key: Key | undefined) => {
@@ -147,7 +155,7 @@ export class Window extends Element {
           void this.refresh();
         }
       } catch (err) {
-        logger.error('failed to process stdin.keypress', err);
+        logger.error("failed to process stdin.keypress", err);
       }
     });
     process.stdin.resume();

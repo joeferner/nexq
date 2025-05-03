@@ -22,6 +22,13 @@ async function run(): Promise<void> {
       });
     }
   }
+
+  for (let i = 0; i < 30; i++) {
+    const topicName = `topic${i}`;
+    await client.api.createTopic({
+      name: topicName,
+    });
+  }
 }
 
 run().catch(console.error);

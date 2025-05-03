@@ -6,6 +6,7 @@ import { Document } from "./Document.js";
 import { Element } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
+import { Geometry } from "./Geometry.js";
 
 export interface DialogOptions {
   borderColor?: string;
@@ -79,16 +80,26 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
     super.populateLayout(node);
   }
 
-  public override render(): RenderItem[] {
+  public override render(container: Geometry): RenderItem[] {
     if (!this.lastParentYogaNode) {
-      return super.render();
+      return super.render(container);
     }
-    const renderItems = super.render();
+    const renderItems = super.render(container);
+    const left = Math.floor((this.lastParentYogaNode.getComputedWidth() - this.box.computedWidth) / 2);
+    const top = Math.floor((this.lastParentYogaNode.getComputedHeight() - this.box.computedHeight) / 2);
     for (const renderItem of renderItems) {
-      renderItem.geometry.left += Math.floor((this.lastParentYogaNode.getComputedWidth() - this.box.computedWidth) / 2);
-      renderItem.geometry.top += Math.floor(
-        (this.lastParentYogaNode.getComputedHeight() - this.box.computedHeight) / 2
-      );
+      if ("container" in renderItem) {
+        renderItem.container = {
+          ...renderItem.container,
+          top: renderItem.container.top + top,
+          left: renderItem.container.left + left,
+        };
+      }
+      renderItem.geometry = {
+        ...renderItem.geometry,
+        top: renderItem.geometry.top + top,
+        left: renderItem.geometry.left + left,
+      };
     }
     return renderItems;
   }

@@ -7,6 +7,7 @@ import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
 import { Styles } from "./Styles.js";
 import { Window } from "./Window.js";
+import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 
 const logger = createLogger("Element");
 
@@ -42,7 +43,7 @@ export class Element {
     container.insertChild(this.yogaNode, container.getChildCount());
   }
 
-  public render(): RenderItem[] {
+  public render(container: Geometry): RenderItem[] {
     if (!this.yogaNode) {
       return [];
     }
@@ -51,18 +52,19 @@ export class Element {
       return [];
     }
 
-    this._computedWidth = this.yogaNode.getComputedWidth();
-    this._computedHeight = this.yogaNode.getComputedHeight();
+    const layout = this.yogaNode.getComputedLayout();
+    const geometry = geometryFromYogaNode(this.yogaNode);
+    geometry.top += container.top;
+    geometry.left += container.left;
 
-    const renderItems: RenderItem[] = this.preRender(this.yogaNode);
-    const x = this.yogaNode.getComputedLeft();
-    const y = this.yogaNode.getComputedTop();
+    this._computedWidth = layout.width;
+    this._computedHeight = layout.height;
+
+    const renderItems: RenderItem[] = this.preRender({ yogaNode: this.yogaNode, container, geometry });
     for (const child of this._children) {
-      const childRenderItems = child.render();
+      const childRenderItems = child.render(geometry);
       for (const childRenderItem of childRenderItems) {
         childRenderItem.zIndex += this.zIndex;
-        childRenderItem.geometry.left += x;
-        childRenderItem.geometry.top += y;
         renderItems.push(childRenderItem);
       }
     }
@@ -137,7 +139,7 @@ export class Element {
     }
   }
 
-  protected preRender(_yogaNode: YogaNode): RenderItem[] {
+  protected preRender(_options: PreRenderOptions): RenderItem[] {
     return [];
   }
 
@@ -253,4 +255,10 @@ export class Element {
   public get parentElement(): Element | null {
     return this.parent ?? null;
   }
+}
+
+export interface PreRenderOptions {
+  yogaNode: YogaNode;
+  geometry: Geometry;
+  container: Geometry;
 }
