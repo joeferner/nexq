@@ -15,7 +15,7 @@ export class Text extends Element {
 
   public constructor(document: Document, options?: TextOptions) {
     super(document);
-    this.text = options?.text ?? '';
+    this.text = options?.text ?? "";
     this.style.color = options?.color;
     this.style.inverse = options?.inverse ?? false;
   }

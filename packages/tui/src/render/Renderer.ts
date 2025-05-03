@@ -1,10 +1,10 @@
 import { cursorHide, cursorShow, cursorTo } from "ansi-escapes";
-import { Color as AnsiSequenceColor, createAnsiSequenceParser } from "ansi-sequence-parser";
+import { createAnsiSequenceParser } from "ansi-sequence-parser";
 import * as ansis from "ansis";
 import * as R from "radash";
 import Yoga, { Direction } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
-import { bgColor, fgColor } from "./color.js";
+import { ansiColorToColorString, bgColor, fgColor } from "./color.js";
 import { Element } from "./Element.js";
 import { geometryFromYogaNode } from "./Geometry.js";
 import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
@@ -212,18 +212,6 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
         x++;
       }
     }
-  }
-}
-
-function ansiColorToColorString(color: AnsiSequenceColor): string {
-  const hex = (n: number): string => {
-    return n.toString(16).padStart(2, "0");
-  };
-
-  if (color.type === "rgb") {
-    return `#${hex(color.rgb[0])}${hex(color.rgb[1])}${hex(color.rgb[2])}`;
-  } else {
-    throw new Error(`color type not supported "${color.type}"`);
   }
 }
 
