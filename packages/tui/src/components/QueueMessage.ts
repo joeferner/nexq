@@ -1,8 +1,9 @@
-import { hex } from "ansis";
 import matchPath from "node-match-path";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
+import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
+import { fgColor } from "../render/color.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
@@ -11,10 +12,9 @@ import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
+import { Detail, detailsToString } from "./details.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
-import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
-import { Detail, detailsToString } from "./details.js";
 
 const logger = createLogger("QueueMessage");
 
@@ -47,7 +47,7 @@ export class QueueMessage extends Element {
     this.box.style.flexGrow = 1;
     this.box.style.flexShrink = 1;
     this.box.style.flexDirection = FlexDirection.Column;
-    this.box.title = hex(NexqStyles.titleColor)` Messages `;
+    this.box.title = fgColor(NexqStyles.titleColor)` Messages `;
     this.box.style.alignItems = Align.Stretch;
     this.box.style.overflow = Overflow.Hidden;
     this.appendChild(this.box);
@@ -83,9 +83,9 @@ export class QueueMessage extends Element {
     this.text.text = detailsToString(details);
 
     this.box.title =
-      hex(NexqStyles.titleColor)` Message(` +
-      hex(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` +
-      hex(NexqStyles.titleColor)`) `;
+      fgColor(NexqStyles.titleColor)` Message(` +
+      fgColor(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` +
+      fgColor(NexqStyles.titleColor)`) `;
 
     const run = async (): Promise<void> => {
       await this.window.refresh();

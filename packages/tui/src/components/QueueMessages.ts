@@ -1,10 +1,10 @@
-import { hex } from "ansis";
 import matchPath from "node-match-path";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
+import { fgColor } from "../render/color.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
@@ -50,7 +50,7 @@ export class QueueMessages extends Element {
     this.box.style.flexGrow = 1;
     this.box.style.flexShrink = 1;
     this.box.style.flexDirection = FlexDirection.Column;
-    this.box.title = hex(NexqStyles.titleColor)` Messages `;
+    this.box.title = fgColor(NexqStyles.titleColor)` Messages `;
     this.box.style.alignItems = Align.Stretch;
     this.box.style.overflow = Overflow.Hidden;
     this.appendChild(this.box);
@@ -113,11 +113,11 @@ export class QueueMessages extends Element {
 
   private refreshTitle(): void {
     this.box.title =
-      hex(NexqStyles.titleColor)` Messages(` +
-      hex(NexqStyles.titleAltColor)`${this.queueName}` +
-      hex(NexqStyles.titleColor)`)[` +
-      hex(NexqStyles.titleCountColor)`${this.tableView.items.length}` +
-      hex(NexqStyles.titleColor)`] `;
+      fgColor(NexqStyles.titleColor)` Messages(` +
+      fgColor(NexqStyles.titleAltColor)`${this.queueName}` +
+      fgColor(NexqStyles.titleColor)`)[` +
+      fgColor(NexqStyles.titleCountColor)`${this.tableView.items.length}` +
+      fgColor(NexqStyles.titleColor)`] `;
   }
 
   protected override elementWillUnmount(): void {

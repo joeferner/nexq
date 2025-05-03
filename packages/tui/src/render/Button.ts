@@ -37,14 +37,14 @@ export class Button extends Element {
   }
 
   protected override onFocus(): void {
-    this.textElement.color = this.selectedColor;
-    this.textElement.inverse = true;
+    this.textElement.style.color = this.selectedColor;
+    this.textElement.style.inverse = true;
     super.onFocus();
   }
 
   protected override onBlur(): void {
-    this.textElement.color = this.color;
-    this.textElement.inverse = false;
+    this.textElement.style.color = this.color;
+    this.textElement.style.inverse = false;
     super.onBlur();
   }
 

@@ -1,9 +1,9 @@
-import { hex } from "ansis";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { GetTopicResponse } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
+import { fgColor } from "../render/color.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
@@ -48,7 +48,7 @@ export class Topics extends Element {
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.style.alignItems = Align.Stretch;
     this.box.style.overflow = Overflow.Hidden;
-    this.box.title = hex(NexqStyles.titleColor)` Topics `;
+    this.box.title = fgColor(NexqStyles.titleColor)` Topics `;
     this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
@@ -113,9 +113,9 @@ export class Topics extends Element {
       const resp = await app.api.api.getTopics();
       const topics = resp.data.topics;
       this.box.title =
-        hex(NexqStyles.titleColor)` Topics[` +
-        hex(NexqStyles.titleCountColor)`${topics.length}` +
-        hex(NexqStyles.titleColor)`] `;
+        fgColor(NexqStyles.titleColor)` Topics[` +
+        fgColor(NexqStyles.titleCountColor)`${topics.length}` +
+        fgColor(NexqStyles.titleColor)`] `;
       this.tableView.items = topics;
       await this.window.refresh();
     } catch (err) {

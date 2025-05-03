@@ -7,6 +7,7 @@ import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { RouterElement } from "../render/RouterElement.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
+import { Command } from "./Command.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Header } from "./Header.js";
 import { MoveMessagesDialog } from "./MoveMessagesDialog.js";
@@ -14,7 +15,6 @@ import { QueueMessage } from "./QueueMessage.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { StatusBar } from "./StatusBar.js";
-import { Command } from "./Command.js";
 import { Topics } from "./Topics.js";
 
 const logger = createLogger("App");

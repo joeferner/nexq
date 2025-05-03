@@ -44,7 +44,11 @@ export class Header extends Element {
 
     this.appendChild(left);
     this.appendChild(new Help(document));
-    this.appendChild(new Text(document, { text: LOGO, color: NexqStyles.logoColor }));
+
+    const logo = new Text(document);
+    logo.text = LOGO;
+    logo.style.color = NexqStyles.logoColor;
+    this.appendChild(logo);
   }
 
   protected override elementDidMount(): void {

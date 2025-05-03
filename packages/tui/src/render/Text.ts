@@ -5,21 +5,19 @@ import { Element, PreRenderOptions } from "./Element.js";
 import { RenderItem } from "./RenderItem.js";
 
 export interface TextOptions {
-  text: string;
+  text?: string;
   color?: string;
   inverse?: boolean;
 }
 
 export class Text extends Element {
   public text: string;
-  public color: string | undefined;
-  public inverse: boolean;
 
-  public constructor(document: Document, options: TextOptions) {
+  public constructor(document: Document, options?: TextOptions) {
     super(document);
-    this.text = options.text;
-    this.color = options.color;
-    this.inverse = options.inverse ?? false;
+    this.text = options?.text ?? '';
+    this.style.color = options?.color;
+    this.style.inverse = options?.inverse ?? false;
   }
 
   public override populateLayout(container: YogaNode): void {
@@ -38,8 +36,8 @@ export class Text extends Element {
       {
         type: "text",
         text: this.text,
-        color: this.color ?? "#ffffff",
-        inverse: this.inverse,
+        color: this.style.color ?? "#ffffff",
+        inverse: this.style.inverse,
         zIndex: this.zIndex,
         container,
         geometry,

@@ -1,9 +1,9 @@
-import { hex } from "ansis";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
 import { Box } from "../render/Box.js";
+import { fgColor } from "../render/color.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
@@ -63,7 +63,7 @@ export class Queues extends Element {
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.style.alignItems = Align.Stretch;
     this.box.style.overflow = Overflow.Hidden;
-    this.box.title = hex(NexqStyles.titleColor)` Queues `;
+    this.box.title = fgColor(NexqStyles.titleColor)` Queues `;
     this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
@@ -176,9 +176,9 @@ export class Queues extends Element {
       const resp = await app.api.api.getQueues();
       const queues = resp.data.queues;
       this.box.title =
-        hex(NexqStyles.titleColor)` Queues[` +
-        hex(NexqStyles.titleCountColor)`${queues.length}` +
-        hex(NexqStyles.titleColor)`] `;
+        fgColor(NexqStyles.titleColor)` Queues[` +
+        fgColor(NexqStyles.titleCountColor)`${queues.length}` +
+        fgColor(NexqStyles.titleColor)`] `;
       this.tableView.items = queues;
       await this.window.refresh();
     } catch (err) {

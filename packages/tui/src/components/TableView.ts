@@ -88,7 +88,7 @@ export class TableView<T> extends Element {
         continue;
       }
       const index = this.offset + i;
-      child.inverse = this.selectedIndex === index;
+      child.style.inverse = this.selectedIndex === index;
       const item = this.items[index];
       child.text = item ? this.createRowText(item, width) : "";
     }
@@ -105,7 +105,7 @@ export class TableView<T> extends Element {
     }
     children[0].text = header;
     children[0].text.substring(0, width);
-    children[0].color = this.headerTextColor;
+    children[0].style.color = this.headerTextColor;
 
     super.populateLayout(container);
   }

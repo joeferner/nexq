@@ -23,6 +23,8 @@ export class Styles {
   public paddingTop?: number | `${number}%` | undefined;
   public paddingBottom?: number | `${number}%` | undefined;
   public overflow?: Overflow;
+  public color?: string;
+  public inverse?: boolean;
 
   public set margin(margin: number | "auto" | `${number}%` | undefined) {
     this.marginLeft = margin;

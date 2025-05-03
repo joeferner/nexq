@@ -1,5 +1,5 @@
-import { hex } from "ansis";
 import { NexqStyles } from "../NexqStyles.js";
+import { fgColor } from "../render/color.js";
 
 export interface Detail {
   title: string;
@@ -11,7 +11,7 @@ export function detailsToString(details: Detail[]): string {
   const maxTitleWidth = Math.max(...details.map((v) => v.title.length));
   const outputTitle = (title: string): string => {
     const spacing = Math.max(0, maxTitleWidth - title.length);
-    return `${hex(NexqStyles.detailsTitleColor)`${title}`}${hex(NexqStyles.detailsTitleColonColor)`:`}${" ".repeat(spacing)}`;
+    return `${fgColor(NexqStyles.detailsTitleColor)`${title}`}${fgColor(NexqStyles.detailsTitleColonColor)`:`}${" ".repeat(spacing)}`;
   };
   let text = "";
   for (const detail of details) {
@@ -33,7 +33,7 @@ export function detailsToString(details: Detail[]): string {
           }
         })
         .join("\n");
-      text += `${outputTitle(detail.title)} ${hex(NexqStyles.detailsValueColor)`${detailValueText}`}`;
+      text += `${outputTitle(detail.title)} ${fgColor(NexqStyles.detailsValueColor)`${detailValueText}`}`;
     }
   }
   return text;

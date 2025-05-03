@@ -1,12 +1,13 @@
 import { cursorHide, cursorShow, cursorTo } from "ansi-escapes";
+import { Color as AnsiSequenceColor, createAnsiSequenceParser } from "ansi-sequence-parser";
 import * as ansis from "ansis";
 import * as R from "radash";
 import Yoga, { Direction } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
+import { bgColor, fgColor } from "./color.js";
 import { Element } from "./Element.js";
-import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
-import { Color as AnsiSequenceColor, createAnsiSequenceParser } from "ansi-sequence-parser";
 import { geometryFromYogaNode } from "./Geometry.js";
+import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
 
 const logger = createLogger("Renderer");
 
@@ -115,9 +116,9 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
     if (existing) {
       return existing;
     }
-    let ansi = ansis.hex(ch.color);
+    let ansi = fgColor(ch.color);
     if (ch.bgColor) {
-      ansi = ansi.bgHex(ch.bgColor);
+      ansi = bgColor(ch.bgColor);
     }
     if (ch.inverse) {
       ansi = ansi.inverse;
