@@ -70,6 +70,9 @@ export class TableView<T> extends Element {
     const height = Math.max(1, this.computedHeight);
     const width = this.computedWidth;
 
+    while (this.childElementCount > this.items.length && this.lastElementChild) {
+      this.removeChild(this.lastElementChild);
+    }
     while (this.childElementCount < height) {
       this.appendChild(new Text(this.document, { text: "item", color: this.itemTextColor }));
     }

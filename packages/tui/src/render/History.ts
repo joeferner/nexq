@@ -38,7 +38,7 @@ export class History {
   }
 
   public get state(): object {
-    return this.stack[this.stack.length - 1].state;
+    return this.stack[this.stack.length - 1]?.state ?? {};
   }
 
   public popState(): void {

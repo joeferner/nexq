@@ -13,7 +13,7 @@ export interface RouterElementOptions {
 
 export class RouterElement extends Element {
   private readonly boundUpdateChild = this.updateChild.bind(this);
-  private lastMatchingRoute?: Route;
+  private _matchingRoute?: Route;
 
   public constructor(
     document: Document,
@@ -34,13 +34,13 @@ export class RouterElement extends Element {
   }
 
   private updateChild(): void {
-    const matchingRoute = this.findMatchingRoute();
-    if (matchingRoute && matchingRoute !== this.lastMatchingRoute) {
-      this.lastMatchingRoute = matchingRoute;
+    const newMatchingRoute = this.findMatchingRoute();
+    if (newMatchingRoute && newMatchingRoute !== this._matchingRoute) {
+      this._matchingRoute = newMatchingRoute;
       while (this.lastElementChild) {
         this.removeChild(this.lastElementChild);
       }
-      this.appendChild(matchingRoute.element);
+      this.appendChild(newMatchingRoute.element);
       void this.window.refresh();
     }
   }
@@ -53,6 +53,9 @@ export class RouterElement extends Element {
       }
     }
     return undefined;
+  }
+  public get matchingRoute(): Route | undefined {
+    return this._matchingRoute;
   }
 }
 

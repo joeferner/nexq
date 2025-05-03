@@ -2,7 +2,7 @@ import https from "node:https";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { Api, GetInfoResponse } from "../client/NexqClientApi.js";
 import { Document } from "../render/Document.js";
-import { Element } from "../render/Element.js";
+import { Element, ElementEvents } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { RouterElement } from "../render/RouterElement.js";
 import { isInputMatch } from "../utils/input.js";
@@ -18,6 +18,14 @@ import { StatusBar } from "./StatusBar.js";
 import { Topics } from "./Topics.js";
 
 const logger = createLogger("App");
+
+export interface FilterEvent {
+  value: RegExp | undefined;
+}
+
+export interface AppEvents extends ElementEvents {
+  filter: (event: FilterEvent) => unknown;
+}
 
 export interface AppOptions {
   tuiVersion: string;
@@ -43,6 +51,8 @@ export class App extends Element {
   public readonly confirmDialog: ConfirmDialog;
   public readonly moveMessagesDialog: MoveMessagesDialog;
   private readonly routerElement: RouterElement;
+  private commandMode = CommandMode.SwitchScreen;
+  private currentFilter?: string;
 
   public constructor(document: Document, options: AppOptions) {
     super(document);
@@ -122,16 +132,35 @@ export class App extends Element {
 
   protected override onKeyDown(event: KeyboardEvent): void {
     if (isInputMatch(event, "escape")) {
-      this.window.history.back();
+      if (this.currentFilter) {
+        this.currentFilter = undefined;
+        this.eventEmitter.emit("filter", { value: undefined } satisfies FilterEvent);
+      } else {
+        this.window.history.back();
+      }
       return;
     }
 
     if (isInputMatch(event, ":")) {
+      this.commandMode = CommandMode.SwitchScreen;
+      this.command.show();
+      return;
+    }
+
+    if (this.canFilterScreen && isInputMatch(event, "/")) {
+      this.commandMode = CommandMode.Filter;
       this.command.show();
       return;
     }
 
     return super.onKeyDown(event);
+  }
+
+  public get canFilterScreen(): boolean {
+    if (this.routerElement.matchingRoute?.element === this.queues) {
+      return true;
+    }
+    return false;
   }
 
   public static getApp(el: Element): App {
@@ -143,6 +172,32 @@ export class App extends Element {
   }
 
   private handleCommand(value: string): boolean {
+    const commandMode = this.commandMode;
+    if (commandMode === CommandMode.SwitchScreen) {
+      return this.handleSwitchScreenCommand(value);
+    } else if (commandMode === CommandMode.Filter) {
+      return this.handleFilterCommand(value);
+    } else {
+      StatusBar.setStatus(this.document, `Invalid command mode: ${commandMode}`);
+      return false;
+    }
+  }
+
+  private handleFilterCommand(value: string): boolean {
+    this.currentFilter = value;
+    let regex: RegExp | undefined;
+    try {
+      regex = value.trim().length === 0 ? undefined : new RegExp(value);
+    } catch (err) {
+      logger.error(`Invalid filter regex: "${value}"`, err);
+      StatusBar.setStatus(this.document, "Invalid filter regex");
+      return false;
+    }
+    this.eventEmitter.emit("filter", { value: regex } satisfies FilterEvent);
+    return true;
+  }
+
+  private handleSwitchScreenCommand(value: string): boolean {
     if (value === "queues") {
       if (this.window.location.pathname === Queues.PATH) {
         StatusBar.setStatus(this.document, "Already on Queues");
@@ -162,4 +217,17 @@ export class App extends Element {
     StatusBar.setStatus(this.document, "Invalid command");
     return false;
   }
+
+  public addEventListener<T extends keyof AppEvents>(event: T, listener: AppEvents[T]): void {
+    this.eventEmitter.addListener(event, listener);
+  }
+
+  public removeEventListener<T extends keyof AppEvents>(event: T, listener: AppEvents[T]): void {
+    this.eventEmitter.removeListener(event, listener);
+  }
+}
+
+enum CommandMode {
+  SwitchScreen = "SwitchScreen",
+  Filter = "Filter",
 }

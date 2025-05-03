@@ -199,15 +199,15 @@ export class Element {
     this._children.push(child);
     if (this.isMounted) {
       if (!this.elementDidMountCalled) {
-        child.elementDidMount();
         this.elementDidMountCalled = true;
         this.elementWillUnmountCalled = false;
+        child.elementDidMount();
       }
       child.walkChildrenDeep((c) => {
         if (!c.elementDidMountCalled) {
-          c.elementDidMount();
           c.elementDidMountCalled = true;
           c.elementWillUnmountCalled = false;
+          c.elementDidMount();
         }
       });
     }
@@ -215,15 +215,15 @@ export class Element {
 
   public removeChild(child: Element): void {
     if (!this.elementWillUnmountCalled) {
-      child.elementWillUnmount();
       this.elementDidMountCalled = false;
       this.elementWillUnmountCalled = true;
+      child.elementWillUnmount();
     }
     child.walkChildrenDeep((c) => {
       if (!c.elementWillUnmountCalled) {
-        c.elementWillUnmount();
         c.elementDidMountCalled = false;
         c.elementWillUnmountCalled = true;
+        c.elementWillUnmount();
       }
     });
     const i = this._children.indexOf(child);

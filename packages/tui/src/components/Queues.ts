@@ -10,7 +10,7 @@ import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { BorderType } from "../render/RenderItem.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
-import { App } from "./App.js";
+import { App, FilterEvent } from "./App.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
 import { SortDirection, TableView } from "./TableView.js";
@@ -23,6 +23,9 @@ export class Queues extends Element {
   private readonly tableView: TableView<GetQueueResponse>;
   private refreshTimeout?: NodeJS.Timeout;
   private inRefreshQueues = false;
+  private readonly handleFilter: (event: FilterEvent) => unknown;
+  private queues: GetQueueResponse[] = [];
+  private filter?: RegExp;
   public static readonly HELP_ITEMS: HelpItem[] = [
     {
       id: "purge",
@@ -48,6 +51,9 @@ export class Queues extends Element {
 
   public constructor(document: Document) {
     super(document);
+
+    this.handleFilter = this._handleFilter.bind(this);
+
     this.style.width = "100%";
     this.style.flexGrow = 1;
     this.style.flexShrink = 1;
@@ -124,6 +130,7 @@ export class Queues extends Element {
   }
 
   protected override elementDidMount(): void {
+    App.getApp(this).addEventListener("filter", this.handleFilter);
     const run = async (): Promise<void> => {
       await this.window.refresh();
       await this.refreshQueues();
@@ -135,10 +142,24 @@ export class Queues extends Element {
   }
 
   protected override elementWillUnmount(): void {
+    App.getApp(this).removeEventListener("filter", this.handleFilter);
     if (this.refreshTimeout) {
       clearTimeout(this.refreshTimeout);
       this.refreshTimeout = undefined;
     }
+  }
+
+  protected _handleFilter(event: FilterEvent): void {
+    this.filter = event.value;
+    this.tableView.items = this.filterQueues(this.queues, this.filter);
+    void this.window.refresh();
+  }
+
+  private filterQueues(queues: GetQueueResponse[], filter: RegExp | undefined): GetQueueResponse[] {
+    if (!filter) {
+      return queues;
+    }
+    return queues.filter((q) => q.name.match(filter));
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {
@@ -174,12 +195,12 @@ export class Queues extends Element {
       }
       logger.info("refreshQueues");
       const resp = await app.api.api.getQueues();
-      const queues = resp.data.queues;
+      this.queues = resp.data.queues;
       this.box.title =
         fgColor(NexqStyles.titleColor)` Queues[` +
-        fgColor(NexqStyles.titleCountColor)`${queues.length}` +
+        fgColor(NexqStyles.titleCountColor)`${this.queues.length}` +
         fgColor(NexqStyles.titleColor)`] `;
-      this.tableView.items = queues;
+      this.tableView.items = this.filterQueues(this.queues, this.filter);
       await this.window.refresh();
     } catch (err) {
       StatusBar.setStatus(this.document, `Failed to get queues`, err);
