@@ -5,7 +5,7 @@ import { createLogger } from "../utils/logger.js";
 import { Document } from "./Document.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
-import { Styles } from "./Styles.js";
+import { Style } from "./Style.js";
 import { Window } from "./Window.js";
 import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 
@@ -19,7 +19,7 @@ export class Element {
   private _document: Document;
   private parent?: Element;
   public id: string | undefined;
-  public readonly style = new Styles();
+  public readonly _style;
   private _children: Element[] = [];
   public zIndex = 0;
   public tabIndex: number | undefined;
@@ -32,6 +32,15 @@ export class Element {
 
   public constructor(document: Document) {
     this._document = document;
+    this._style = this.createStyle();
+  }
+
+  public get style(): Style {
+    return this._style;
+  }
+
+  protected createStyle(): Style {
+    return new Style();
   }
 
   public populateLayout(container: YogaNode): void {

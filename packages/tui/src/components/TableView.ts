@@ -4,11 +4,10 @@ import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
+import { ansiLength, fgColor } from "../render/color.js";
 
 export interface TableViewOptions<T> {
   columns: TableViewColumn<T>[];
-  itemTextColor?: string;
-  headerTextColor?: string;
 }
 
 export enum SortDirection {
@@ -39,6 +38,7 @@ export class TableView<T> extends Element {
   private readonly columnWidths: number[] = [];
   public itemTextColor: string;
   public headerTextColor: string;
+  public sortTextColor: string;
   public sortedColumnIndex = 0;
   public sortedColumnDirection = SortDirection.Ascending;
 
@@ -47,8 +47,9 @@ export class TableView<T> extends Element {
     this._columns = options.columns;
     this.style.flexDirection = FlexDirection.Column;
     this.appendChild(new Text(document, { text: "Loading" }));
-    this.itemTextColor = options.itemTextColor ?? "#ffffff";
-    this.headerTextColor = options.headerTextColor ?? "#ffffff";
+    this.itemTextColor = "#ffffff";
+    this.headerTextColor = "#ffffff";
+    this.sortTextColor = "#ffffff";
     this.updateColumnWidths();
   }
 
@@ -101,10 +102,12 @@ export class TableView<T> extends Element {
       const column = this.columns[i];
       let columnTitle = column.title;
       if (this.sortedColumnIndex === i) {
-        columnTitle += this.sortedColumnDirection === SortDirection.Ascending ? "↑" : "↓";
+        columnTitle += fgColor(
+          this.sortTextColor
+        )`${this.sortedColumnDirection === SortDirection.Ascending ? "↑" : "↓"}`;
       }
       header += columnTitle;
-      header += " ".repeat(Math.max(0, this.columnWidths[i] - columnTitle.length));
+      header += " ".repeat(Math.max(0, this.columnWidths[i] - ansiLength(columnTitle)));
     }
     children[0].text = header;
     children[0].text.substring(0, width);

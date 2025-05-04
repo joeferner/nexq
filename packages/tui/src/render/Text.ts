@@ -3,11 +3,17 @@ import { Node as YogaNode } from "yoga-layout";
 import { Document } from "./Document.js";
 import { Element, PreRenderOptions } from "./Element.js";
 import { RenderItem } from "./RenderItem.js";
+import { Style } from "./Style.js";
 
 export interface TextOptions {
   text?: string;
   color?: string;
   inverse?: boolean;
+}
+
+export class TextStyle extends Style {
+  public inverse?: boolean;
+  public color?: string;
 }
 
 export class Text extends Element {
@@ -18,6 +24,14 @@ export class Text extends Element {
     this.text = options?.text ?? "";
     this.style.color = options?.color;
     this.style.inverse = options?.inverse ?? false;
+  }
+
+  protected override createStyle(): Style {
+    return new TextStyle();
+  }
+
+  public override get style(): TextStyle {
+    return super.style;
   }
 
   public override populateLayout(container: YogaNode): void {

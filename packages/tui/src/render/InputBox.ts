@@ -3,12 +3,13 @@ import { Document } from "./Document.js";
 import { Element, PreRenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
+import { Style } from "./Style.js";
 
-export interface InputBoxOptions {
-  color?: string;
-  bgColor?: string;
-  focusColor?: string;
-  focusBgColor?: string;
+export class InputBoxStyle extends Style {
+  public color?: string;
+  public backgroundColor?: string;
+  public focusColor?: string;
+  public focusBackgroundColor?: string;
 }
 
 export class InputBox extends Element {
@@ -16,12 +17,17 @@ export class InputBox extends Element {
   private offset = 0;
   private _cursorPosition = 0;
 
-  public constructor(
-    document: Document,
-    private readonly options: InputBoxOptions
-  ) {
+  public constructor(document: Document) {
     super(document);
     this.style.height = 1;
+  }
+
+  protected override createStyle(): Style {
+    return new InputBoxStyle();
+  }
+
+  public override get style(): InputBoxStyle {
+    return super.style;
   }
 
   public override onKeyDown(event: KeyboardEvent): void {
@@ -101,8 +107,8 @@ export class InputBox extends Element {
     results.push({
       type: "text",
       text: text + " ".repeat(geometry.width - text.length),
-      color: this.focused ? (this.options.focusColor ?? "#ffffff") : (this.options.color ?? "#ffffff"),
-      bgColor: this.focused ? this.options.focusBgColor : this.options.bgColor,
+      color: this.focused ? (this.style.focusColor ?? "#ffffff") : (this.style.color ?? "#ffffff"),
+      bgColor: this.focused ? this.style.focusBackgroundColor : this.style.backgroundColor,
       container,
       geometry,
       zIndex: this.zIndex,

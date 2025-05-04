@@ -1,9 +1,9 @@
 import { FlexDirection, Justify } from "yoga-layout";
 import { NexqStyles } from "../NexqStyles.js";
-import { Element } from "../render/Element.js";
-import { Document } from "../render/Document.js";
 import { Button } from "../render/Button.js";
 import { Dialog } from "../render/Dialog.js";
+import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
 import { InputBox } from "../render/InputBox.js";
 import { Text } from "../render/Text.js";
 
@@ -22,22 +22,26 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
   private readonly moveButton: Button;
 
   public constructor(document: Document) {
-    super(document, { ...NexqStyles.dialogStyles });
+    super(document);
+    NexqStyles.applyToDialog(this);
 
-    this.inputBox = new InputBox(document, {
-      ...NexqStyles.inputStyles,
-    });
+    this.inputBox = new InputBox(document);
+    NexqStyles.applyToInputBox(this.inputBox);
     this.inputBox.style.width = 40;
     this.inputBox.tabIndex = 1;
     this.inputBox.style.marginBottom = 1;
 
-    this.cancelButton = new Button(document, { text: "  Cancel  ", ...NexqStyles.buttonStyles });
+    this.cancelButton = new Button(document);
+    this.cancelButton.text = "  Cancel  ";
+    NexqStyles.applyToButton(this.cancelButton);
     this.cancelButton.tabIndex = 2;
     this.cancelButton.addEventListener("click", () => {
       this.close(undefined);
     });
 
-    this.moveButton = new Button(document, { text: "  Move  ", ...NexqStyles.buttonStyles });
+    this.moveButton = new Button(document);
+    this.moveButton.text = "  Move  ";
+    NexqStyles.applyToButton(this.moveButton);
     this.moveButton.tabIndex = 3;
     this.moveButton.addEventListener("click", () => {
       this.close({

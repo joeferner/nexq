@@ -1,4 +1,5 @@
 import { Justify } from "yoga-layout";
+import { NexqStyles } from "../NexqStyles.js";
 import { Button } from "../render/Button.js";
 import { Dialog } from "../render/Dialog.js";
 import { Document } from "../render/Document.js";
@@ -7,7 +8,6 @@ import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { StatusBar } from "./StatusBar.js";
-import { NexqStyles } from "../NexqStyles.js";
 
 export interface ConfirmOptions {
   title: string;
@@ -18,7 +18,8 @@ export interface ConfirmOptions {
 
 export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
   public constructor(document: Document) {
-    super(document, { ...NexqStyles.dialogStyles });
+    super(document);
+    NexqStyles.applyToDialog(this);
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {
@@ -48,7 +49,9 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
     for (let i = 0; i < options.options.length; i++) {
-      const button = new Button(this.document, { text: `  ${options.options[i]}  `, ...NexqStyles.buttonStyles });
+      const button = new Button(this.document);
+      button.text = `  ${options.options[i]}  `;
+      NexqStyles.applyToButton(button);
       button.id = options.options[i];
       button.tabIndex = i + 1;
       button.addEventListener("click", () => {

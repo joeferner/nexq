@@ -1,6 +1,6 @@
 import { Align, Display, Edge, FlexDirection, Justify, Overflow, PositionType, Node as YogaNode } from "yoga-layout";
 
-export class Styles {
+export class Style {
   public height: number | "auto" | `${number}%` | undefined;
   public minHeight: number | `${number}%` | undefined;
   public maxHeight: number | `${number}%` | undefined;
@@ -23,8 +23,6 @@ export class Styles {
   public paddingTop?: number | `${number}%` | undefined;
   public paddingBottom?: number | `${number}%` | undefined;
   public overflow?: Overflow;
-  public color?: string;
-  public inverse?: boolean;
 
   public set margin(margin: number | "auto" | `${number}%` | undefined) {
     this.marginLeft = margin;

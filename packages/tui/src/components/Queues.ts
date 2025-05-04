@@ -73,7 +73,6 @@ export class Queues extends Element {
     this.appendChild(this.box);
 
     this.tableView = new TableView(document, {
-      ...NexqStyles.tableViewStyles,
       columns: [
         {
           title: "NAME",
@@ -126,6 +125,7 @@ export class Queues extends Element {
     });
     this.tableView.style.flexGrow = 1;
     this.tableView.style.flexShrink = 1;
+    NexqStyles.applyToTableView(this.tableView);
     this.box.appendChild(this.tableView);
   }
 

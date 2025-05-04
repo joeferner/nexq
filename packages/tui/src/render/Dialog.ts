@@ -3,15 +3,10 @@ import { isInputMatch } from "../utils/input.js";
 import { Box } from "./Box.js";
 import { Document } from "./Document.js";
 import { Element } from "./Element.js";
+import { Geometry } from "./Geometry.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
-import { Geometry } from "./Geometry.js";
 import { fgColor } from "./color.js";
-
-export interface DialogOptions {
-  borderColor?: string;
-  titleColor?: string;
-}
 
 export interface UpdateOptions {
   title: string;
@@ -26,17 +21,17 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
   private lastFocus?: Element;
   public titleColor: string;
 
-  protected constructor(document: Document, options?: DialogOptions) {
+  protected constructor(document: Document) {
     super(document);
 
     this.zIndex = 100;
     this.style.positionType = PositionType.Absolute;
     this.style.display = Display.None;
 
-    this.titleColor = options?.titleColor ?? "#ffffff";
+    this.titleColor = "#ffffff";
 
     this.box = new Box(document);
-    this.box.borderColor = options?.borderColor ?? "#ffffff";
+    this.box.borderColor = "#ffffff";
     this.box.style.flexDirection = FlexDirection.Column;
     this.box.style.justifyContent = Justify.Center;
     this.box.style.paddingLeft = 2;
@@ -48,6 +43,10 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
 
   public set title(title: string) {
     this.box.title = fgColor(this.titleColor)`<${title}>`;
+  }
+
+  public set borderColor(borderColor: string) {
+    this.box.borderColor = borderColor;
   }
 
   public async show(options: TShowOptions): Promise<TResults | undefined> {

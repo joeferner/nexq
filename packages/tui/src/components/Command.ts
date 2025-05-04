@@ -4,8 +4,8 @@ import { Box } from "../render/Box.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { InputBox } from "../render/InputBox.js";
-import { BorderType } from "../render/RenderItem.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
+import { BorderType } from "../render/RenderItem.js";
 import { isInputMatch } from "../utils/input.js";
 
 export class Command extends Element {
@@ -21,7 +21,8 @@ export class Command extends Element {
     this.style.flexDirection = FlexDirection.Row;
     this.style.display = Display.None;
 
-    this.input = new InputBox(document, { ...NexqStyles.inputStyles });
+    this.input = new InputBox(document);
+    NexqStyles.applyToInputBox(this.input);
     this.input.style.width = "100%";
 
     const box = new Box(document);

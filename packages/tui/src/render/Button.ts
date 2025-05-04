@@ -1,30 +1,45 @@
+import { Node } from "yoga-layout";
 import { isInputMatch } from "../utils/input.js";
 import { Document } from "./Document.js";
 import { Element, ElementEvents } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { Text } from "./Text.js";
-
-export interface ButtonOptions {
-  text: string;
-  color?: string;
-  selectedColor?: string;
-}
+import { Style } from "./Style.js";
 
 export interface ButtonEvents extends ElementEvents {
   click: () => unknown;
 }
 
+export class ButtonStyle extends Style {
+  public color?: string;
+}
+
 export class Button extends Element {
   private readonly textElement: Text;
-  public color: string;
   public selectedColor: string;
 
-  public constructor(document: Document, options: ButtonOptions) {
+  public constructor(document: Document) {
     super(document);
-    this.color = options.color ?? "#ffffff";
-    this.selectedColor = options.selectedColor ?? "#ffffff";
-    this.textElement = new Text(document, { text: options.text, color: this.color });
+    this.style.color = "#ffffff";
+    this.selectedColor = "#ffffff";
+    this.textElement = new Text(document, { text: "" });
     this.appendChild(this.textElement);
+  }
+
+  protected override createStyle(): Style {
+    return new ButtonStyle();
+  }
+
+  public override get style(): ButtonStyle {
+    return super.style;
+  }
+
+  public get text(): string {
+    return this.textElement.text;
+  }
+
+  public set text(text: string) {
+    this.textElement.text = text;
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {
@@ -36,16 +51,15 @@ export class Button extends Element {
     super.onKeyDown(event);
   }
 
-  protected override onFocus(): void {
-    this.textElement.style.color = this.selectedColor;
-    this.textElement.style.inverse = true;
-    super.onFocus();
-  }
-
-  protected override onBlur(): void {
-    this.textElement.style.color = this.color;
-    this.textElement.style.inverse = false;
-    super.onBlur();
+  public override populateLayout(container: Node): void {
+    super.populateLayout(container);
+    if (this.window.activeElement === this) {
+      this.textElement.style.color = this.selectedColor;
+      this.textElement.style.inverse = true;
+    } else {
+      this.textElement.style.color = this.style.color;
+      this.textElement.style.inverse = false;
+    }
   }
 
   public addEventListener<T extends keyof ButtonEvents>(event: T, listener: ButtonEvents[T]): void {

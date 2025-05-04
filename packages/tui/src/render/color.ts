@@ -1,4 +1,4 @@
-import { Color as AnsiSequenceColor } from "ansi-sequence-parser";
+import { Color as AnsiSequenceColor, parseAnsiSequences } from "ansi-sequence-parser";
 import * as ansis from "ansis";
 import { getNamedColors, NamedColor } from "named-css-colors";
 import { createLogger } from "../utils/logger.js";
@@ -86,4 +86,8 @@ export function ansiColorToColorString(color: AnsiSequenceColor): string {
     logger.warn(`color not supported "${JSON.stringify(color.type)}"`);
     return "#ffffff";
   }
+}
+
+export function ansiLength(str: string): number {
+  return parseAnsiSequences(str).reduce((p, v) => p + v.value.length, 0);
 }
