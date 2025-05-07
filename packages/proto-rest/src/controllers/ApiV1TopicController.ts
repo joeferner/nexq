@@ -4,6 +4,7 @@ import {
   parseOptionalDurationIntoMs,
   QueueNotFoundError,
   Store,
+  SubscriptionNotFoundError,
   TopicAlreadyExistsError,
   TopicNotFoundError,
   TopicProtocol,
@@ -170,6 +171,36 @@ export class ApiV1TopicController extends Controller {
         throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to subscribe`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * delete a subscription
+   *
+   * @param topicName the name of the topic to delete subscription from
+   * @param subscriptionId the id of the subscription to delete
+   * @example topicName "topic1"
+   * @example subscriptionId "1ba29961-a6a3-47e7-a032-b2e43506aa4a"
+   */
+  @Post("{topicName}/subscription/{subscriptionId}")
+  @SuccessResponse("200", "Subscription deleted")
+  @Response<void>(404, "topic or subscription not found")
+  public async deleteSubscription(@Path() topicName: string, @Path() subscriptionId: string): Promise<void> {
+    try {
+      await this.store.getTopicInfo(topicName);
+      await this.store.deleteSubscription(subscriptionId);
+    } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
+      if (err instanceof TopicNotFoundError) {
+        throw createHttpError.NotFound("topic not found");
+      }
+      if (err instanceof SubscriptionNotFoundError) {
+        throw createHttpError.NotFound("subscription not found");
+      }
+      logger.error(`failed to delete subscription`, err);
       throw err;
     }
   }

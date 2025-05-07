@@ -109,6 +109,7 @@ describe("ApiV1TopicController", async () => {
     });
 
     test("topic not found", async () => {
+      await store.createQueue(QUEUE_NAME);
       await expectHttpError(
         async () => await controller.subscribeQueue("bad-topic-name", { queueName: QUEUE_NAME }),
         404
@@ -116,8 +117,37 @@ describe("ApiV1TopicController", async () => {
     });
 
     test("queue not found", async () => {
+      await store.createTopic(TOPIC_NAME);
       await expectHttpError(
         async () => await controller.subscribeQueue(TOPIC_NAME, { queueName: "bad-queue-name" }),
+        404
+      );
+    });
+  });
+
+  describe("deleteSubscription", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await store.createTopic(TOPIC_NAME);
+      const subscriptionId = await store.subscribe(TOPIC_NAME, TopicProtocol.Queue, QUEUE_NAME);
+
+      await controller.deleteSubscription(TOPIC_NAME, subscriptionId);
+
+      const topic = await store.getTopicInfo(TOPIC_NAME);
+      expect(topic.subscriptions.length).toBe(0);
+    });
+
+    test("topic not found", async () => {
+      await store.createQueue(QUEUE_NAME);
+      await store.createTopic(TOPIC_NAME);
+      const subscriptionId = await store.subscribe(TOPIC_NAME, TopicProtocol.Queue, QUEUE_NAME);
+      await expectHttpError(async () => await controller.deleteSubscription("bad-topic-name", subscriptionId), 404);
+    });
+
+    test("subscriptionId not found", async () => {
+      await store.createTopic(TOPIC_NAME);
+      await expectHttpError(
+        async () => await controller.deleteSubscription(TOPIC_NAME, "1ba29961-a6a3-47e7-a032-b2e43506aa4a"),
         404
       );
     });
