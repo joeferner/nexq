@@ -11,6 +11,7 @@ export { QueueNotFoundError } from "./error/QueueNotFoundError.js";
 export { ReceiptHandleIsInvalidError } from "./error/ReceiptHandleIsInvalidError.js";
 export { TopicAlreadyExistsError } from "./error/TopicAlreadyExistsError.js";
 export { TopicNotFoundError } from "./error/TopicNotFoundError.js";
+export { SubscriptionNotFoundError } from "./error/SubscriptionNotFoundError.js";
 export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlreadyExistsError.js";
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 

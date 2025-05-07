@@ -13,6 +13,7 @@ import {
   ReceiptHandleIsInvalidError,
   ReceivedMessage,
   SendMessageOptions,
+  SubscriptionNotFoundError,
   Time,
   TopicInfo,
   TopicNotFoundError,
@@ -52,6 +53,7 @@ import {
   SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE,
   SQL_DELETE_MESSAGE_BY_RECEIPT_HANDLE,
   SQL_DELETE_QUEUE,
+  SQL_DELETE_SUBSCRIPTION,
   SQL_DELETE_TOPIC,
   SQL_FIND_MESSAGE_BY_ID,
   SQL_FIND_MESSAGES_TO_RECEIVE,
@@ -95,9 +97,32 @@ export interface DialectMessageNotification {
   queueName: string;
 }
 
+export interface DialectQueueNotification {
+  type: "dialectQueueNotification";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  queueName: string;
+}
+
+export interface DialectTopicNotification {
+  type: "dialectTopicNotification";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  topicName: string;
+}
+
+export interface DialectSubscriptionNotification {
+  type: "dialectSubscriptionNotification";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  id: string;
+  queueName: string;
+  topicName: string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export declare interface Dialect<TDatabase, TSql extends Sql<TDatabase>> {
   on(event: "messageNotification", listener: (notification: DialectMessageNotification) => unknown): this;
+  on(event: "queueNotification", listener: (notification: DialectQueueNotification) => unknown): this;
+  on(event: "topicNotification", listener: (notification: DialectTopicNotification) => unknown): this;
+  on(event: "subscriptionNotification", listener: (notification: DialectSubscriptionNotification) => unknown): this;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
@@ -683,6 +708,13 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
     const results = await this.sql.run(this.database, SQL_DELETE_TOPIC, [topicName]);
     if (results.changes !== 1) {
       throw new TopicNotFoundError(topicName);
+    }
+  }
+
+  public async deleteSubscription(subscriptionId: string): Promise<void> {
+    const results = await this.sql.run(this.database, SQL_DELETE_SUBSCRIPTION, [subscriptionId]);
+    if (results.changes !== 1) {
+      throw new SubscriptionNotFoundError(subscriptionId);
     }
   }
 

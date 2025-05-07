@@ -10,12 +10,14 @@ export function sqlTopicWithSubscriptionToTopicInfo(rows: SqlTopicWithSubscripti
   return {
     name: rows[0].name,
     tags: JSON.parse(rows[0].tags) as Record<string, string>,
-    subscriptions: rows.map((row) => {
-      return {
-        id: row.subscription_id,
-        protocol: TopicProtocol.Queue,
-        queueName: row.queue_name,
-      } satisfies TopicInfoQueueSubscription;
-    }),
+    subscriptions: rows
+      .filter((row) => row.subscription_id !== null)
+      .map((row) => {
+        return {
+          id: row.subscription_id,
+          protocol: TopicProtocol.Queue,
+          queueName: row.queue_name,
+        } satisfies TopicInfoQueueSubscription;
+      }),
   };
 }

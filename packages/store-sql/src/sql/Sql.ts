@@ -41,6 +41,7 @@ export const SQL_CREATE_TOPIC = "createTopic";
 export const SQL_CREATE_SUBSCRIPTION = "createSubscription";
 export const SQL_GET_SUBSCRIPTION = "getSubscription";
 export const SQL_DELETE_TOPIC = "deleteTopic";
+export const SQL_DELETE_SUBSCRIPTION = "deleteSubscription";
 export const SQL_NAK_MESSAGE = "nakMessage";
 export const SQL_UPDATE_QUEUE_EXPIRES_AT = "updateQueueExpiresAt";
 export const SQL_DELETE_ALL_MESSAGES = "deleteAllMessages";
@@ -600,6 +601,16 @@ export abstract class Sql<TDatabase> {
           ${this.tablePrefix}_topic
         WHERE
           name = ?
+      `
+    );
+
+    this.addQuery(
+      SQL_DELETE_SUBSCRIPTION,
+      `
+        DELETE FROM
+          ${this.tablePrefix}_subscription
+        WHERE
+          id = ?
       `
     );
 

@@ -5,10 +5,10 @@ import * as R from "radash";
 import { describe, expect, test } from "vitest";
 import { SqlStore, SqlStoreCreateConfig, SqlStoreCreateConfigPostgres } from "./SqlStore.js";
 
-const testPostgres = process.env["TEST_POSTGRES"];
+const testPostgres = process.env["TEST_POSTGRES"] === "1";
 const QUEUE1_NAME = "queue1";
 
-async function createStore(options: CreateStoreOptions, otherOptions?: { resetData: boolean }): Promise<SqlStore> {
+async function createStore(options: CreateStoreOptions): Promise<SqlStore> {
   let config: SqlStoreCreateConfig;
 
   if (testPostgres) {
@@ -41,7 +41,7 @@ async function createStore(options: CreateStoreOptions, otherOptions?: { resetDa
     config,
   });
 
-  if (otherOptions?.resetData !== false) {
+  if (options?.resetData !== false) {
     await store.deleteAllData();
 
     if (options.initialUsers) {
@@ -55,7 +55,7 @@ async function createStore(options: CreateStoreOptions, otherOptions?: { resetDa
 }
 
 describe("SqlStore", async () => {
-  await runStoreTest(createStore);
+  await runStoreTest({ createStore, supportsMultipleStores: testPostgres });
 
   test("maskPasswordInConnectionString", () => {
     expect(SqlStore.maskPasswordInConnectionString("postgresql://")).toBe("postgresql://");
@@ -83,7 +83,7 @@ describe("SqlStore", async () => {
     test("message from other server causes immediate receive", async () => {
       const time = new RealTime();
       const store1 = await createStore({ time });
-      const store2 = await createStore({ time }, { resetData: false });
+      const store2 = await createStore({ time, resetData: false });
       const messageBody = "test message";
       let receivedMessage: ReceivedMessage | undefined;
       let receivedMessageTime: Date | undefined;

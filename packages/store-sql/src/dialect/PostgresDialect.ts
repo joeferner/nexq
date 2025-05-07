@@ -1,12 +1,49 @@
-import { Time } from "@nexq/core";
+import { createLogger, Time } from "@nexq/core";
 import fs from "node:fs";
 import pg from "pg";
 import Pool from "pg-pool";
+import * as R from "radash";
 import { SqlStoreCreateConfigPostgres } from "../SqlStore.js";
 import { PostgresSql } from "../sql/PostgresSql.js";
-import { Dialect, DialectMessageNotification } from "./Dialect.js";
+import {
+  Dialect,
+  DialectMessageNotification,
+  DialectQueueNotification,
+  DialectSubscriptionNotification,
+  DialectTopicNotification,
+} from "./Dialect.js";
 import { PostgresTransaction } from "./PostgresTransaction.js";
-import * as R from "radash";
+
+interface MessageNotification {
+  type: "message-delete" | "message-upsert";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  id: string;
+  queueName: string;
+}
+
+interface QueueNotification {
+  type: "queue-delete" | "queue-upsert";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  queueName: string;
+}
+
+interface TopicNotification {
+  type: "topic-delete" | "topic-upsert";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  topicName: string;
+}
+
+interface SubscriptionNotification {
+  type: "subscription-delete" | "subscription-upsert";
+  op: "INSERT" | "UPDATE" | "DELETE";
+  id: string;
+  topicName: string;
+  queueName: string;
+}
+
+type Notification = MessageNotification | QueueNotification | TopicNotification | SubscriptionNotification;
+
+const logger = createLogger("PostgresDialect");
 
 export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
   private startListenSleep = 0;
@@ -32,19 +69,46 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
       void this.startListen();
     });
     await this.listenClient.query("LISTEN nexq_message_notify");
+    await this.listenClient.query("LISTEN nexq_queue_notify");
+    await this.listenClient.query("LISTEN nexq_topic_notify");
+    await this.listenClient.query("LISTEN nexq_subscription_notify");
     this.listenClient.on("notification", (message) => {
       const payload = message.payload;
       if (!payload) {
         return;
       }
 
-      const payloadObj = JSON.parse(payload) as DialectMessageNotification;
-      this.emit("messageNotification", {
-        type: "dialectMessageNotification",
-        op: payloadObj.op,
-        id: payloadObj.id,
-        queueName: payloadObj.queueName,
-      } satisfies DialectMessageNotification);
+      const payloadObj = JSON.parse(payload) as Notification;
+      if (payloadObj.type === "message-delete" || payloadObj.type === "message-upsert") {
+        this.emit("messageNotification", {
+          type: "dialectMessageNotification",
+          op: payloadObj.op,
+          id: payloadObj.id,
+          queueName: payloadObj.queueName,
+        } satisfies DialectMessageNotification);
+      } else if (payloadObj.type === "queue-delete" || payloadObj.type === "queue-upsert") {
+        this.emit("queueNotification", {
+          type: "dialectQueueNotification",
+          op: payloadObj.op,
+          queueName: payloadObj.queueName,
+        } satisfies DialectQueueNotification);
+      } else if (payloadObj.type === "topic-delete" || payloadObj.type === "topic-upsert") {
+        this.emit("topicNotification", {
+          type: "dialectTopicNotification",
+          op: payloadObj.op,
+          topicName: payloadObj.topicName,
+        } satisfies DialectTopicNotification);
+      } else if (payloadObj.type === "subscription-delete" || payloadObj.type === "subscription-upsert") {
+        this.emit("subscriptionNotification", {
+          type: "dialectSubscriptionNotification",
+          op: payloadObj.op,
+          id: payloadObj.id,
+          topicName: payloadObj.topicName,
+          queueName: payloadObj.queueName,
+        } satisfies DialectSubscriptionNotification);
+      } else {
+        logger.warn(`unhandled notification type: "${payloadObj.type}"`);
+      }
     });
     this.startListenSleep = 0;
   }

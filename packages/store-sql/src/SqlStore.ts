@@ -46,7 +46,12 @@ import {
 } from "@nexq/core";
 import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
 import { SendMessagesResult } from "@nexq/core/build/dto/SendMessagesResult.js";
-import { DialectMessageNotification } from "./dialect/Dialect.js";
+import {
+  DialectMessageNotification,
+  DialectQueueNotification,
+  DialectSubscriptionNotification,
+  DialectTopicNotification,
+} from "./dialect/Dialect.js";
 import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { Transaction } from "./dialect/Transaction.js";
@@ -130,6 +135,15 @@ export class SqlStore implements Store {
     this.dialect = options._dialect;
     this.dialect.on("messageNotification", (notification) => {
       this.handleDialectMessageNotification(notification);
+    });
+    this.dialect.on("queueNotification", (notification) => {
+      this.handleDialectQueueNotification(notification);
+    });
+    this.dialect.on("topicNotification", (notification) => {
+      this.handleDialectTopicNotification(notification);
+    });
+    this.dialect.on("subscriptionNotification", (notification) => {
+      this.handleDialectSubscriptionNotification(notification);
     });
     this.passwordHashRounds = options.passwordHashRounds ?? DEFAULT_PASSWORD_HASH_ROUNDS;
 
@@ -382,6 +396,18 @@ export class SqlStore implements Store {
 
   private handleDialectMessageNotification(notification: DialectMessageNotification): void {
     this.trigger(notification);
+  }
+
+  private handleDialectQueueNotification(notification: DialectQueueNotification): void {
+    delete this.cachedQueueInfo[notification.queueName];
+  }
+
+  private handleDialectTopicNotification(notification: DialectTopicNotification): void {
+    delete this.cachedTopicInfo[notification.topicName];
+  }
+
+  private handleDialectSubscriptionNotification(notification: DialectSubscriptionNotification): void {
+    // delete this.cachedTopicInfo[notification.topicName];
   }
 
   private addTrigger(queueName: string): QueueTrigger {
@@ -754,6 +780,7 @@ export class SqlStore implements Store {
           return existingSubscription.id;
         }
       }
+      delete this.cachedTopicInfo[topicName];
       return id;
     });
   }
@@ -770,6 +797,7 @@ export class SqlStore implements Store {
   private async getTopicRequired(topicName: string, tx?: Transaction): Promise<TopicInfo> {
     const topic = await this.dialect.getTopicInfo(tx, topicName);
     if (topic) {
+      this.cachedTopicInfo[topicName] = topic;
       return topic;
     }
     throw new TopicNotFoundError(topicName);
@@ -783,6 +811,16 @@ export class SqlStore implements Store {
     }
     await this.dialect.deleteTopic(topic.name);
     delete this.cachedTopicInfo[topicName];
+  }
+
+  public async deleteSubscription(subscriptionId: string): Promise<void> {
+    await this.dialect.deleteSubscription(subscriptionId);
+    const cachedTopicName = Object.keys(this.cachedTopicInfo).find((t) =>
+      this.cachedTopicInfo[t].subscriptions.some((s) => s.id === subscriptionId)
+    );
+    if (cachedTopicName) {
+      delete this.cachedTopicInfo[cachedTopicName];
+    }
   }
 
   public async deleteAllData(): Promise<void> {

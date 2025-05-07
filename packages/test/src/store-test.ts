@@ -27,6 +27,7 @@ const MESSAGE4_BODY = "message4";
 export interface CreateStoreOptions {
   time: Time;
   initialUsers?: CreateUserOptions[];
+  resetData?: boolean;
 }
 
 export async function assertQueueSize(
@@ -54,7 +55,12 @@ export async function poll(store: Store): Promise<void> {
   await Promise.all([store.poll(), store.poll()]);
 }
 
-export async function runStoreTest(createStore: (options: CreateStoreOptions) => Promise<Store>): Promise<void> {
+export async function runStoreTest(options: {
+  createStore: (options: CreateStoreOptions) => Promise<Store>;
+  supportsMultipleStores: boolean;
+}): Promise<void> {
+  const { createStore, supportsMultipleStores } = options;
+
   describe("queue", async () => {
     let time!: MockTime;
     let store!: Store;
@@ -1256,6 +1262,57 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       expect(messages[1].body).toBe(MESSAGE2_BODY);
       expect(messages[1].id).toBe(result.ids[1]);
     });
+
+    if (supportsMultipleStores) {
+      test("caching - queue", async () => {
+        const time = new MockTime();
+        const store2 = await createStore({ time, resetData: false });
+        try {
+          await store.createQueue(QUEUE1_NAME);
+          await store2.getQueueInfo(QUEUE1_NAME);
+          await store.deleteQueue(QUEUE1_NAME);
+          await R.sleep(100);
+          await expect(async () => store2.receiveMessage(QUEUE1_NAME)).rejects.toThrowError(`queue "queue1" not found`);
+        } finally {
+          await store2.shutdown();
+        }
+      });
+
+      test("caching - topic", async () => {
+        const time = new MockTime();
+        const store2 = await createStore({ time, resetData: false });
+        try {
+          await store.createQueue(QUEUE1_NAME);
+          await store.createTopic(TOPIC1_NAME);
+          await store2.getTopicInfo(TOPIC1_NAME);
+          await store.deleteTopic(TOPIC1_NAME);
+          await R.sleep(100);
+          await expect(async () => store2.publishMessage(TOPIC1_NAME, "test")).rejects.toThrowError(
+            `topic "topic1" not found`
+          );
+        } finally {
+          await store2.shutdown();
+        }
+      });
+
+      test("caching - subscription", async () => {
+        const time = new MockTime();
+        const store2 = await createStore({ time, resetData: false });
+        try {
+          await store.createQueue(QUEUE1_NAME);
+          await store.createTopic(TOPIC1_NAME);
+          const subscriptionId = await store.subscribe(TOPIC1_NAME, TopicProtocol.Queue, QUEUE1_NAME);
+          await store2.getTopicInfo(TOPIC1_NAME);
+          await store2.getQueueInfo(QUEUE1_NAME);
+          await store.deleteSubscription(subscriptionId);
+          await R.sleep(100);
+          await assertQueueEmpty(store, QUEUE1_NAME);
+          await assertQueueEmpty(store2, QUEUE1_NAME);
+        } finally {
+          await store2.shutdown();
+        }
+      });
+    }
   });
 
   describe("topics", async () => {

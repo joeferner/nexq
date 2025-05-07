@@ -13,6 +13,7 @@ const sqlLogger = createLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;
 const MIGRATION_NOTIFY = 2;
+const MIGRATION_NOTIFY_ALL = 3;
 
 export class PostgresSql extends Sql<Pool<PgClient>> {
   public constructor() {
@@ -110,6 +111,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
 
     await this.migrateInitial(database, migrations);
     await this.migrateNotify(database, migrations);
+    await this.migrateNotifyAll(database, migrations);
   }
 
   private async migrateInitial(database: Pool<pg.Client>, migrations: pg.QueryResult<SqlMigration>): Promise<void> {
@@ -217,7 +219,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     if (migrations.rows.some((m) => m.version === MIGRATION_NOTIFY)) {
       return;
     }
-    logger.info(`running migration ${MIGRATION_NOTIFY} - initial`);
+    logger.info(`running migration ${MIGRATION_NOTIFY} - notify`);
 
     await database.query(`
       CREATE OR REPLACE FUNCTION nexq_message_notify() RETURNS TRIGGER as $process_record$
@@ -243,6 +245,97 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
       MIGRATION_NOTIFY,
       "notify",
+      new Date().toISOString(),
+    ]);
+  }
+
+  private async migrateNotifyAll(database: Pool<pg.Client>, migrations: pg.QueryResult<SqlMigration>): Promise<void> {
+    if (migrations.rows.some((m) => m.version === MIGRATION_NOTIFY_ALL)) {
+      return;
+    }
+    logger.info(`running migration ${MIGRATION_NOTIFY_ALL} - notify all`);
+
+    // add type to nexq_message_notify
+    await database.query(`
+      CREATE OR REPLACE FUNCTION nexq_message_notify() RETURNS TRIGGER as $process_record$
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            PERFORM pg_notify('nexq_message_notify', json_build_object('type', 'message-delete', 'op', TG_OP, 'id', OLD.id, 'queueName', OLD.queue_name)::text);
+            RETURN OLD;
+          ELSE
+            PERFORM pg_notify('nexq_message_notify', json_build_object('type', 'message-upsert', 'op', TG_OP, 'id', NEW.id, 'queueName', NEW.queue_name)::text);
+            RETURN NEW;
+          END IF;
+        END;
+      $process_record$ LANGUAGE plpgsql;
+    `);
+
+    // queue
+    await database.query(`
+      CREATE OR REPLACE FUNCTION nexq_queue_notify() RETURNS TRIGGER as $process_record$
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            PERFORM pg_notify('nexq_queue_notify', json_build_object('type', 'queue-delete', 'op', TG_OP, 'queueName', OLD.name)::text);
+            RETURN OLD;
+          ELSE
+            PERFORM pg_notify('nexq_queue_notify', json_build_object('type', 'queue-upsert', 'op', TG_OP, 'queueName', NEW.name)::text);
+            RETURN NEW;
+          END IF;
+        END;
+      $process_record$ LANGUAGE plpgsql;
+    `);
+
+    await database.query(`
+      CREATE TRIGGER queue_trigger
+      AFTER INSERT OR UPDATE OR DELETE ON nexq_queue
+      FOR EACH ROW EXECUTE PROCEDURE nexq_queue_notify()
+    `);
+
+    // topic
+    await database.query(`
+      CREATE OR REPLACE FUNCTION nexq_topic_notify() RETURNS TRIGGER as $process_record$
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            PERFORM pg_notify('nexq_topic_notify', json_build_object('type', 'topic-delete', 'op', TG_OP, 'topicName', OLD.name)::text);
+            RETURN OLD;
+          ELSE
+            PERFORM pg_notify('nexq_topic_notify', json_build_object('type', 'topic-upsert', 'op', TG_OP, 'topicName', NEW.name)::text);
+            RETURN NEW;
+          END IF;
+        END;
+      $process_record$ LANGUAGE plpgsql;
+    `);
+
+    await database.query(`
+      CREATE TRIGGER topic_trigger
+      AFTER INSERT OR UPDATE OR DELETE ON nexq_topic
+      FOR EACH ROW EXECUTE PROCEDURE nexq_topic_notify()
+    `);
+
+    // subscription
+    await database.query(`
+      CREATE OR REPLACE FUNCTION nexq_subscription_notify() RETURNS TRIGGER as $process_record$
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            PERFORM pg_notify('nexq_subscription_notify', json_build_object('type', 'subscription-delete', 'op', TG_OP, 'id', OLD.id, 'topicName', OLD.topic_name, 'queueName', OLD.queue_name)::text);
+            RETURN OLD;
+          ELSE
+            PERFORM pg_notify('nexq_subscription_notify', json_build_object('type', 'subscription-upsert', 'op', TG_OP, 'id', NEW.id, 'topicName', NEW.topic_name, 'queueName', NEW.queue_name)::text);
+            RETURN NEW;
+          END IF;
+        END;
+      $process_record$ LANGUAGE plpgsql;
+    `);
+
+    await database.query(`
+      CREATE TRIGGER subscription_trigger
+      AFTER INSERT OR UPDATE OR DELETE ON nexq_subscription
+      FOR EACH ROW EXECUTE PROCEDURE nexq_subscription_notify()
+    `);
+
+    await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
+      MIGRATION_NOTIFY_ALL,
+      "notify all",
       new Date().toISOString(),
     ]);
   }

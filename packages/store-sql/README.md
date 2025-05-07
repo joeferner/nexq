@@ -17,6 +17,7 @@ Outside of dev container
 ```bash
 docker network create nexq
 docker run --rm -it --network=nexq --name nexq-postgres -e POSTGRES_USER=nexq -e POSTGRES_PASSWORD=password postgres
+# psql --user nexq
 ```
 
 Inside dev container

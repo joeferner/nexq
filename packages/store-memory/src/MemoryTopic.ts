@@ -2,6 +2,7 @@ import {
   createId,
   CreateTopicOptions,
   SendMessageOptions,
+  SubscriptionNotFoundError,
   TopicInfo,
   TopicInfoQueueSubscription,
   TopicProtocol,
@@ -57,5 +58,13 @@ export class MemoryTopic {
       const id = createId();
       queue.sendMessage(id, body, options);
     }
+  }
+
+  public deleteSubscription(subscriptionId: string): void {
+    const index = this.queueSubscriptions.findIndex((s) => s.id === subscriptionId);
+    if (index < 0) {
+      throw new SubscriptionNotFoundError(subscriptionId);
+    }
+    this.queueSubscriptions.splice(index, 1);
   }
 }

@@ -24,6 +24,7 @@ import {
   SendMessageOptions,
   SendMessageResult,
   Store,
+  SubscriptionNotFoundError,
   Time,
   Timeout,
   TopicAlreadyExistsError,
@@ -437,5 +438,17 @@ export class MemoryStore implements Store {
     }
 
     delete this.topics[topic.name];
+  }
+
+  public async deleteSubscription(subscriptionId: string): Promise<void> {
+    const topicInfos = await this.getTopicInfos();
+    for (const topicInfo of topicInfos) {
+      if (topicInfo.subscriptions.some((s) => s.id === subscriptionId)) {
+        const topic = this.getTopicRequired(topicInfo.name);
+        topic.deleteSubscription(subscriptionId);
+        return;
+      }
+    }
+    throw new SubscriptionNotFoundError(subscriptionId);
   }
 }
