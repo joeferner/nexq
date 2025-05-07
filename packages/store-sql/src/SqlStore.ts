@@ -407,7 +407,7 @@ export class SqlStore implements Store {
   }
 
   private handleDialectSubscriptionNotification(notification: DialectSubscriptionNotification): void {
-    // delete this.cachedTopicInfo[notification.topicName];
+    delete this.cachedTopicInfo[notification.topicName];
   }
 
   private addTrigger(queueName: string): QueueTrigger {

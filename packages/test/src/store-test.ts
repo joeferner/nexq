@@ -1468,6 +1468,15 @@ export async function runStoreTest(options: {
       const q2m2 = await store.receiveMessage(QUEUE2_NAME);
       expect(q2m2?.body).toBe(MESSAGE2_BODY);
     });
+
+    test("publish - no subscriptions", async () => {
+      // create the topic
+      await store.createTopic(TOPIC1_NAME);
+      await time.advance(1000);
+
+      // public messages
+      await store.publishMessage(TOPIC1_NAME, MESSAGE1_BODY);
+    });
   });
 
   describe("user", async () => {
