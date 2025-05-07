@@ -8,6 +8,8 @@ import { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
 import { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
 import { SendMessageOptions } from "./dto/SendMessageOptions.js";
 import { SendMessageResult } from "./dto/SendMessageResult.js";
+import { SendMessagesOptions } from "./dto/SendMessagesOptions.js";
+import { SendMessagesResult } from "./dto/SendMessagesResult.js";
 import { TopicInfo } from "./dto/TopicInfo.js";
 import { TopicProtocol } from "./dto/TopicInfoSubscription.js";
 import { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";
@@ -29,6 +31,7 @@ export interface Store {
 
   createQueue(queueName: string, options?: CreateQueueOptions): Promise<void>;
   sendMessage(queueName: string, body: string, options?: SendMessageOptions): Promise<SendMessageResult>;
+  sendMessages(queueName: string, options: SendMessagesOptions): Promise<SendMessagesResult>;
   receiveMessage(queueName: string, options?: ReceiveMessageOptions): Promise<ReceivedMessage | undefined>;
   receiveMessages(queueName: string, options?: ReceiveMessagesOptions): Promise<ReceivedMessage[]>;
   peekMessages(queueName: string, options?: PeekMessagesOptions): Promise<Message[]>;

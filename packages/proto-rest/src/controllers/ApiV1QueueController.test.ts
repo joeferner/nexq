@@ -110,6 +110,25 @@ describe("ApiV1QueueController", async () => {
     });
   });
 
+  describe("sendMessages", async () => {
+    test("good", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await controller.sendMessages(QUEUE1_NAME, { messages: [{ body: "test1" }, { body: "test2" }] });
+      await assertQueueSize(store, QUEUE1_NAME, 2, 0, 0);
+      const m1 = await store.receiveMessage(QUEUE1_NAME);
+      expect(m1!.body).toBe("test1");
+      const m2 = await store.receiveMessage(QUEUE1_NAME);
+      expect(m2!.body).toBe("test2");
+    });
+
+    test("queue not found", async () => {
+      await expectHttpError(
+        async () => await controller.sendMessages("bad-queue-name", { messages: [{ body: "test" }] }),
+        404
+      );
+    });
+  });
+
   describe("purgeQueue", async () => {
     test("good", async () => {
       await store.createQueue(QUEUE1_NAME);

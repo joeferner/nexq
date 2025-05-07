@@ -44,13 +44,15 @@ import {
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
 } from "@nexq/core";
+import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
+import { SendMessagesResult } from "@nexq/core/build/dto/SendMessagesResult.js";
+import { DialectMessageNotification } from "./dialect/Dialect.js";
 import { PostgresDialect } from "./dialect/PostgresDialect.js";
 import { SqliteDialect } from "./dialect/SqliteDialect.js";
 import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 import { clearRecord } from "./utils.js";
-import { DialectMessageNotification } from "./dialect/Dialect.js";
 
 const logger = createLogger("SqlStore");
 
@@ -260,6 +262,27 @@ export class SqlStore implements Store {
     await this.dialect.sendMessage(undefined, queueInfo, id, body, options);
     this.trigger({ type: "newQueueMessageEvent", queueName } satisfies NewQueueMessageEvent);
     return { id };
+  }
+
+  public async sendMessages(queueName: string, options: SendMessagesOptions): Promise<SendMessagesResult> {
+    const queueInfo = await this.getCachedQueueInfo(queueName);
+    const { maxMessageSize } = queueInfo;
+    if (maxMessageSize) {
+      const tooLargeMessage = options.messages.find((m) => m.body.length > maxMessageSize);
+      if (tooLargeMessage) {
+        throw new MessageExceededMaxMessageSizeError(tooLargeMessage.body.length, maxMessageSize);
+      }
+    }
+    const ids = options.messages.map((_) => createId());
+    await this.dialect.withTransaction(async (tx) => {
+      for (let i = 0; i < options.messages.length; i++) {
+        const message = options.messages[i];
+        const id = ids[i];
+        await this.dialect.sendMessage(tx, queueInfo, id, message.body, message);
+      }
+    });
+    this.trigger({ type: "newQueueMessageEvent", queueName } satisfies NewQueueMessageEvent);
+    return { ids };
   }
 
   public async publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void> {

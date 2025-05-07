@@ -326,8 +326,10 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
           receivedError = err;
         });
       await time.advance(1);
+      await R.sleep(100);
       abortController.abort();
       await time.advance(1);
+      await R.sleep(100);
       expect(receivedResponse).toBeFalsy();
       expect(receivedError).toEqual(new AbortError("receive aborted"));
     });
@@ -1234,6 +1236,25 @@ export async function runStoreTest(createStore: (options: CreateStoreOptions) =>
       const results2 = await p2;
       expect(results2.time.toISOString()).toBe(expectedTime2.toISOString());
       expect(results2.messages.length).toBe(1);
+    });
+
+    test("send messages", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send messages
+      const result = await store.sendMessages(QUEUE1_NAME, {
+        messages: [{ body: MESSAGE1_BODY }, { body: MESSAGE2_BODY }],
+      });
+      await time.advance(10);
+
+      // receive messages
+      const messages = await store.receiveMessages(QUEUE1_NAME, { maxNumberOfMessages: 10 });
+      expect(messages.length).toBe(2);
+      expect(messages[0].body).toBe(MESSAGE1_BODY);
+      expect(messages[0].id).toBe(result.ids[0]);
+      expect(messages[1].body).toBe(MESSAGE2_BODY);
+      expect(messages[1].id).toBe(result.ids[1]);
     });
   });
 

@@ -13,8 +13,9 @@ import {
   Store,
   TopicNotFoundError,
 } from "@nexq/core";
-import createHttpError from "http-errors";
+import { SendMessagesOptionsMessage } from "@nexq/core/build/dto/SendMessagesOptions.js";
 import express from "express";
+import createHttpError from "http-errors";
 import {
   Body,
   Controller,
@@ -24,8 +25,8 @@ import {
   Post,
   Put,
   Query,
-  Response,
   Request,
+  Response,
   Route,
   SuccessResponse,
   Tags,
@@ -40,6 +41,8 @@ import { ReceiveMessagesRequest } from "../dto/ReceiveMessagesRequest.js";
 import { ReceiveMessagesResponse, ReceiveMessagesResponseMessage } from "../dto/ReceiveMessagesResponse.js";
 import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { SendMessageResponse } from "../dto/SendMessageResponse.js";
+import { SendMessagesRequest } from "../dto/SendMessagesRequest.js";
+import { SendMessagesResponse } from "../dto/SendMessagesResponse.js";
 import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
 import { isHttpError } from "../utils.js";
 
@@ -194,6 +197,44 @@ export class ApiV1QueueController extends Controller {
         throw createHttpError.NotFound("queue not found");
       }
       logger.error(`failed to send message`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * send messages to a queue
+   *
+   * @param queueName the name of the queue to send to
+   * @param request the options for the messages
+   * @example queueName "queue1"
+   */
+  @Post("{queueName}/messages")
+  @SuccessResponse("200", "Messages sent")
+  @Response<void>(400, "invalid body")
+  @Response<void>(404, "queue not found")
+  public async sendMessages(
+    @Path() queueName: string,
+    @Body() request: SendMessagesRequest
+  ): Promise<SendMessagesResponse> {
+    try {
+      const messages: SendMessagesOptionsMessage[] = request.messages.map((message) => {
+        return {
+          body: message.body,
+          attributes: message.attributes,
+          delayMs: parseOptionalDurationIntoMs(message.delay),
+          priority: message.priority,
+        } satisfies SendMessagesOptionsMessage;
+      });
+      const m = await this.store.sendMessages(queueName, { messages });
+      return { ids: m.ids };
+    } catch (err) {
+      if (isHttpError(err)) {
+        throw err;
+      }
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      logger.error(`failed to send messages`, err);
       throw err;
     }
   }
