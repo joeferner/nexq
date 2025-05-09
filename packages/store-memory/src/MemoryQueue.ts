@@ -218,7 +218,7 @@ export class MemoryQueue {
         }
       }
 
-      messages.push(message.toMessage());
+      messages.push(message.toMessage(now));
 
       if (messages.length === options.maxNumberOfMessages) {
         return messages;

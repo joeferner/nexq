@@ -8,6 +8,12 @@ export interface Message {
   priority: number;
   lastNakReason: string | undefined;
   attributes: Record<string, string>;
+  delayUntil: Date | undefined;
+  isAvailable: boolean;
+  receiveCount: number;
+  expiresAt: Date | undefined;
+  receiptHandle: string | undefined;
+  firstReceivedAt: Date | undefined;
 }
 
 export interface ReceivedMessage extends Message {
@@ -16,13 +22,6 @@ export interface ReceivedMessage extends Message {
 
 export interface GetMessage extends Message {
   positionInQueue: number;
-  delayUntil: Date | undefined;
-  isAvailable: boolean;
-  receiveCount: number;
-  expiresAt: Date | undefined;
-  receiptHandle: string | undefined;
-  firstReceivedAt: Date | undefined;
-  lastNakReason: string | undefined;
 }
 
 export function isAvailable(

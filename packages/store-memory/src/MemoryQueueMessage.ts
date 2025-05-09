@@ -62,10 +62,10 @@ export class MemoryQueueMessage {
       this._firstReceiveTime = now;
     }
     this._receiveCount++;
-    return { ...this.toMessage(), receiptHandle: this._receiptHandle };
+    return { ...this.toMessage(now), receiptHandle: this._receiptHandle };
   }
 
-  public toMessage(): Message {
+  public toMessage(now: Date): Message {
     return {
       id: this.id,
       body: this.body,
@@ -73,20 +73,19 @@ export class MemoryQueueMessage {
       priority: this.priority,
       lastNakReason: this.lastNakReason,
       attributes: this.attributes,
-    };
-  }
-
-  public toGetMessage(positionInQueue: number, now: Date): GetMessage {
-    return {
-      ...this.toMessage(),
-      positionInQueue,
       delayUntil: this._delayUntil,
       isAvailable: this.isAvailable(now),
       receiveCount: this.receiveCount,
       expiresAt: this.expiresAt,
       receiptHandle: this.receiptHandle,
       firstReceivedAt: this._firstReceiveTime,
-      lastNakReason: this.lastNakReason,
+    };
+  }
+
+  public toGetMessage(positionInQueue: number, now: Date): GetMessage {
+    return {
+      ...this.toMessage(now),
+      positionInQueue,
     } satisfies GetMessage;
   }
 

@@ -66,6 +66,14 @@ export class QueueMessages extends Element {
             R.sort(rows, (row) => row.index, direction === SortDirection.Descending),
         },
         {
+          title: "STATUS",
+          align: "left",
+          sortKeyboardShortcut: "shift-s",
+          render: (row): string => `${row.isAvailable ? "" : "R"}`,
+          sortItems: (rows, direction): QueueMessagesRow[] =>
+            R.sort(rows, (row) => (row.isAvailable ? 1 : 0), direction === SortDirection.Descending),
+        },
+        {
           title: "PRIORITY",
           align: "right",
           sortKeyboardShortcut: "shift-p",
@@ -74,9 +82,17 @@ export class QueueMessages extends Element {
             R.sort(rows, (row) => row.priority, direction === SortDirection.Descending),
         },
         {
+          title: "RECV",
+          align: "right",
+          sortKeyboardShortcut: "shift-r",
+          render: (row): string => `${row.receiveCount}`,
+          sortItems: (rows, direction): QueueMessagesRow[] =>
+            R.sort(rows, (row) => row.receiveCount, direction === SortDirection.Descending),
+        },
+        {
           title: "SENT",
           align: "left",
-          sortKeyboardShortcut: "shift-s",
+          sortKeyboardShortcut: "shift-e",
           render: (row): string => `${row.sentTime}`,
           sortItems: (rows, direction): QueueMessagesRow[] => R.alphabetical(rows, (row) => row.sentTime, direction),
         },
@@ -163,7 +179,12 @@ export class QueueMessages extends Element {
         this.refreshTimeout = undefined;
       }
       logger.info("refreshMessages");
-      const resp = await app.api.api.peekMessages(this.queueName, { maxNumberOfMessages: 100 });
+      const resp = await app.api.api.peekMessages(this.queueName, {
+        maxNumberOfMessages: 100,
+        includeDelayed: true,
+        includeNotVisible: true,
+      });
+      logger.info(JSON.stringify(resp.data.messages, null, 2));
       this.tableView.items = resp.data.messages.map((m, index) => ({ ...m, index }));
       this.refreshTitle();
       await this.window.refresh();

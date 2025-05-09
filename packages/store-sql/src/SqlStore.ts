@@ -529,7 +529,7 @@ export class SqlStore implements Store {
 
       for (const queueInfo of queueInfos) {
         try {
-          await this.pollQueue(queueInfo);
+          await this.pollQueue(queueInfo, now);
         } catch (err) {
           logger.error(`failed to poll queue: ${queueInfo.name}`, err);
         }
@@ -544,9 +544,9 @@ export class SqlStore implements Store {
     }
   }
 
-  private async pollQueue(queueInfo: QueueInfo): Promise<void> {
+  private async pollQueue(queueInfo: QueueInfo, now: Date): Promise<void> {
     if (queueInfo.deadLetterTopicName) {
-      await this.pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo);
+      await this.pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo, now);
     } else if (queueInfo.deadLetterQueueName) {
       await this.pollQueueWithOnlyDeadLetterQueue(queueInfo);
     } else {
@@ -611,12 +611,12 @@ export class SqlStore implements Store {
     }
   }
 
-  private async pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo: QueueInfo): Promise<void> {
+  private async pollQueueWithDeadLetterTopicAndPossibleQueue(queueInfo: QueueInfo, now: Date): Promise<void> {
     await this.dialect.withTransaction(async (tx) => {
       const expiredSqlMessages = await this.dialect.getExpiredMessages(tx, queueInfo);
 
       for (const sqlMessage of expiredSqlMessages) {
-        const message = sqlMessageToMessage(sqlMessage);
+        const message = sqlMessageToMessage(sqlMessage, now);
         const options: SendMessageOptions & { lastNakReason?: string } = {
           priority: message.priority,
           delayMs: 0,

@@ -75,7 +75,13 @@ export class QueueMessage extends Element {
     const details: Detail[] = [
       { title: "Id", value: message.id },
       { title: "Priority", value: `${message.priority}` },
+      { title: "Available", value: message.isAvailable ? "Yes" : "No" },
+      { title: "Receive Count", value: message.receiveCount.toLocaleString() },
       { title: "Sent Time", value: message.sentTime },
+      { title: "Delay Until", value: message.delayUntil ?? "<not set>" },
+      { title: "Expires At", value: message.expiresAt ?? "<not set>" },
+      { title: "First Received At", value: message.expiresAt ?? "<not set>" },
+      { title: "Receipt Handle", value: message.receiptHandle ?? "<not set>" },
       { title: "Last Nak", value: message.lastNakReason ?? "<not set>" },
       { title: "Attributes", value: attributesToString(message.attributes) },
       { title: "Body", value: bodyToString(message.body), newLineNoIndent: true },

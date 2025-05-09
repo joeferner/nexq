@@ -17,30 +17,15 @@ export interface SqlMessage {
   last_nak_reason: string | null;
 }
 
-export function sqlMessageToMessage(row: SqlMessage): Message {
-  return {
+export function sqlMessageToMessage(row: SqlMessage, now: Date): Message {
+  const result: Message = {
     id: row.id,
     priority: row.priority,
     sentTime: parseDate(row.sent_at),
     attributes: JSON.parse(row.attributes) as Record<string, string>,
     body: row.message_body,
-    lastNakReason: row.last_nak_reason ?? undefined,
-  };
-}
-
-export function sqlMessageToReceivedMessage(row: SqlMessage, receiptHandle: string): ReceivedMessage {
-  return {
-    ...sqlMessageToMessage(row),
-    receiptHandle,
-  };
-}
-
-export function sqlMessageToGetMessage(row: SqlMessage, positionInQueue: number, now: Date): GetMessage {
-  const result: GetMessage = {
-    ...sqlMessageToMessage(row),
     delayUntil: parseOptionalDate(row.delay_until),
     isAvailable: false,
-    positionInQueue,
     receiveCount: row.receive_count,
     expiresAt: parseOptionalDate(row.expires_at),
     receiptHandle: row.receipt_handle ?? undefined,
@@ -48,5 +33,20 @@ export function sqlMessageToGetMessage(row: SqlMessage, positionInQueue: number,
     lastNakReason: row.last_nak_reason ?? undefined,
   };
   result.isAvailable = isAvailable(result, now);
+  return result;
+}
+
+export function sqlMessageToReceivedMessage(row: SqlMessage, receiptHandle: string, now: Date): ReceivedMessage {
+  return {
+    ...sqlMessageToMessage(row, now),
+    receiptHandle,
+  };
+}
+
+export function sqlMessageToGetMessage(row: SqlMessage, positionInQueue: number, now: Date): GetMessage {
+  const result: GetMessage = {
+    ...sqlMessageToMessage(row, now),
+    positionInQueue,
+  };
   return result;
 }

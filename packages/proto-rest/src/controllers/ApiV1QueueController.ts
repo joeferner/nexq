@@ -539,6 +539,12 @@ export class ApiV1QueueController extends Controller {
             sentTime: m.sentTime.toISOString(),
             body: m.body,
             lastNakReason: m.lastNakReason,
+            delayUntil: m.delayUntil?.toDateString(),
+            isAvailable: m.isAvailable,
+            receiveCount: m.receiveCount,
+            expiresAt: m.expiresAt?.toISOString(),
+            receiptHandle: m.receiptHandle,
+            firstReceivedAt: m.firstReceivedAt?.toISOString(),
           } satisfies PeekMessagesResponseMessage;
         }),
       };

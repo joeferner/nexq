@@ -10,6 +10,10 @@
  * ---------------------------------------------------------------
  */
 
+export enum TopicProtocolQueue {
+  Queue = "Queue",
+}
+
 /** Construct a type with a set of properties K of type T */
 export type RecordStringString = Record<string, string>;
 
@@ -21,10 +25,6 @@ export interface CreateTopicRequest {
   name: string;
   /** tags to apply to this topic */
   tags?: RecordStringString;
-}
-
-export enum TopicProtocolQueue {
-  Queue = "Queue",
 }
 
 export interface TopicInfoQueueSubscription {
@@ -205,6 +205,14 @@ export interface SendMessageResponse {
   id: string;
 }
 
+export interface SendMessagesResponse {
+  ids: string[];
+}
+
+export interface SendMessagesRequest {
+  messages: SendMessageRequest[];
+}
+
 export interface MoveMessagesResponse {
   /** @format int32 */
   movedMessageCount: number;
@@ -264,6 +272,13 @@ export interface PeekMessagesResponseMessage {
   /** Time the message was originally sent */
   sentTime: string;
   lastNakReason?: string;
+  delayUntil?: string;
+  isAvailable: boolean;
+  /** @format double */
+  receiveCount: number;
+  expiresAt?: string;
+  receiptHandle?: string;
+  firstReceivedAt?: string;
 }
 
 export interface PeekMessagesResponse {
@@ -340,7 +355,10 @@ export class HttpClient<SecurityDataType = unknown> {
   private format?: ResponseType;
 
   constructor({ securityWorker, secure, format, ...axiosConfig }: ApiConfig<SecurityDataType> = {}) {
-    this.instance = axios.create({ ...axiosConfig, baseURL: axiosConfig.baseURL || "/" });
+    this.instance = axios.create({
+      ...axiosConfig,
+      baseURL: axiosConfig.baseURL || "/",
+    });
     this.secure = secure;
     this.format = format;
     this.securityWorker = securityWorker;
@@ -534,6 +552,20 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       }),
 
     /**
+     * @description delete a subscription
+     *
+     * @tags topic
+     * @name DeleteSubscription
+     * @request POST:/api/v1/topic/{topicName}/subscription/{subscriptionId}
+     */
+    deleteSubscription: (topicName: string, subscriptionId: string, params: RequestParams = {}) =>
+      this.request<void, void>({
+        path: `/api/v1/topic/${topicName}/subscription/${subscriptionId}`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
      * @description create a queue
      *
      * @tags queue
@@ -603,6 +635,23 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
     sendMessage: (queueName: string, data: SendMessageRequest, params: RequestParams = {}) =>
       this.request<SendMessageResponse, void>({
         path: `/api/v1/queue/${queueName}/message`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description send messages to a queue
+     *
+     * @tags queue
+     * @name SendMessages
+     * @request POST:/api/v1/queue/{queueName}/messages
+     */
+    sendMessages: (queueName: string, data: SendMessagesRequest, params: RequestParams = {}) =>
+      this.request<SendMessagesResponse, void>({
+        path: `/api/v1/queue/${queueName}/messages`,
         method: "POST",
         body: data,
         type: ContentType.Json,

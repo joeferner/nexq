@@ -293,7 +293,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
             row.id,
             queueName,
           ]);
-          return sqlMessageToReceivedMessage(row, receiptHandle);
+          return sqlMessageToReceivedMessage(row, receiptHandle, now);
         })
       );
       return results;
@@ -308,7 +308,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
       options.includeDelayed ? this.getWayInTheFutureDate(now) : now,
       options.maxNumberOfMessages,
     ]);
-    return rows.map(sqlMessageToMessage);
+    return rows.map((row) => sqlMessageToMessage(row, now));
   }
 
   public async getMessage(queueName: string, messageId: string): Promise<GetMessage> {
