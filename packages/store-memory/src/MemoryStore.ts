@@ -7,6 +7,7 @@ import {
   DEFAULT_PASSWORD_HASH_ROUNDS,
   DeleteDeadLetterQueueError,
   DeleteDeadLetterTopicError,
+  getErrorMessage,
   GetMessage,
   InvalidQueueNameError,
   InvalidTopicNameError,
@@ -43,7 +44,7 @@ import { MemoryQueue } from "./MemoryQueue.js";
 import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
 import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
-import { SendMessagesResult } from "@nexq/core/build/dto/SendMessagesResult.js";
+import { SendMessagesResult, SendMessagesResultMessage } from "@nexq/core/build/dto/SendMessagesResult.js";
 
 const logger = createLogger("MemoryStore");
 
@@ -159,12 +160,16 @@ export class MemoryStore implements Store {
 
   public async sendMessages(queueName: string, options: SendMessagesOptions): Promise<SendMessagesResult> {
     const queue = this.getQueueRequired(queueName);
-    const ids: string[] = [];
+    const results: SendMessagesResultMessage[] = [];
     for (const message of options.messages) {
-      const r = queue.sendMessage(undefined, message.body, message);
-      ids.push(r.id);
+      try {
+        const r = queue.sendMessage(undefined, message.body, message);
+        results.push({ id: r.id });
+      } catch (err) {
+        results.push({ error: getErrorMessage(err) });
+      }
     }
-    return { ids };
+    return { results };
   }
 
   public async receiveMessage(

@@ -25,4 +25,11 @@ export interface SendMessageRequest {
    * attributes to include with the message
    */
   attributes?: Record<string, string>;
+
+  /**
+   * If this ID is present, futures messages with this ID that match this ID
+   * will not be allowed. One a message is received, even if it errors or times
+   * out will not be considered a duplicate.
+   */
+  deduplicationId?: string;
 }

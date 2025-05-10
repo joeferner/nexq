@@ -11,6 +11,7 @@ const logger = createLogger("SqlStore:SqliteSql");
 const sqlLogger = createLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;
+const MIGRATION_VERSION_DEDUPLICATION = 2;
 
 export class SqliteSql extends Sql<sqlite.Database> {
   private readonly preparedStatements: Record<string, sqlite.Statement> = {};
@@ -94,6 +95,11 @@ export class SqliteSql extends Sql<sqlite.Database> {
       .prepare<[], SqlMigration>(`SELECT version FROM nexq_migration ORDER BY applied_at`)
       .all();
 
+    await this.migrateInitial(database, migrations);
+    await this.migrateDeduplicationId(database, migrations);
+  }
+
+  private async migrateInitial(database: sqlite.Database, migrations: SqlMigration[]): Promise<void> {
     if (!migrations.some((m) => m.version === MIGRATION_VERSION_INITIAL)) {
       logger.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
 
@@ -188,6 +194,26 @@ export class SqliteSql extends Sql<sqlite.Database> {
       database
         .prepare(`INSERT INTO nexq_migration(version, name, applied_at) VALUES (?, ?, ?)`)
         .run(MIGRATION_VERSION_INITIAL, "initial", new Date().toISOString());
+    }
+  }
+
+  private async migrateDeduplicationId(database: sqlite.Database, migrations: SqlMigration[]): Promise<void> {
+    if (!migrations.some((m) => m.version === MIGRATION_VERSION_DEDUPLICATION)) {
+      logger.info(`running migration ${MIGRATION_VERSION_DEDUPLICATION} - deduplication`);
+
+      database.exec(`ALTER TABLE nexq_message ADD COLUMN deduplication_id TEXT DEFAULT (hex(randomblob(16)))`);
+      database.exec(`
+        CREATE UNIQUE INDEX
+          nexq_message_deduplication_id
+        ON nexq_message(
+          queue_name,
+          deduplication_id,
+          ifnull(receipt_handle, '')
+        )`);
+
+      database
+        .prepare(`INSERT INTO nexq_migration(version, name, applied_at) VALUES (?, ?, ?)`)
+        .run(MIGRATION_VERSION_DEDUPLICATION, "deduplication", new Date().toISOString());
     }
   }
 }
