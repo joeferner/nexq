@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import * as R from "radash";
-import Yoga, { Display, Node as YogaNode } from "yoga-layout";
+import Yoga, { Display, Overflow, Node as YogaNode } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
 import { Document } from "./Document.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
@@ -66,6 +66,10 @@ export abstract class Element {
     const geometry = geometryFromYogaNode(this.yogaNode);
     geometry.top += container.top;
     geometry.left += container.left;
+    if (this.parentElement?.style.overflow === Overflow.Hidden) {
+      geometry.width = Math.min(geometry.width, container.width - layout.left);
+      geometry.height = Math.min(geometry.height, container.height - layout.top);
+    }
 
     this._computedWidth = layout.width;
     this._computedHeight = layout.height;
