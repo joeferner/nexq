@@ -111,6 +111,10 @@ export class MemoryStore implements Store {
       throw new InvalidQueueNameError(queueName);
     }
 
+    if (queueName === options?.deadLetterQueueName) {
+      throw new InvalidQueueNameError(options.deadLetterQueueName);
+    }
+
     const existingQueue = this.queues[queueName];
     if (options?.upsert !== true) {
       if (existingQueue) {

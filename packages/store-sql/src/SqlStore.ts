@@ -235,6 +235,10 @@ export class SqlStore implements Store {
       throw new InvalidQueueNameError(queueName);
     }
 
+    if (queueName === options?.deadLetterQueueName) {
+      throw new InvalidQueueNameError(options.deadLetterQueueName);
+    }
+
     await this.dialect.withTransaction(async (tx) => {
       const existingQueue = await this.dialect.getQueueInfo(tx, queueName);
       if (existingQueue && options?.upsert !== true) {

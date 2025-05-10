@@ -858,6 +858,13 @@ export async function runStoreTest(options: {
       expect(recvMessage?.body).toBe(MESSAGE2_BODY);
     });
 
+    test("dead letter cannot be assigned to self", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await expect(
+        async () => await store.createQueue(QUEUE1_NAME, { deadLetterQueueName: QUEUE1_NAME, upsert: true })
+      ).rejects.toThrowError('queue name "queue1" is invalid');
+    });
+
     test("dead letter queue with messageRetentionPeriodMs", async () => {
       // create the queue
       await store.createQueue(DEAD_LETTER_QUEUE1_NAME, { messageRetentionPeriodMs: 1000 });
