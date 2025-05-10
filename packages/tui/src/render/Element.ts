@@ -12,9 +12,9 @@ import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 const logger = createLogger("Element");
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ElementEvents {}
+export interface ElementEvents { }
 
-export class Element {
+export abstract class Element {
   protected yogaNode?: YogaNode;
   private _document: Document;
   private parent?: Element;
@@ -29,8 +29,9 @@ export class Element {
   protected eventEmitter = new EventEmitter();
   private elementDidMountCalled = false;
   private elementWillUnmountCalled = false;
+  public _scrollTop = 0;
 
-  public constructor(document: Document) {
+  protected constructor(document: Document) {
     this._document = document;
     this._style = this.createStyle();
   }
@@ -74,6 +75,7 @@ export class Element {
       const childRenderItems = child.render(geometry);
       for (const childRenderItem of childRenderItems) {
         childRenderItem.zIndex += this.zIndex;
+        childRenderItem.geometry.top -= this.scrollTop;
         renderItems.push(childRenderItem);
       }
     }
@@ -176,6 +178,14 @@ export class Element {
     return this._document.window;
   }
 
+  public get scrollTop(): number {
+    return this._scrollTop;
+  }
+
+  public set scrollTop(scrollTop: number) {
+    this._scrollTop = scrollTop;
+  }
+
   public focus(): void {
     this.window.walkChildrenDeep((child) => {
       if (child === this) {
@@ -192,9 +202,9 @@ export class Element {
     });
   }
 
-  protected onFocus(): void {}
+  protected onFocus(): void { }
 
-  protected onBlur(): void {}
+  protected onBlur(): void { }
 
   public get isMounted(): boolean {
     if (!this.parent) {
@@ -241,9 +251,9 @@ export class Element {
     }
   }
 
-  protected elementDidMount(): void {}
+  protected elementDidMount(): void { }
 
-  protected elementWillUnmount(): void {}
+  protected elementWillUnmount(): void { }
 
   public get firstElementChild(): Element | null {
     return this._children[0] ?? null;

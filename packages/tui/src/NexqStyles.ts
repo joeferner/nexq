@@ -38,9 +38,9 @@ export class NexqStyles {
   public static readonly detailsValueColor = "papayawhip";
 
   public static applyToTableView<T>(tableView: TableView<T>): void {
-    tableView.headerTextColor = NexqStyles.tableViewHeaderTextColor;
-    tableView.itemTextColor = NexqStyles.tableViewTextColor;
-    tableView.sortTextColor = NexqStyles.tableViewSortColor;
+    tableView.style.headerTextColor = NexqStyles.tableViewHeaderTextColor;
+    tableView.style.itemTextColor = NexqStyles.tableViewTextColor;
+    tableView.style.sortTextColor = NexqStyles.tableViewSortColor;
   }
 
   public static applyToDialog<TShowOptions, TResults>(dialog: Dialog<TShowOptions, TResults>): void {

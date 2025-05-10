@@ -7,6 +7,7 @@ import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { isPathMatch } from "../render/RouterElement.js";
 import { Topics } from "./Topics.js";
+import { DivElement } from "../render/DivElement.js";
 
 export interface HelpItem {
   id: string;
@@ -59,7 +60,7 @@ export class Help extends Element {
     for (const helpItem of helpItems) {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
 
-      const row = new Element(this.document);
+      const row = new DivElement(this.document);
       row.style.flexDirection = FlexDirection.Row;
       row.appendChild(
         new Text(this.document, { text: `<${helpItem.shortcut}>${padding} `, color: NexqStyles.helpHotkeyColor })

@@ -6,6 +6,7 @@ import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { InputBox } from "../render/InputBox.js";
 import { Text } from "../render/Text.js";
+import { DivElement } from "../render/DivElement.js";
 
 export interface MoveMessagesDialogOptions {
   sourceQueueName: string;
@@ -53,12 +54,12 @@ export class MoveMessagesDialog extends Dialog<MoveMessagesDialogOptions, MoveMe
 
     this.title = "Move Messages";
 
-    const inputContainer = new Element(document);
+    const inputContainer = new DivElement(document);
     inputContainer.style.flexDirection = FlexDirection.Row;
     inputContainer.appendChild(new Text(document, { text: "To: " }));
     inputContainer.appendChild(this.inputBox);
 
-    const optionsContainer = new Element(document);
+    const optionsContainer = new DivElement(document);
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
     optionsContainer.appendChild(this.cancelButton);

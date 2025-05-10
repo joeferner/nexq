@@ -8,6 +8,7 @@ import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { StatusBar } from "./StatusBar.js";
+import { DivElement } from "../render/DivElement.js";
 
 export interface ConfirmOptions {
   title: string;
@@ -44,7 +45,7 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
       this.box.removeChild(this.box.lastElementChild);
     }
 
-    const optionsContainer = new Element(this.document);
+    const optionsContainer = new DivElement(this.document);
     let focusedOption: Element | undefined;
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
