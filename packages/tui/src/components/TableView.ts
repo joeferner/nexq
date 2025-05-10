@@ -1,10 +1,12 @@
-import { FlexDirection, Node as YogaNode } from "yoga-layout";
+import { FlexDirection, Overflow, Node as YogaNode } from "yoga-layout";
+import { ansiLength, fgColor } from "../render/color.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
+import { Style } from "../render/Style.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
-import { ansiLength, fgColor } from "../render/color.js";
+import { DivElement } from "../render/DivElement.js";
 
 export interface TableViewOptions<T> {
   columns: TableViewColumn<T>[];
@@ -27,34 +29,58 @@ export interface TableViewColumn<T> {
   render: (value: T) => string;
 }
 
+export class TableViewStyle extends Style {
+  public itemTextColor = "#ffffff";
+  public headerTextColor = "#ffffff";
+  public sortTextColor = "#ffffff";
+}
+
 const COLUMN_MARGIN = 1;
 const COLUMN_SORT_WIDTH = 1;
 
 export class TableView<T> extends Element {
   private _items: T[] = [];
   public selectedIndex = 0;
-  public offset = 0;
   public _columns: TableViewColumn<T>[];
   private readonly columnWidths: number[] = [];
-  public itemTextColor: string;
-  public headerTextColor: string;
-  public sortTextColor: string;
   public sortedColumnIndex = 0;
   public sortedColumnDirection = SortDirection.Ascending;
+  private readonly header: Text;
+  private readonly tableBody: DivElement;
 
   public constructor(document: Document, options: TableViewOptions<T>) {
     super(document);
     this._columns = options.columns;
     this.style.flexDirection = FlexDirection.Column;
-    this.appendChild(new Text(document, { text: "Loading" }));
-    this.itemTextColor = "#ffffff";
-    this.headerTextColor = "#ffffff";
-    this.sortTextColor = "#ffffff";
+    this.style.overflow = Overflow.Hidden;
+
+    this.header = new Text(document, { text: "Loading" });
+    this.appendChild(this.header);
+
+    this.tableBody = new DivElement(document);
+    this.tableBody.style.flexDirection = FlexDirection.Column;
+    this.tableBody.style.overflow = Overflow.Scroll;
+    this.appendChild(this.tableBody);
+
     this.updateColumnWidths();
+  }
+
+  protected override createStyle(): Style {
+    return new TableViewStyle();
+  }
+
+  public override get style(): TableViewStyle {
+    return super.style as TableViewStyle;
   }
 
   public set items(items: T[]) {
     this._items = items;
+    while (this.tableBody.childElementCount > this.items.length && this.tableBody.lastElementChild) {
+      this.tableBody.removeChild(this.tableBody.lastElementChild);
+    }
+    while (this.tableBody.childElementCount < this.items.length) {
+      this.tableBody.appendChild(new Text(this.document, { text: "item", color: this.style.itemTextColor }));
+    }
     this.updateColumnWidths();
     this.sortItems();
   }
@@ -68,50 +94,45 @@ export class TableView<T> extends Element {
   }
 
   public override populateLayout(container: YogaNode): void {
-    const height = Math.max(1, this.computedHeight);
-    const width = this.computedWidth;
+    const height = Math.max(1, this.clientHeight);
+    const width = this.clientWidth;
 
-    while (this.childElementCount > this.items.length && this.lastElementChild) {
-      this.removeChild(this.lastElementChild);
-    }
-    while (this.childElementCount < height) {
-      this.appendChild(new Text(this.document, { text: "item", color: this.itemTextColor }));
-    }
-
+    // ensure the selected item is scrolled into view
     this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.items.length - 1));
-    if (this.selectedIndex < this.offset) {
-      this.offset = this.selectedIndex;
-    } else if (this.selectedIndex >= this.offset + height - 1) {
-      this.offset = this.selectedIndex - height + 2;
+    if (this.selectedIndex < this.tableBody.scrollTop) {
+      this.tableBody.scrollTop = this.selectedIndex;
+    } else if (this.selectedIndex >= this.tableBody.scrollTop + height - 1) {
+      this.tableBody.scrollTop = this.selectedIndex - height + 2;
     }
 
-    const children = this.children as Text[];
-    for (let i = 0; i < height - 1; i++) {
-      const child = children[i + 1];
+    // update the child text to match the width of columns and element
+    const tableBodyChildren = this.tableBody.children as Text[];
+    for (let i = 0; i < this.items.length; i++) {
+      const child = tableBodyChildren[i];
       if (!child) {
         continue;
       }
-      const index = this.offset + i;
-      child.style.inverse = this.selectedIndex === index;
-      const item = this.items[index];
+      child.style.inverse = this.selectedIndex === i;
+      const item = this.items[i];
       child.text = item ? this.createRowText(item, width) : "";
     }
 
+    // update header with sorting
     let header = "";
     for (let i = 0; i < this.columns.length; i++) {
       const column = this.columns[i];
       let columnTitle = column.title;
       if (this.sortedColumnIndex === i) {
         columnTitle += fgColor(
-          this.sortTextColor
+          this.style.sortTextColor
         )`${this.sortedColumnDirection === SortDirection.Ascending ? "↑" : "↓"}`;
       }
       header += columnTitle;
       header += " ".repeat(Math.max(0, this.columnWidths[i] - ansiLength(columnTitle)));
     }
-    children[0].text = header;
-    children[0].text.substring(0, width);
-    children[0].style.color = this.headerTextColor;
+    this.header.text = header;
+    this.header.text.substring(0, width);
+    this.header.style.color = this.style.headerTextColor;
 
     super.populateLayout(container);
   }
@@ -175,12 +196,12 @@ export class TableView<T> extends Element {
     }
 
     if (isInputMatch(event, "pagedown")) {
-      this.selectedIndex += this.computedHeight - 2;
+      this.selectedIndex += this.clientHeight - 2;
       return;
     }
 
     if (isInputMatch(event, "pageup")) {
-      this.selectedIndex -= this.computedHeight - 2;
+      this.selectedIndex -= this.clientHeight - 2;
       return;
     }
 

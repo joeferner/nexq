@@ -1,5 +1,7 @@
 import { Align, Display, Edge, FlexDirection, Justify, Overflow, PositionType, Node as YogaNode } from "yoga-layout";
 
+export type BorderStyle = "none" | "solid";
+
 export class Style {
   public height: number | "auto" | `${number}%` | undefined;
   public minHeight: number | `${number}%` | undefined;
@@ -18,10 +20,22 @@ export class Style {
   public marginRight?: number | "auto" | `${number}%` | undefined;
   public marginTop?: number | "auto" | `${number}%` | undefined;
   public marginBottom?: number | "auto" | `${number}%` | undefined;
+
   public paddingLeft?: number | `${number}%` | undefined;
   public paddingRight?: number | `${number}%` | undefined;
   public paddingTop?: number | `${number}%` | undefined;
   public paddingBottom?: number | `${number}%` | undefined;
+
+  public borderLeftColor = "#ffffff";
+  public borderRightColor = "#ffffff";
+  public borderTopColor = "#ffffff";
+  public borderBottomColor = "#ffffff";
+
+  public borderLeftStyle?: BorderStyle;
+  public borderRightStyle?: BorderStyle;
+  public borderTopStyle?: BorderStyle;
+  public borderBottomStyle?: BorderStyle;
+
   public overflow?: Overflow;
 
   public set margin(margin: number | "auto" | `${number}%` | undefined) {
@@ -29,6 +43,20 @@ export class Style {
     this.marginRight = margin;
     this.marginTop = margin;
     this.marginBottom = margin;
+  }
+
+  public set borderColor(borderColor: string) {
+    this.borderLeftColor = borderColor;
+    this.borderRightColor = borderColor;
+    this.borderTopColor = borderColor;
+    this.borderBottomColor = borderColor;
+  }
+
+  public set borderStyle(borderStyle: BorderStyle) {
+    this.borderLeftStyle = borderStyle;
+    this.borderRightStyle = borderStyle;
+    this.borderTopStyle = borderStyle;
+    this.borderBottomStyle = borderStyle;
   }
 
   public apply(node: YogaNode): void {
@@ -42,20 +70,32 @@ export class Style {
     node.setMinWidth(this.minWidth);
     node.setMaxWidth(this.maxWidth);
 
+    node.setBorder(Edge.Left, borderWidth(this.borderLeftStyle));
+    node.setBorder(Edge.Right, borderWidth(this.borderRightStyle));
+    node.setBorder(Edge.Top, borderWidth(this.borderTopStyle));
+    node.setBorder(Edge.Bottom, borderWidth(this.borderBottomStyle));
+
     node.setFlexGrow(this.flexGrow);
     node.setFlexShrink(this.flexShrink);
     node.setAlignItems(this.alignItems);
     node.setFlexDirection(this.flexDirection);
     node.setJustifyContent(this.justifyContent);
     node.setPositionType(this.positionType);
+
     node.setMargin(Edge.Left, this.marginLeft);
     node.setMargin(Edge.Right, this.marginRight);
     node.setMargin(Edge.Top, this.marginTop);
     node.setMargin(Edge.Bottom, this.marginBottom);
+
     node.setPadding(Edge.Left, this.paddingLeft);
     node.setPadding(Edge.Right, this.paddingRight);
     node.setPadding(Edge.Top, this.paddingTop);
     node.setPadding(Edge.Bottom, this.paddingBottom);
+
     node.setDisplay(this.display);
   }
+}
+
+function borderWidth(style: BorderStyle | undefined): number {
+  return style === "none" || !style ? 0 : 1;
 }

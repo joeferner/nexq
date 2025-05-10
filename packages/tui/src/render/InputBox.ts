@@ -1,6 +1,6 @@
 import { inputToChar, isInputMatch } from "../utils/input.js";
 import { Document } from "./Document.js";
-import { Element, PreRenderOptions } from "./Element.js";
+import { Element, RenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
 import { Style } from "./Style.js";
@@ -90,7 +90,7 @@ export class InputBox extends Element {
   }
 
   public set cursorPosition(cursorPosition: number) {
-    const width = Math.max(1, this.computedWidth);
+    const width = Math.max(1, this.clientWidth);
     this._cursorPosition = Math.max(0, Math.min(cursorPosition, this.value.length));
     if (this._cursorPosition - this.offset >= width) {
       this.offset = this._cursorPosition - width + 1;
@@ -99,9 +99,9 @@ export class InputBox extends Element {
     }
   }
 
-  protected preRender(options: PreRenderOptions): RenderItem[] {
-    const { container, geometry } = options;
-    const results = super.preRender(options);
+  protected override _render(options: RenderOptions): RenderItem[] {
+    const { innerContainer: container, innerGeometry: geometry } = options;
+    const results: RenderItem[] = [];
     const text = this.value.substring(this.offset, this.offset + geometry.width);
 
     results.push({

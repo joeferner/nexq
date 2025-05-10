@@ -1,7 +1,7 @@
 import { createAnsiSequenceParser } from "ansi-sequence-parser";
 import { Node as YogaNode } from "yoga-layout";
 import { Document } from "./Document.js";
-import { Element, PreRenderOptions } from "./Element.js";
+import { Element, RenderOptions } from "./Element.js";
 import { RenderItem } from "./RenderItem.js";
 import { Style } from "./Style.js";
 
@@ -44,8 +44,8 @@ export class Text extends Element {
     super.populateLayout(container);
   }
 
-  protected override preRender(options: PreRenderOptions): RenderItem[] {
-    const { container, geometry } = options;
+  protected override _render(options: RenderOptions): RenderItem[] {
+    const { innerContainer: container, innerGeometry: geometry } = options;
     return [
       {
         type: "text",

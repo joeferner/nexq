@@ -1,20 +1,21 @@
 import EventEmitter from "events";
 import * as R from "radash";
-import Yoga, { Display, Node as YogaNode } from "yoga-layout";
+import Yoga, { Display, Overflow, Node as YogaNode } from "yoga-layout";
+import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { Document } from "./Document.js";
+import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
 import { Style } from "./Style.js";
 import { Window } from "./Window.js";
-import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 
 const logger = createLogger("Element");
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ElementEvents {}
 
-export class Element {
+export abstract class Element {
   protected yogaNode?: YogaNode;
   private _document: Document;
   private parent?: Element;
@@ -24,13 +25,18 @@ export class Element {
   public zIndex = 0;
   public tabIndex: number | undefined;
   public focused = false;
-  protected _computedWidth = 0;
-  protected _computedHeight = 0;
+  protected _clientWidth = 0;
+  protected _clientHeight = 0;
+  protected _offsetWidth = 0;
+  protected _offsetHeight = 0;
+  protected _scrollWidth = 0;
+  protected _scrollHeight = 0;
   protected eventEmitter = new EventEmitter();
   private elementDidMountCalled = false;
   private elementWillUnmountCalled = false;
+  private _scrollTop = 0;
 
-  public constructor(document: Document) {
+  protected constructor(document: Document) {
     this._document = document;
     this._style = this.createStyle();
   }
@@ -52,7 +58,7 @@ export class Element {
     container.insertChild(this.yogaNode, container.getChildCount());
   }
 
-  public render(container: Geometry): RenderItem[] {
+  public render(options: RenderOptions): RenderItem[] {
     if (!this.yogaNode) {
       return [];
     }
@@ -61,19 +67,48 @@ export class Element {
       return [];
     }
 
+    const container = options.innerGeometry;
+
     const layout = this.yogaNode.getComputedLayout();
     const geometry = geometryFromYogaNode(this.yogaNode);
     geometry.top += container.top;
     geometry.left += container.left;
+    if (this.parentElement?.style.overflow === Overflow.Hidden) {
+      geometry.width = Math.min(geometry.width, container.width - layout.left);
+      geometry.height = Math.min(geometry.height, container.height - layout.top);
+    }
 
-    this._computedWidth = layout.width;
-    this._computedHeight = layout.height;
+    this._clientWidth = geometry.width - this.borderWidthLeft - this.borderWidthRight;
+    this._clientHeight = geometry.height - this.borderWidthTop - this.borderWidthBottom;
+    this._offsetWidth = geometry.width;
+    this._offsetHeight = geometry.height;
+    this._scrollWidth = this.children.reduce((p, c) => p + c.offsetWidth, 0);
+    this._scrollHeight = this.children.reduce((p, c) => p + c.offsetHeight, 0);
 
-    const renderItems: RenderItem[] = this.preRender({ yogaNode: this.yogaNode, container, geometry });
+    const innerContainer: Geometry = {
+      left: container.left + this.borderWidthLeft,
+      top: container.top + this.borderWidthTop,
+      width: container.width - this.borderWidthLeft - this.borderWidthRight,
+      height: container.height - this.borderWidthTop - this.borderWidthBottom,
+    };
+    const innerGeometry: Geometry = {
+      left: geometry.left + this.borderWidthLeft,
+      top: geometry.top + this.borderWidthTop,
+      width: geometry.width - this.borderWidthLeft - this.borderWidthRight,
+      height: geometry.height - this.borderWidthTop - this.borderWidthBottom,
+    };
+
+    return this._render({ outerContainer: container, outerGeometry: geometry, innerContainer, innerGeometry });
+  }
+
+  protected _render(options: RenderOptions): RenderItem[] {
+    const renderItems: RenderItem[] = [];
+
     for (const child of this._children) {
-      const childRenderItems = child.render(geometry);
+      const childRenderItems = child.render(options);
       for (const childRenderItem of childRenderItems) {
         childRenderItem.zIndex += this.zIndex;
+        childRenderItem.geometry.top -= this.scrollTop;
         renderItems.push(childRenderItem);
       }
     }
@@ -84,7 +119,36 @@ export class Element {
     this.activeElement?.onKeyDown(event);
   }
 
+  public scrollTo(xCoord: number, yCoord: number): void {
+    if (xCoord !== 0) {
+      throw new Error("horizontal scrolling not implemented");
+    }
+    this._scrollTop = Math.max(0, Math.min(yCoord, this.scrollHeight - this.clientHeight));
+  }
+
   protected onKeyDown(event: KeyboardEvent): void {
+    if (this.style.overflow === Overflow.Scroll) {
+      if (isInputMatch(event, "down")) {
+        this.scrollTo(0, this.scrollTop + 1);
+        return;
+      }
+
+      if (isInputMatch(event, "up")) {
+        this.scrollTo(0, this.scrollTop - 1);
+        return;
+      }
+
+      if (isInputMatch(event, "pagedown")) {
+        this.scrollTo(0, this.scrollTop + this.clientHeight);
+        return;
+      }
+
+      if (isInputMatch(event, "pageup")) {
+        this.scrollTo(0, this.scrollTop - this.clientHeight);
+        return;
+      }
+    }
+
     this.parent?.onKeyDown(event);
   }
 
@@ -148,16 +212,54 @@ export class Element {
     }
   }
 
-  protected preRender(_options: PreRenderOptions): RenderItem[] {
-    return [];
+  /**
+   * returns the inner width of an element in pixels, including padding but
+   * not the horizontal scrollbar width, border, or margin
+   */
+  public get clientWidth(): number {
+    return this._clientWidth;
   }
 
-  public get computedWidth(): number {
-    return this._computedWidth;
+  /**
+   * returns the inner height of an element in pixels, including padding but
+   * not the horizontal scrollbar height, border, or margin
+   */
+  public get clientHeight(): number {
+    return this._clientHeight;
   }
 
-  public get computedHeight(): number {
-    return this._computedHeight;
+  /**
+   * is a measurement which includes the element borders, the element horizontal
+   * padding, the element vertical scrollbar (if present, if rendered) and
+   * the element CSS width.
+   */
+  public get offsetWidth(): number {
+    return this._offsetWidth;
+  }
+
+  /**
+   * is a measurement which includes the element borders, the element vertical
+   * padding, the element horizontal scrollbar (if present, if rendered) and
+   * the element CSS height.
+   */
+  public get offsetHeight(): number {
+    return this._offsetHeight;
+  }
+
+  /**
+   * is a measurement of the width of an element's content including content
+   * not visible on the screen due to overflow
+   */
+  public get scrollWidth(): number {
+    return this._scrollWidth;
+  }
+
+  /**
+   * is a measurement of the height of an element's content including content
+   * not visible on the screen due to overflow
+   */
+  public get scrollHeight(): number {
+    return this._scrollHeight;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,6 +276,14 @@ export class Element {
 
   public get window(): Window {
     return this._document.window;
+  }
+
+  public get scrollTop(): number {
+    return this._scrollTop;
+  }
+
+  public set scrollTop(scrollTop: number) {
+    this._scrollTop = scrollTop;
   }
 
   public focus(): void {
@@ -264,10 +374,31 @@ export class Element {
   public get parentElement(): Element | null {
     return this.parent ?? null;
   }
+
+  private get borderWidthLeft(): number {
+    return borderWidth(this.style.borderLeftStyle);
+  }
+
+  private get borderWidthRight(): number {
+    return borderWidth(this.style.borderRightStyle);
+  }
+
+  private get borderWidthTop(): number {
+    return borderWidth(this.style.borderTopStyle);
+  }
+
+  private get borderWidthBottom(): number {
+    return borderWidth(this.style.borderBottomStyle);
+  }
 }
 
-export interface PreRenderOptions {
-  yogaNode: YogaNode;
-  geometry: Geometry;
-  container: Geometry;
+export interface RenderOptions {
+  outerGeometry: Readonly<Geometry>;
+  outerContainer: Readonly<Geometry>;
+  innerGeometry: Readonly<Geometry>;
+  innerContainer: Readonly<Geometry>;
+}
+
+function borderWidth(borderStyle: string | undefined): number {
+  return borderStyle === undefined || borderStyle === "none" ? 0 : 1;
 }

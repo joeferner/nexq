@@ -1,4 +1,5 @@
 import { Geometry } from "./Geometry.js";
+import { BorderStyle } from "./Style.js";
 
 export interface TextRenderItem {
   type: "text";
@@ -17,17 +18,19 @@ export interface CursorRenderItem {
   zIndex: number;
 }
 
-export enum BorderType {
-  Single = "Single",
-}
-
 export interface BoxRenderItem {
   type: "box";
-  borderType: BorderType;
   container: Geometry;
   geometry: Geometry;
-  color: string;
   zIndex: number;
+  borderLeftStyle: BorderStyle;
+  borderRightStyle: BorderStyle;
+  borderTopStyle: BorderStyle;
+  borderBottomStyle: BorderStyle;
+  borderLeftColor: string;
+  borderRightColor: string;
+  borderTopColor: string;
+  borderBottomColor: string;
 }
 
 export type RenderItem = TextRenderItem | CursorRenderItem | BoxRenderItem;

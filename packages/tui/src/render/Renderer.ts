@@ -7,7 +7,8 @@ import { createLogger } from "../utils/logger.js";
 import { ansiColorToColorString, bgColor, fgColor } from "./color.js";
 import { Element } from "./Element.js";
 import { geometryFromYogaNode } from "./Geometry.js";
-import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
+import { BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
+import { BorderStyle } from "./Style.js";
 
 const logger = createLogger("Renderer");
 
@@ -56,7 +57,12 @@ export class Renderer {
       element.populateLayout(root);
       root.calculateLayout(undefined, undefined, Direction.LTR);
       const container = geometryFromYogaNode(root);
-      renderItems = element.render(container);
+      renderItems = element.render({
+        outerContainer: container,
+        innerContainer: container,
+        innerGeometry: container,
+        outerGeometry: container,
+      });
     } finally {
       root.freeRecursive();
     }
@@ -226,8 +232,18 @@ interface BorderCharacters {
   w: string;
 }
 
-const BORDERS: Record<BorderType, BorderCharacters> = {
-  [BorderType.Single]: {
+const BORDERS: Record<BorderStyle, BorderCharacters> = {
+  none: {
+    nw: "",
+    n: "",
+    ne: "",
+    e: "",
+    se: "",
+    s: "",
+    sw: "",
+    w: "",
+  },
+  solid: {
     nw: "┌",
     n: "─",
     ne: "┐",
@@ -241,7 +257,7 @@ const BORDERS: Record<BorderType, BorderCharacters> = {
 
 function renderBoxItemToBuffer(buffer: Character[][], renderItem: BoxRenderItem): void {
   const { top, left, width, height } = renderItem.geometry;
-  const border = BORDERS[renderItem.borderType];
+  const border = BORDERS[renderItem.borderLeftStyle];
 
   for (let y = 0; y < height; y++) {
     const bufferRow = buffer[top + y];
@@ -255,7 +271,7 @@ function renderBoxItemToBuffer(buffer: Character[][], renderItem: BoxRenderItem)
       }
 
       bufferCh.bgColor = undefined;
-      bufferCh.color = renderItem.color;
+      bufferCh.color = renderItem.borderLeftColor;
       bufferCh.inverse = false;
       if (x === 0 && y === 0) {
         bufferCh.value = border.nw;
