@@ -1,4 +1,4 @@
-import { createLogger, Time } from "@nexq/core";
+import { createLogger, DuplicateMessageError, getErrorMessage, QueueInfo, SendMessageOptions, Time } from "@nexq/core";
 import fs from "node:fs";
 import pg from "pg";
 import Pool from "pg-pool";
@@ -13,6 +13,7 @@ import {
   DialectTopicNotification,
 } from "./Dialect.js";
 import { PostgresTransaction } from "./PostgresTransaction.js";
+import { Transaction } from "./Transaction.js";
 
 interface MessageNotification {
   type: "message-delete" | "message-upsert";
@@ -178,5 +179,27 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
 
   protected toSqlBoolean(v: boolean): unknown {
     return v;
+  }
+
+  public override async sendMessage(
+    tx: Transaction | undefined,
+    queueInfo: QueueInfo,
+    id: string,
+    body: string,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): Promise<void> {
+    const deduplicationId = options?.deduplicationId ?? id;
+    try {
+      return await super.sendMessage(tx, queueInfo, id, body, options);
+    } catch (err) {
+      if (
+        getErrorMessage(err).includes(
+          `error: duplicate key value violates unique constraint "nexq_message_deduplication_id"`
+        )
+      ) {
+        throw new DuplicateMessageError(deduplicationId);
+      }
+      throw err;
+    }
   }
 }

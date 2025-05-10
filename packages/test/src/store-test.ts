@@ -504,6 +504,55 @@ export async function runStoreTest(options: {
       expect(messageTry2).toBeTruthy();
     });
 
+    describe("deduplication", async () => {
+      test("different ids", async () => {
+        // create the queue
+        await store.createQueue(QUEUE1_NAME, { maxMessageSize: 10 });
+
+        await store.sendMessage(QUEUE1_NAME, "test1", { deduplicationId: "test1" });
+        await store.sendMessage(QUEUE1_NAME, "test2", { deduplicationId: "test2" });
+        await assertQueueSize(store, QUEUE1_NAME, 2, 0, 0);
+      });
+
+      test("same ids", async () => {
+        // create the queue
+        await store.createQueue(QUEUE1_NAME, { maxMessageSize: 10 });
+
+        await store.sendMessage(QUEUE1_NAME, "test1", { deduplicationId: "dup1" });
+        await expect(
+          async () => await store.sendMessage(QUEUE1_NAME, "test2", { deduplicationId: "dup1" })
+        ).rejects.toThrowError('Message with "dup1" already exists in queue');
+        await assertQueueSize(store, QUEUE1_NAME, 1, 0, 0);
+        const message1 = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+        expect(message1?.body).toBe("test1");
+
+        await store.sendMessage(QUEUE1_NAME, "test3", { deduplicationId: "dup1" });
+        await assertQueueSize(store, QUEUE1_NAME, 1, 0, 1);
+        const message2 = await store.receiveMessage(QUEUE1_NAME, { visibilityTimeoutMs: 100 });
+        expect(message2?.body).toBe("test3");
+      });
+
+      test("same ids bulk", async () => {
+        // create the queue
+        await store.createQueue(QUEUE1_NAME, { maxMessageSize: 10 });
+
+        await store.sendMessage(QUEUE1_NAME, "test1", { deduplicationId: "dup1" });
+        const sendMessagesResults = await store.sendMessages(QUEUE1_NAME, {
+          messages: [
+            { body: "test2", deduplicationId: "dup1" },
+            { body: "test3", deduplicationId: "dup2" },
+          ],
+        });
+        expect(sendMessagesResults.results[0].id).toBeUndefined();
+        expect(sendMessagesResults.results[0].error).toBe(
+          'DuplicateMessageError: Message with "dup1" already exists in queue'
+        );
+        expect(sendMessagesResults.results[1].id).toBeTruthy();
+        expect(sendMessagesResults.results[1].error).toBeUndefined();
+        await assertQueueSize(store, QUEUE1_NAME, 2, 0, 0);
+      });
+    });
+
     test("max message size", async () => {
       // create the queue
       await store.createQueue(QUEUE1_NAME, { maxMessageSize: 10 });
@@ -1265,9 +1314,9 @@ export async function runStoreTest(options: {
       const messages = await store.receiveMessages(QUEUE1_NAME, { maxNumberOfMessages: 10 });
       expect(messages.length).toBe(2);
       expect(messages[0].body).toBe(MESSAGE1_BODY);
-      expect(messages[0].id).toBe(result.ids[0]);
+      expect(messages[0].id).toBe(result.results[0].id);
       expect(messages[1].body).toBe(MESSAGE2_BODY);
-      expect(messages[1].id).toBe(result.ids[1]);
+      expect(messages[1].id).toBe(result.results[1].id);
     });
 
     if (supportsMultipleStores) {

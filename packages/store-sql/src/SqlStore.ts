@@ -9,6 +9,7 @@ import {
   DEFAULT_VISIBILITY_TIMEOUT_MS,
   DeleteDeadLetterQueueError,
   DeleteDeadLetterTopicError,
+  getErrorMessage,
   GetMessage,
   hashPassword,
   InvalidQueueNameError,
@@ -45,7 +46,7 @@ import {
   UsernameAlreadyExistsError,
 } from "@nexq/core";
 import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
-import { SendMessagesResult } from "@nexq/core/build/dto/SendMessagesResult.js";
+import { SendMessagesResult, SendMessagesResultMessage } from "@nexq/core/build/dto/SendMessagesResult.js";
 import {
   DialectMessageNotification,
   DialectQueueNotification,
@@ -291,16 +292,25 @@ export class SqlStore implements Store {
         throw new MessageExceededMaxMessageSizeError(tooLargeMessage.body.length, maxMessageSize);
       }
     }
-    const ids = options.messages.map((_) => createId());
-    await this.dialect.withTransaction(async (tx) => {
+    const results = await this.dialect.withTransaction(async (tx) => {
+      const results: SendMessagesResultMessage[] = [];
       for (let i = 0; i < options.messages.length; i++) {
         const message = options.messages[i];
-        const id = ids[i];
-        await this.dialect.sendMessage(tx, queueInfo, id, message.body, message);
+        const id = createId();
+        const savePoint = await this.dialect.createSavePoint(tx, "sendMessage");
+        try {
+          await this.dialect.sendMessage(tx, queueInfo, id, message.body, message);
+          await savePoint.release();
+          results.push({ id });
+        } catch (err) {
+          await savePoint.rollback();
+          results.push({ error: getErrorMessage(err) });
+        }
       }
+      return results;
     });
     this.trigger({ type: "newQueueMessageEvent", queueName } satisfies NewQueueMessageEvent);
-    return { ids };
+    return { results };
   }
 
   public async publishMessage(topicName: string, body: string, options?: SendMessageOptions): Promise<void> {
