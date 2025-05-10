@@ -1,12 +1,13 @@
 import { FlexDirection } from "yoga-layout";
 import { NexqStyles } from "../NexqStyles.js";
 import { Document } from "../render/Document.js";
-import { Element } from "../render/Element.js";
+import { Element, RenderOptions } from "../render/Element.js";
 import { Text } from "../render/Text.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { isPathMatch } from "../render/RouterElement.js";
 import { Topics } from "./Topics.js";
+import { DivElement } from "../render/DivElement.js";
 
 export interface HelpItem {
   id: string;
@@ -20,6 +21,7 @@ export class Help extends Element {
 
   public constructor(document: Document) {
     super(document);
+    this.id = "Help";
     this.style.flexDirection = FlexDirection.Column;
   }
 
@@ -32,6 +34,10 @@ export class Help extends Element {
   protected override elementWillUnmount(): void {
     this.window.removeEventListener("popstate", this.boundRefreshChildren);
     this.window.removeEventListener("pushstate", this.boundRefreshChildren);
+  }
+
+  public override render(options: RenderOptions): void {
+    super.render(options);
   }
 
   private refreshChildren(): void {
@@ -59,7 +65,7 @@ export class Help extends Element {
     for (const helpItem of helpItems) {
       const padding = " ".repeat(maxShortcutWidth - helpItem.shortcut.length);
 
-      const row = new Element(this.document);
+      const row = new DivElement(this.document);
       row.style.flexDirection = FlexDirection.Row;
       row.appendChild(
         new Text(this.document, { text: `<${helpItem.shortcut}>${padding} `, color: NexqStyles.helpHotkeyColor })

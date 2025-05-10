@@ -56,6 +56,7 @@ export class App extends Element {
 
   public constructor(document: Document, options: AppOptions) {
     super(document);
+    this.id = "App";
 
     this.tuiVersion = options.tuiVersion;
 

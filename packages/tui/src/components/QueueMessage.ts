@@ -2,12 +2,10 @@ import matchPath from "node-match-path";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
-import { Box } from "../render/Box.js";
 import { fgColor } from "../render/color.js";
+import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
-import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
-import { BorderType } from "../render/RenderItem.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
@@ -18,9 +16,8 @@ import { StatusBar } from "./StatusBar.js";
 
 const logger = createLogger("QueueMessage");
 
-export class QueueMessage extends Element {
+export class QueueMessage extends DivElement {
   public static readonly PATH = "/queue/:queueName/:messageId";
-  private readonly box: Box;
   private readonly text: Text;
   public static readonly HELP_ITEMS: HelpItem[] = [
     {
@@ -34,27 +31,20 @@ export class QueueMessage extends Element {
 
   public constructor(document: Document) {
     super(document);
+
     this.style.width = "100%";
     this.style.flexGrow = 1;
     this.style.flexShrink = 1;
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
-    this.style.overflow = Overflow.Hidden;
-
-    this.box = new Box(document);
-    this.box.borderType = BorderType.Single;
-    this.box.borderColor = NexqStyles.borderColor;
-    this.box.style.flexGrow = 1;
-    this.box.style.flexShrink = 1;
-    this.box.style.flexDirection = FlexDirection.Column;
-    this.box.title = fgColor(NexqStyles.titleColor)` Messages `;
-    this.box.style.alignItems = Align.Stretch;
-    this.box.style.overflow = Overflow.Hidden;
-    this.appendChild(this.box);
+    this.style.overflowY = Overflow.Scroll;
+    this.style.borderStyle = "solid";
+    this.style.borderColor = NexqStyles.borderColor;
+    this.borderTitle = fgColor(NexqStyles.titleColor)` Messages `;
 
     this.text = new Text(document, { text: "" });
     this.text.style.flexGrow = 1;
-    this.box.appendChild(this.text);
+    this.appendChild(this.text);
   }
 
   protected override elementDidMount(): void {
@@ -88,15 +78,15 @@ export class QueueMessage extends Element {
     ];
     this.text.text = detailsToString(details);
 
-    this.box.title =
+    this.borderTitle =
       fgColor(NexqStyles.titleColor)` Message(` +
       fgColor(NexqStyles.titleAltColor)`${this.queueName}/${this.messageId}` +
       fgColor(NexqStyles.titleColor)`) `;
 
     const run = async (): Promise<void> => {
       await this.window.refresh();
-      if (this.window.activeElement !== this.box) {
-        this.box.focus();
+      if (this.window.activeElement !== this) {
+        this.focus();
       }
     };
     void run();

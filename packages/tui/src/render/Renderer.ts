@@ -1,13 +1,13 @@
 import { cursorHide, cursorShow, cursorTo } from "ansi-escapes";
 import { createAnsiSequenceParser } from "ansi-sequence-parser";
 import * as ansis from "ansis";
-import * as R from "radash";
 import Yoga, { Direction } from "yoga-layout";
 import { createLogger } from "../utils/logger.js";
 import { ansiColorToColorString, bgColor, fgColor } from "./color.js";
 import { Element } from "./Element.js";
-import { geometryFromYogaNode } from "./Geometry.js";
-import { BorderType, BoxRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
+import { Geometry, geometryFromYogaNode, rectIntersection } from "./Geometry.js";
+import { BoxRenderItem, findRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
+import { BorderStyle } from "./Style.js";
 
 const logger = createLogger("Renderer");
 
@@ -16,7 +16,42 @@ interface Character {
   color: string;
   bgColor?: string;
   inverse: boolean;
+  zIndex: number;
 }
+
+interface BorderCharacters {
+  nw: string;
+  n: string;
+  ne: string;
+  e: string;
+  se: string;
+  s: string;
+  sw: string;
+  w: string;
+}
+
+const BORDERS: Record<BorderStyle, BorderCharacters> = {
+  none: {
+    nw: "",
+    n: "",
+    ne: "",
+    e: "",
+    se: "",
+    s: "",
+    sw: "",
+    w: "",
+  },
+  solid: {
+    nw: "┌",
+    n: "─",
+    ne: "┐",
+    e: "│",
+    se: "┘",
+    s: "─",
+    sw: "└",
+    w: "│",
+  },
+};
 
 function isCharacterEqual(ch1: Character, ch2: Character | undefined): boolean {
   if (ch2 === undefined) {
@@ -48,19 +83,31 @@ export class Renderer {
     this._width = process.stdout.columns ?? 80;
     this._height = process.stdout.rows ?? 40;
 
-    const root = Yoga.Node.create();
-    let renderItems;
+    const root: BoxRenderItem = {
+      type: "box",
+      children: [],
+      zIndex: 0,
+      geometry: {
+        top: 0,
+        left: 0,
+        height: 0,
+        width: 0,
+      },
+    };
+    const rootYogaNode = Yoga.Node.create();
     try {
-      root.setWidth(this.width);
-      root.setHeight(this.height);
-      element.populateLayout(root);
-      root.calculateLayout(undefined, undefined, Direction.LTR);
-      const container = geometryFromYogaNode(root);
-      renderItems = element.render(container);
+      rootYogaNode.setWidth(this.width);
+      rootYogaNode.setHeight(this.height);
+      element.populateLayout(rootYogaNode);
+      rootYogaNode.calculateLayout(undefined, undefined, Direction.LTR);
+      root.geometry = geometryFromYogaNode(rootYogaNode);
+      element.render({
+        parent: root,
+        root,
+      });
     } finally {
-      root.freeRecursive();
+      rootYogaNode.freeRecursive();
     }
-    const sortedRenderItems = R.sort(renderItems, (r) => r.zIndex);
 
     const secondaryBufferIndex = (this.bufferIndex + 1) % 2;
     if (this._width !== this.previousWidth || this._height !== this.previousHeight) {
@@ -70,13 +117,12 @@ export class Renderer {
     }
 
     clearBuffer(this.buffers[this.bufferIndex]);
-    for (const renderItem of sortedRenderItems) {
-      renderItemToBuffer(this.buffers[this.bufferIndex], renderItem);
-    }
+    renderItemGeometryToAbsolute(root, root.geometry, 0);
+    renderItemToBuffer(this.buffers[this.bufferIndex], root, root.geometry);
 
     renderBuffer(this.buffers[this.bufferIndex], this.buffers[secondaryBufferIndex]);
 
-    const cursorRenderItem = sortedRenderItems.find((r) => r.type === "cursor");
+    const cursorRenderItem = findRenderItem(root, (r) => r.type === "cursor");
     if (cursorRenderItem) {
       process.stdout.write(cursorShow);
       process.stdout.write(cursorTo(cursorRenderItem.geometry.left, cursorRenderItem.geometry.top));
@@ -100,6 +146,7 @@ function clearBuffer(buffer: Character[][], ch?: string): void {
     for (let x = 0; x < row.length; x++) {
       row[x].value = ch ?? " ";
       row[x].inverse = false;
+      row[x].zIndex = Number.MIN_SAFE_INTEGER;
     }
   }
 }
@@ -169,25 +216,50 @@ function renderBuffer(buffer: Character[][], lastBuffer?: Character[][]): void {
   }
 }
 
-function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem): void {
+function renderItemGeometryToAbsolute(renderItem: RenderItem, container: Geometry, zIndex: number): void {
+  renderItem.geometry.top = container.top + renderItem.geometry.top;
+  renderItem.geometry.left = container.left + renderItem.geometry.left;
+  renderItem.zIndex += zIndex;
+  if ("children" in renderItem) {
+    for (const child of renderItem.children) {
+      renderItemGeometryToAbsolute(child, renderItem.geometry, renderItem.zIndex);
+    }
+  }
+}
+
+function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem, container: Geometry): void {
   const type = renderItem.type;
+
+  if (renderItem.name?.endsWith("-title")) {
+    renderItem.name = "" + renderItem.name;
+  }
+
+  const newContainer = rectIntersection(renderItem.geometry, container);
+  if (!newContainer) {
+    return;
+  }
+  container = newContainer;
+
   if (type === "cursor") {
     // do nothing
   } else if (type === "text") {
-    renderTextItemToBuffer(buffer, renderItem);
+    renderTextItemToBuffer(buffer, renderItem, container);
   } else if (type === "box") {
-    renderBoxItemToBuffer(buffer, renderItem);
+    renderBoxItemToBuffer(buffer, renderItem, container);
   } else {
     throw new Error(`unhandled render item type "${type}"`);
   }
 }
 
-function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderItem): void {
+function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderItem, container: Geometry): void {
   const parser = createAnsiSequenceParser();
   const lines = renderItem.text.split("\n").map((line) => parser.parse(line));
+  const containerBottom = container.top + container.height;
+  const containerRight = container.left + container.width;
+
   let y = renderItem.geometry.top;
   for (let lineIndex = 0; lineIndex < renderItem.geometry.height; lineIndex++, y++) {
-    if (y < renderItem.container.top || y >= renderItem.container.top + renderItem.container.height) {
+    if (y < container.top || y >= containerBottom) {
       continue;
     }
 
@@ -200,13 +272,14 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
     const tokens = lines[lineIndex];
     for (const token of tokens ?? []) {
       for (const ch of token.value) {
-        if (x >= renderItem.container.left && x < renderItem.container.left + renderItem.container.width) {
+        if (x >= container.left && x < containerRight) {
           const bufferCh = bufferRow[x];
-          if (bufferCh) {
+          if (bufferCh && renderItem.zIndex > bufferCh.zIndex) {
             bufferCh.value = ch ?? " ";
             bufferCh.color = token.foreground ? ansiColorToColorString(token.foreground) : renderItem.color;
             bufferCh.bgColor = token.background ? ansiColorToColorString(token.background) : renderItem.bgColor;
             bufferCh.inverse = renderItem.inverse ?? false;
+            bufferCh.zIndex = renderItem.zIndex;
           }
         }
         x++;
@@ -215,67 +288,75 @@ function renderTextItemToBuffer(buffer: Character[][], renderItem: TextRenderIte
   }
 }
 
-interface BorderCharacters {
-  nw: string;
-  n: string;
-  ne: string;
-  e: string;
-  se: string;
-  s: string;
-  sw: string;
-  w: string;
-}
+function renderBoxItemToBuffer(buffer: Character[][], renderItem: BoxRenderItem, container: Geometry): void {
+  const top = renderItem.geometry.top;
+  const left = renderItem.geometry.left;
+  const bottom = top + renderItem.geometry.height;
+  const right = left + renderItem.geometry.width;
+  const containerBottom = container.top + container.height;
+  const containerRight = container.left + container.width;
+  let insideBorderContainer: Geometry | undefined;
 
-const BORDERS: Record<BorderType, BorderCharacters> = {
-  [BorderType.Single]: {
-    nw: "┌",
-    n: "─",
-    ne: "┐",
-    e: "│",
-    se: "┘",
-    s: "─",
-    sw: "└",
-    w: "│",
-  },
-};
+  if (renderItem.borderLeftStyle && renderItem.borderLeftStyle !== "none" && renderItem.borderLeftColor) {
+    const border = BORDERS[renderItem.borderLeftStyle];
 
-function renderBoxItemToBuffer(buffer: Character[][], renderItem: BoxRenderItem): void {
-  const { top, left, width, height } = renderItem.geometry;
-  const border = BORDERS[renderItem.borderType];
-
-  for (let y = 0; y < height; y++) {
-    const bufferRow = buffer[top + y];
-    if (!bufferRow) {
-      continue;
-    }
-    for (let x = 0; x < width; x++) {
-      const bufferCh = bufferRow[left + x];
-      if (!bufferCh) {
+    for (let y = top; y < bottom; y++) {
+      if (y < container.top || y >= containerBottom) {
         continue;
       }
 
-      bufferCh.bgColor = undefined;
-      bufferCh.color = renderItem.color;
-      bufferCh.inverse = false;
-      if (x === 0 && y === 0) {
-        bufferCh.value = border.nw;
-      } else if (x === 0 && y === height - 1) {
-        bufferCh.value = border.sw;
-      } else if (x === width - 1 && y === 0) {
-        bufferCh.value = border.ne;
-      } else if (x === width - 1 && y === height - 1) {
-        bufferCh.value = border.se;
-      } else if (x === 0) {
-        bufferCh.value = border.w;
-      } else if (x === width - 1) {
-        bufferCh.value = border.e;
-      } else if (y === 0) {
-        bufferCh.value = border.n;
-      } else if (y === height - 1) {
-        bufferCh.value = border.s;
-      } else {
-        bufferCh.value = " ";
+      const bufferRow = buffer[y];
+      if (!bufferRow) {
+        continue;
       }
+      for (let x = left; x < right; x++) {
+        if (x < container.left || x >= containerRight) {
+          continue;
+        }
+
+        const bufferCh = bufferRow[x];
+        if (!bufferCh) {
+          continue;
+        }
+
+        bufferCh.bgColor = undefined;
+        bufferCh.color = renderItem.borderLeftColor;
+        bufferCh.inverse = false;
+        if (x === left && y === top) {
+          bufferCh.value = border.nw;
+        } else if (x === left && y === bottom - 1) {
+          bufferCh.value = border.sw;
+        } else if (x === right - 1 && y === top) {
+          bufferCh.value = border.ne;
+        } else if (x === right - 1 && y === bottom - 1) {
+          bufferCh.value = border.se;
+        } else if (x === left) {
+          bufferCh.value = border.w;
+        } else if (x === right - 1) {
+          bufferCh.value = border.e;
+        } else if (y === top) {
+          bufferCh.value = border.n;
+        } else if (y === bottom - 1) {
+          bufferCh.value = border.s;
+        } else {
+          bufferCh.value = " ";
+        }
+      }
+    }
+
+    insideBorderContainer = {
+      left: container.left + 1,
+      top: container.top + 1,
+      width: container.width - 2,
+      height: container.height - 2,
+    };
+  }
+
+  for (const child of renderItem.children) {
+    if (child.canRenderOnBorder) {
+      renderItemToBuffer(buffer, child, container);
+    } else {
+      renderItemToBuffer(buffer, child, insideBorderContainer ?? container);
     }
   }
 }
@@ -289,6 +370,7 @@ function createBuffer(width: number, height: number): Character[][] {
         value: " ",
         color: "#ffffff",
         inverse: false,
+        zIndex: Number.MIN_SAFE_INTEGER,
       });
     }
     buffer.push(line);

@@ -17,7 +17,10 @@ async function run(): Promise<void> {
         attributes[`attr${a}`] = `attribute value ${a}`;
       }
       await client.api.sendMessage(queueName, {
-        body: `data ${m}`,
+        body: JSON.stringify({
+          message:
+            "this is a long test string to check display of large strings in the TUI interface when inspecting a message, we want to make sure it wraps correctly. (multi-wide character ⛩️⛩️⛩️⛩️⛩️⛩️⛩️⛩️)",
+        }),
         attributes,
       });
     }

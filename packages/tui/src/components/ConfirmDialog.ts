@@ -2,10 +2,12 @@ import { Justify } from "yoga-layout";
 import { NexqStyles } from "../NexqStyles.js";
 import { Button } from "../render/Button.js";
 import { Dialog } from "../render/Dialog.js";
+import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
 import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
+import { fgColor } from "../render/color.js";
 import { isInputMatch } from "../utils/input.js";
 import { StatusBar } from "./StatusBar.js";
 
@@ -19,6 +21,7 @@ export interface ConfirmOptions {
 export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
   public constructor(document: Document) {
     super(document);
+    this.id = "ConfirmDialog";
     NexqStyles.applyToDialog(this);
   }
 
@@ -26,7 +29,7 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
     if (isInputMatch(event, "escape")) {
       this.close(undefined);
     } else if (isInputMatch(event, "return")) {
-      const focusedElement = this.box.activeElement;
+      const focusedElement = this.activeElement;
       if (focusedElement instanceof Button) {
         this.close(focusedElement.id);
       } else {
@@ -38,13 +41,13 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
   }
 
   public override async onShow(options: ConfirmOptions): Promise<void> {
-    this.title = options.title;
+    this.borderTitle = fgColor(NexqStyles.dialogTitleColor)`<${options.title}>`;
 
-    while (this.box.lastElementChild) {
-      this.box.removeChild(this.box.lastElementChild);
+    while (this.lastElementChild) {
+      this.removeChild(this.lastElementChild);
     }
 
-    const optionsContainer = new Element(this.document);
+    const optionsContainer = new DivElement(this.document);
     let focusedOption: Element | undefined;
     optionsContainer.style.width = "100%";
     optionsContainer.style.justifyContent = Justify.Center;
@@ -66,8 +69,8 @@ export class ConfirmDialog extends Dialog<ConfirmOptions, string | undefined> {
     const message = new Text(this.document, { text: options.message });
     message.style.marginBottom = 1;
 
-    this.box.appendChild(message);
-    this.box.appendChild(optionsContainer);
+    this.appendChild(message);
+    this.appendChild(optionsContainer);
 
     const focusedChild = focusedOption ?? optionsContainer.firstElementChild;
     focusedChild?.focus();

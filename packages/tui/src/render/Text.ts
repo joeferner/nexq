@@ -1,8 +1,7 @@
 import { createAnsiSequenceParser } from "ansi-sequence-parser";
 import { Node as YogaNode } from "yoga-layout";
 import { Document } from "./Document.js";
-import { Element, PreRenderOptions } from "./Element.js";
-import { RenderItem } from "./RenderItem.js";
+import { Element, RenderChildrenOptions } from "./Element.js";
 import { Style } from "./Style.js";
 
 export interface TextOptions {
@@ -44,18 +43,21 @@ export class Text extends Element {
     super.populateLayout(container);
   }
 
-  protected override preRender(options: PreRenderOptions): RenderItem[] {
-    const { container, geometry } = options;
-    return [
-      {
-        type: "text",
-        text: this.text,
-        color: this.style.color ?? "#ffffff",
-        inverse: this.style.inverse,
-        zIndex: this.zIndex,
-        container,
-        geometry,
+  protected override renderChildren(options: RenderChildrenOptions): void {
+    const geometry = options.parent.geometry;
+
+    options.parent.children.push({
+      type: "text",
+      text: this.text,
+      color: this.style.color ?? "#ffffff",
+      inverse: this.style.inverse,
+      zIndex: this.zIndex,
+      geometry: {
+        left: 0,
+        top: 0,
+        width: geometry.width,
+        height: geometry.height,
       },
-    ];
+    });
   }
 }
