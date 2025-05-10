@@ -121,6 +121,28 @@ describe("ApiV1QueueController", async () => {
       expect(m2!.body).toBe("test2");
     });
 
+    test("duplicates", async () => {
+      await store.createQueue(QUEUE1_NAME);
+      await store.sendMessage(QUEUE1_NAME, "test1", { deduplicationId: "dup1" });
+      const response = await controller.sendMessages(QUEUE1_NAME, {
+        messages: [
+          { body: "test2", deduplicationId: "dup1" },
+          { body: "test3", deduplicationId: "dup2" },
+        ],
+      });
+      await assertQueueSize(store, QUEUE1_NAME, 2, 0, 0);
+      const m1 = await store.receiveMessage(QUEUE1_NAME);
+      expect(m1!.body).toBe("test1");
+      const m2 = await store.receiveMessage(QUEUE1_NAME);
+      expect(m2!.body).toBe("test3");
+
+      expect(response.results.length).toBe(2);
+      expect(response.results[0].id).toBeUndefined();
+      expect(response.results[0].error).toBeTruthy();
+      expect(response.results[1].id).toBe(m2?.id);
+      expect(response.results[1].error).toBeUndefined();
+    });
+
     test("queue not found", async () => {
       await expectHttpError(
         async () => await controller.sendMessages("bad-queue-name", { messages: [{ body: "test" }] }),
