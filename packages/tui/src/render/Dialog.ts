@@ -1,25 +1,21 @@
 import { Display, FlexDirection, Justify, PositionType, Node as YogaNode } from "yoga-layout/load";
 import { isInputMatch } from "../utils/input.js";
-import { Box } from "./Box.js";
+import { DivElement } from "./DivElement.js";
 import { Document } from "./Document.js";
-import { Element } from "./Element.js";
-import { Geometry } from "./Geometry.js";
+import { Element, RenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
-import { RenderItem } from "./RenderItem.js";
-import { fgColor } from "./color.js";
+import { BoxRenderItem } from "./RenderItem.js";
 
 export interface UpdateOptions {
   title: string;
   children: Element[];
 }
 
-export abstract class Dialog<TShowOptions, TResults> extends Element {
-  protected box: Box;
+export abstract class Dialog<TShowOptions, TResults> extends DivElement {
   private lastParentYogaNode?: YogaNode;
   protected options?: TShowOptions;
   private resolve?: (value: TResults | undefined) => unknown;
   private lastFocus?: Element;
-  public titleColor: string;
 
   protected constructor(document: Document) {
     super(document);
@@ -27,26 +23,14 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
     this.zIndex = 100;
     this.style.positionType = PositionType.Absolute;
     this.style.display = Display.None;
-
-    this.titleColor = "#ffffff";
-
-    this.box = new Box(document);
-    this.box.borderColor = "#ffffff";
-    this.box.style.flexDirection = FlexDirection.Column;
-    this.box.style.justifyContent = Justify.Center;
-    this.box.style.paddingLeft = 2;
-    this.box.style.paddingRight = 2;
-    this.box.style.paddingTop = 1;
-    this.box.style.paddingBottom = 1;
-    this.appendChild(this.box);
-  }
-
-  public set title(title: string) {
-    this.box.title = fgColor(this.titleColor)`<${title}>`;
-  }
-
-  public set borderColor(borderColor: string) {
-    this.box.borderColor = borderColor;
+    this.style.borderStyle = "solid";
+    this.style.borderColor = "#ffffff";
+    this.style.flexDirection = FlexDirection.Column;
+    this.style.justifyContent = Justify.Center;
+    this.style.paddingLeft = 2;
+    this.style.paddingRight = 2;
+    this.style.paddingTop = 1;
+    this.style.paddingBottom = 1;
   }
 
   public async show(options: TShowOptions): Promise<TResults | undefined> {
@@ -79,28 +63,27 @@ export abstract class Dialog<TShowOptions, TResults> extends Element {
     super.populateLayout(node);
   }
 
-  public override render(container: Geometry): RenderItem[] {
+  public override render(options: RenderOptions): void {
     if (!this.lastParentYogaNode) {
-      return super.render(container);
+      return super.render(options);
     }
-    const renderItems = super.render(container);
-    const left = Math.floor((this.lastParentYogaNode.getComputedWidth() - this.box.computedWidth) / 2);
-    const top = Math.floor((this.lastParentYogaNode.getComputedHeight() - this.box.computedHeight) / 2);
-    for (const renderItem of renderItems) {
-      if ("container" in renderItem) {
-        renderItem.container = {
-          ...renderItem.container,
-          top: renderItem.container.top + top,
-          left: renderItem.container.left + left,
-        };
-      }
-      renderItem.geometry = {
-        ...renderItem.geometry,
-        top: renderItem.geometry.top + top,
-        left: renderItem.geometry.left + left,
-      };
-    }
-    return renderItems;
+
+    const box: BoxRenderItem = {
+      type: "box",
+      zIndex: this.zIndex,
+      geometry: {
+        ...options.root.geometry,
+      },
+      children: [],
+    };
+    options.root.children.push(box);
+
+    super.render({
+      ...options,
+      parent: box,
+    });
+    box.geometry.left = Math.floor((this.lastParentYogaNode.getComputedWidth() - this.clientWidth) / 2);
+    box.geometry.top = Math.floor((this.lastParentYogaNode.getComputedHeight() - this.clientHeight) / 2);
   }
 
   protected override onKeyDown(event: KeyboardEvent): void {

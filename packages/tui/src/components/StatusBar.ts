@@ -1,8 +1,8 @@
 import { Align, FlexDirection } from "yoga-layout";
-import { Element } from "../render/Element.js";
-import { getErrorMessage } from "../utils/error.js";
-import { Text } from "../render/Text.js";
 import { Document } from "../render/Document.js";
+import { Element } from "../render/Element.js";
+import { Text } from "../render/Text.js";
+import { getErrorMessage } from "../utils/error.js";
 
 export class StatusBar extends Element {
   public static readonly ID = "NexqStatusBar";

@@ -5,6 +5,7 @@ import { Document } from "../render/Document.js";
 import { Help } from "./Help.js";
 import { Text } from "../render/Text.js";
 import { App } from "./App.js";
+import { DivElement } from "../render/DivElement.js";
 
 const LOGO = `     __            ____ 
   /\\ \\ \\_____  __ /___ \\
@@ -18,10 +19,11 @@ export class Header extends Element {
 
   public constructor(document: Document) {
     super(document);
+    this.id = "header";
     this.style.flexGrow = 0;
 
     const createLeftItem = (name: string, valueElement: Text): Element => {
-      const item = new Element(document);
+      const item = new DivElement(document);
       item.appendChild(new Text(document, { text: name, color: NexqStyles.headerNameColor }));
       item.appendChild(valueElement);
       return item;
@@ -30,7 +32,7 @@ export class Header extends Element {
     this.tuiVersion = new Text(document, { text: "v???", color: NexqStyles.headerValueColor });
     this.nexqVersion = new Text(document, { text: "v???", color: NexqStyles.headerValueColor });
 
-    const left = new Element(document);
+    const left = new DivElement(document);
     left.style.flexDirection = FlexDirection.Column;
     left.style.justifyContent = Justify.FlexEnd;
     left.style.height = "100%";

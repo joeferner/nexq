@@ -1,8 +1,7 @@
 import { inputToChar, isInputMatch } from "../utils/input.js";
 import { Document } from "./Document.js";
-import { Element, PreRenderOptions } from "./Element.js";
+import { Element, RenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
-import { RenderItem } from "./RenderItem.js";
 import { Style } from "./Style.js";
 
 export class InputBoxStyle extends Style {
@@ -90,7 +89,7 @@ export class InputBox extends Element {
   }
 
   public set cursorPosition(cursorPosition: number) {
-    const width = Math.max(1, this.computedWidth);
+    const width = Math.max(1, this.clientWidth);
     this._cursorPosition = Math.max(0, Math.min(cursorPosition, this.value.length));
     if (this._cursorPosition - this.offset >= width) {
       this.offset = this._cursorPosition - width + 1;
@@ -99,28 +98,29 @@ export class InputBox extends Element {
     }
   }
 
-  protected preRender(options: PreRenderOptions): RenderItem[] {
-    const { container, geometry } = options;
-    const results = super.preRender(options);
+  protected override renderChildren(options: RenderOptions): void {
+    const geometry = options.parent.geometry;
     const text = this.value.substring(this.offset, this.offset + geometry.width);
 
-    results.push({
+    options.parent.children.push({
       type: "text",
       text: text + " ".repeat(geometry.width - text.length),
       color: this.focused ? (this.style.focusColor ?? "#ffffff") : (this.style.color ?? "#ffffff"),
       bgColor: this.focused ? this.style.focusBackgroundColor : this.style.backgroundColor,
-      container,
-      geometry,
+      geometry: {
+        left: 0,
+        top: 0,
+        width: geometry.width,
+        height: 1,
+      },
       zIndex: this.zIndex,
     });
     if (this.focused) {
-      results.push({
+      options.parent.children.push({
         type: "cursor",
-        geometry: { left: geometry.left + this.cursorPosition - this.offset, top: geometry.top, width: 1, height: 1 },
+        geometry: { left: this.cursorPosition - this.offset, top: 0, width: 1, height: 1 },
         zIndex: this.zIndex,
       });
     }
-
-    return results;
   }
 }

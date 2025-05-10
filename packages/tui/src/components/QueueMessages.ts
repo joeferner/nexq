@@ -3,12 +3,10 @@ import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
-import { Box } from "../render/Box.js";
 import { fgColor } from "../render/color.js";
+import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
-import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
-import { BorderType } from "../render/RenderItem.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
@@ -20,10 +18,9 @@ const logger = createLogger("QueueMessages");
 
 type QueueMessagesRow = PeekMessagesResponseMessage & { index: number };
 
-export class QueueMessages extends Element {
+export class QueueMessages extends DivElement {
   public static readonly PATH = "/queue/:queueName";
   private readonly tableView: TableView<QueueMessagesRow>;
-  private readonly box: Box;
   private refreshTimeout?: NodeJS.Timeout;
   private inRefreshMessages = false;
   private queueName = "";
@@ -37,23 +34,16 @@ export class QueueMessages extends Element {
 
   public constructor(document: Document) {
     super(document);
+    this.id = "QueueMessages";
     this.style.width = "100%";
     this.style.flexGrow = 1;
     this.style.flexShrink = 1;
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
     this.style.overflow = Overflow.Hidden;
-
-    this.box = new Box(document);
-    this.box.borderType = BorderType.Single;
-    this.box.borderColor = NexqStyles.borderColor;
-    this.box.style.flexGrow = 1;
-    this.box.style.flexShrink = 1;
-    this.box.style.flexDirection = FlexDirection.Column;
-    this.box.title = fgColor(NexqStyles.titleColor)` Messages `;
-    this.box.style.alignItems = Align.Stretch;
-    this.box.style.overflow = Overflow.Hidden;
-    this.appendChild(this.box);
+    this.style.borderStyle = "solid";
+    this.style.borderColor = NexqStyles.borderColor;
+    this.borderTitle = fgColor(NexqStyles.titleColor)` Messages `;
 
     this.tableView = new TableView(document, {
       columns: [
@@ -101,7 +91,7 @@ export class QueueMessages extends Element {
     this.tableView.style.flexGrow = 1;
     this.tableView.style.flexShrink = 1;
     NexqStyles.applyToTableView(this.tableView);
-    this.box.appendChild(this.tableView);
+    this.appendChild(this.tableView);
   }
 
   protected override elementDidMount(): void {
@@ -128,7 +118,7 @@ export class QueueMessages extends Element {
   }
 
   private refreshTitle(): void {
-    this.box.title =
+    this.borderTitle =
       fgColor(NexqStyles.titleColor)` Messages(` +
       fgColor(NexqStyles.titleAltColor)`${this.queueName}` +
       fgColor(NexqStyles.titleColor)`)[` +
@@ -184,7 +174,6 @@ export class QueueMessages extends Element {
         includeDelayed: true,
         includeNotVisible: true,
       });
-      logger.info(JSON.stringify(resp.data.messages, null, 2));
       this.tableView.items = resp.data.messages.map((m, index) => ({ ...m, index }));
       this.refreshTitle();
       await this.window.refresh();

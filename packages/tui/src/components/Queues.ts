@@ -2,12 +2,10 @@ import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
 import { NexqStyles } from "../NexqStyles.js";
-import { Box } from "../render/Box.js";
 import { fgColor } from "../render/color.js";
+import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
-import { Element } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
-import { BorderType } from "../render/RenderItem.js";
 import { isInputMatch } from "../utils/input.js";
 import { createLogger } from "../utils/logger.js";
 import { App, FilterEvent } from "./App.js";
@@ -17,9 +15,8 @@ import { SortDirection, TableView } from "./TableView.js";
 
 const logger = createLogger("Queues");
 
-export class Queues extends Element {
+export class Queues extends DivElement {
   public static readonly PATH = "/queue";
-  private readonly box: Box;
   private readonly tableView: TableView<GetQueueResponse>;
   private refreshTimeout?: NodeJS.Timeout;
   private inRefreshQueues = false;
@@ -51,6 +48,7 @@ export class Queues extends Element {
 
   public constructor(document: Document) {
     super(document);
+    this.id = "Queues";
 
     this.handleFilter = this._handleFilter.bind(this);
 
@@ -60,17 +58,9 @@ export class Queues extends Element {
     this.style.alignItems = Align.Stretch;
     this.style.flexDirection = FlexDirection.Column;
     this.style.overflow = Overflow.Hidden;
-
-    this.box = new Box(document);
-    this.box.borderType = BorderType.Single;
-    this.box.borderColor = NexqStyles.borderColor;
-    this.box.style.flexGrow = 1;
-    this.box.style.flexShrink = 1;
-    this.box.style.flexDirection = FlexDirection.Column;
-    this.box.style.alignItems = Align.Stretch;
-    this.box.style.overflow = Overflow.Hidden;
-    this.box.title = fgColor(NexqStyles.titleColor)` Queues `;
-    this.appendChild(this.box);
+    this.style.borderStyle = "solid";
+    this.style.borderColor = NexqStyles.borderColor;
+    this.borderTitle = fgColor(NexqStyles.titleColor)` Queues `;
 
     this.tableView = new TableView(document, {
       columns: [
@@ -126,7 +116,7 @@ export class Queues extends Element {
     this.tableView.style.flexGrow = 1;
     this.tableView.style.flexShrink = 1;
     NexqStyles.applyToTableView(this.tableView);
-    this.box.appendChild(this.tableView);
+    this.appendChild(this.tableView);
   }
 
   protected override elementDidMount(): void {
@@ -196,7 +186,7 @@ export class Queues extends Element {
       logger.info("refreshQueues");
       const resp = await app.api.api.getQueues();
       this.queues = resp.data.queues;
-      this.box.title =
+      this.borderTitle =
         fgColor(NexqStyles.titleColor)` Queues[` +
         fgColor(NexqStyles.titleCountColor)`${this.queues.length}` +
         fgColor(NexqStyles.titleColor)`] `;
