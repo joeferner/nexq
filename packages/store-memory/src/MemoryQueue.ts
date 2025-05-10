@@ -5,6 +5,7 @@ import {
   CreateQueueOptions,
   DEFAULT_NAK_EXPIRE_BEHAVIOR,
   DEFAULT_VISIBILITY_TIMEOUT_MS,
+  DuplicateMessageError,
   GetMessage,
   InvalidUpdateError,
   isDecreasePriorityByNakExpireBehavior,
@@ -105,6 +106,12 @@ export class MemoryQueue {
       throw new Error(`duplicate message with id "${id}" in queue "${this.name}"`);
     }
 
+    if (options?.deduplicationId) {
+      if (this.isDuplicateMessage(options.deduplicationId)) {
+        throw new DuplicateMessageError(options.deduplicationId);
+      }
+    }
+
     const delay = options?.delayMs ?? this.delayMs;
     const delayUntil = delay === undefined ? undefined : new Date(now.getTime() + delay);
     if (this.maxMessageSize && body.length > this.maxMessageSize) {
@@ -123,10 +130,23 @@ export class MemoryQueue {
             ? undefined
             : new Date(now.getTime() + this.messageRetentionPeriodMs),
         lastNakReason: options?.lastNakReason,
+        deduplicationId: options?.deduplicationId,
       })
     );
     this.trigger({ type: "new-queue-message", queueName: this.name } satisfies NewQueueMessageEvent);
     return { id };
+  }
+
+  private isDuplicateMessage(deduplicationId: string): boolean {
+    for (const message of this.messages) {
+      if (message.receiptHandle) {
+        continue;
+      }
+      if (message.deduplicationId !== undefined && message.deduplicationId === deduplicationId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public pause(): void {

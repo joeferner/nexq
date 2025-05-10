@@ -1,10 +1,27 @@
 [![NexQ](https://github.com/joeferner/nexq/actions/workflows/node.js.yml/badge.svg)](https://github.com/joeferner/nexq/actions/workflows/node.js.yml)
 
+# About
+
+NexQ is a queue server supporting multiple protocols and multiple storage engines.
+
 # Features
 
 :scroll: - Future
 :ballot_box_with_check: - Partially Complete
 :white_check_mark: - Completed
+
+## General
+
+- :white_check_mark: Topics and subscriptions
+- :white_check_mark: Expiring queues
+- :white_check_mark: Delaying messages from receive
+- :white_check_mark: Expiring/retention of messages based on time in queue
+- :white_check_mark: Dead letter queues and topics
+- :white_check_mark: Max message receive count
+- :white_check_mark: Configurable NAK behavior (retry, move to end)
+- :white_check_mark: Bulk sending/receiving messages
+- :white_check_mark: Pause/Resume queues
+- :white_check_mark: [Deduplication of messages](docs/features/message-dedup.md)
 
 ## Protocols
 

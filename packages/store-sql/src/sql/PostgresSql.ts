@@ -4,6 +4,7 @@ import { Client as PgClient } from "pg";
 import Pool from "pg-pool";
 import { isPostgresTransaction } from "../dialect/PostgresTransaction.js";
 import { isTransaction, Transaction } from "../dialect/Transaction.js";
+import { SavePoint } from "../dialect/dto/SavePoint.js";
 import { Sql } from "./Sql.js";
 import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
@@ -14,6 +15,7 @@ const sqlLogger = createLogger("SQL");
 const MIGRATION_VERSION_INITIAL = 1;
 const MIGRATION_NOTIFY = 2;
 const MIGRATION_NOTIFY_ALL = 3;
+const MIGRATION_DEDUPLICATION = 4;
 
 export class PostgresSql extends Sql<Pool<PgClient>> {
   public constructor() {
@@ -94,6 +96,20 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     }
   }
 
+  public override async createSavePoint(tx: Transaction, name: string): Promise<SavePoint> {
+    const client = this.getClient(tx);
+
+    await client.query(`SAVEPOINT ${name}`);
+    return {
+      release: async (): Promise<void> => {
+        await client.query(`RELEASE SAVEPOINT ${name}`);
+      },
+      rollback: async (): Promise<void> => {
+        await client.query(`ROLLBACK TO SAVEPOINT ${name}`);
+      },
+    };
+  }
+
   private transformParams(_params: unknown[]): void {
     // nothing to transform
   }
@@ -112,6 +128,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     await this.migrateInitial(database, migrations);
     await this.migrateNotify(database, migrations);
     await this.migrateNotifyAll(database, migrations);
+    await this.migrateDeduplicationId(database, migrations);
   }
 
   private async migrateInitial(database: Pool<pg.Client>, migrations: pg.QueryResult<SqlMigration>): Promise<void> {
@@ -336,6 +353,40 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
       MIGRATION_NOTIFY_ALL,
       "notify all",
+      new Date().toISOString(),
+    ]);
+  }
+
+  private async migrateDeduplicationId(
+    database: Pool<pg.Client>,
+    migrations: pg.QueryResult<SqlMigration>
+  ): Promise<void> {
+    if (migrations.rows.some((m) => m.version === MIGRATION_DEDUPLICATION)) {
+      return;
+    }
+    logger.info(`running migration ${MIGRATION_DEDUPLICATION} - deduplication`);
+
+    await database.query(`
+      ALTER TABLE
+        nexq_message
+      ADD COLUMN
+        deduplication_id TEXT DEFAULT gen_random_uuid()
+    `);
+
+    await database.query(`
+      ALTER TABLE
+        nexq_message
+      ADD CONSTRAINT
+        nexq_message_deduplication_id UNIQUE NULLS NOT DISTINCT (
+          queue_name,
+          deduplication_id,
+          receipt_handle
+        )
+    `);
+
+    await database.query(`INSERT INTO nexq_migration(version, name, applied_at) VALUES ($1, $2, $3)`, [
+      MIGRATION_DEDUPLICATION,
+      "deduplication",
       new Date().toISOString(),
     ]);
   }

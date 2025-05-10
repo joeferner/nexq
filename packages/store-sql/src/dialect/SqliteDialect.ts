@@ -1,10 +1,11 @@
-import { Time } from "@nexq/core";
+import { DuplicateMessageError, getErrorMessage, QueueInfo, SendMessageOptions, Time } from "@nexq/core";
 import { Mutex, MutexInterface } from "async-mutex";
 import sqlite, { Database } from "better-sqlite3";
 import { SqlStoreCreateConfigSqlite } from "../SqlStore.js";
 import { SqliteSql } from "../sql/SqliteSql.js";
 import { Dialect } from "./Dialect.js";
 import { SqliteTransaction } from "./SqliteTransaction.js";
+import { Transaction } from "./Transaction.js";
 
 export class SqliteDialect extends Dialect<sqlite.Database, SqliteSql> {
   private txMutex = new Mutex();
@@ -67,5 +68,23 @@ export class SqliteDialect extends Dialect<sqlite.Database, SqliteSql> {
 
   protected toSqlBoolean(v: boolean): unknown {
     return v ? 1 : 0;
+  }
+
+  public override async sendMessage(
+    tx: Transaction | undefined,
+    queueInfo: QueueInfo,
+    id: string,
+    body: string,
+    options?: SendMessageOptions & { lastNakReason?: string }
+  ): Promise<void> {
+    const deduplicationId = options?.deduplicationId ?? id;
+    try {
+      return await super.sendMessage(tx, queueInfo, id, body, options);
+    } catch (err) {
+      if (getErrorMessage(err).includes(`UNIQUE constraint failed: index 'nexq_message_deduplication_id'`)) {
+        throw new DuplicateMessageError(deduplicationId);
+      }
+      throw err;
+    }
   }
 }

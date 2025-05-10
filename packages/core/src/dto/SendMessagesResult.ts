@@ -1,3 +1,8 @@
 export interface SendMessagesResult {
-  ids: string[];
+  results: SendMessagesResultMessage[];
+}
+
+export interface SendMessagesResultMessage {
+  id?: string;
+  error?: string;
 }

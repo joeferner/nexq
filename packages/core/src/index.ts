@@ -1,6 +1,7 @@
 export { AbortError } from "./error/AbortError.js";
 export { DeleteDeadLetterQueueError } from "./error/DeleteDeadLetterQueueError.js";
 export { DeleteDeadLetterTopicError } from "./error/DeleteDeadLetterTopicError.js";
+export { DuplicateMessageError } from "./error/DuplicateMessageError.js";
 export { InvalidQueueNameError } from "./error/InvalidQueueNameError.js";
 export { InvalidTopicNameError } from "./error/InvalidTopicNameError.js";
 export { InvalidUpdateError } from "./error/InvalidUpdateError.js";
@@ -9,9 +10,9 @@ export { MessageNotFoundError } from "./error/MessageNotFoundError.js";
 export { QueueAlreadyExistsError } from "./error/QueueAlreadyExistsError.js";
 export { QueueNotFoundError } from "./error/QueueNotFoundError.js";
 export { ReceiptHandleIsInvalidError } from "./error/ReceiptHandleIsInvalidError.js";
+export { SubscriptionNotFoundError } from "./error/SubscriptionNotFoundError.js";
 export { TopicAlreadyExistsError } from "./error/TopicAlreadyExistsError.js";
 export { TopicNotFoundError } from "./error/TopicNotFoundError.js";
-export { SubscriptionNotFoundError } from "./error/SubscriptionNotFoundError.js";
 export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlreadyExistsError.js";
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 

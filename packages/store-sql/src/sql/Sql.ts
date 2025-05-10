@@ -1,6 +1,7 @@
 import { UpdateMessageOptions } from "@nexq/core";
-import { RunResult } from "./dto/RunResult.js";
 import { Transaction } from "../dialect/Transaction.js";
+import { SavePoint } from "../dialect/dto/SavePoint.js";
+import { RunResult } from "./dto/RunResult.js";
 
 export const SQL_DELETE_QUEUE = "deleteQueue";
 export const SQL_PURGE_QUEUE = "purgeQueue";
@@ -209,8 +210,9 @@ export abstract class Sql<TDatabase> {
           attributes,
           expires_at,
           delay_until,
-          last_nak_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          last_nak_reason,
+          deduplication_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     );
 
@@ -668,6 +670,13 @@ export abstract class Sql<TDatabase> {
       throw new Error(`could not find query with name: ${queryName}`);
     }
     return sql;
+  }
+
+  public async createSavePoint(_tx: Transaction, _name: string): Promise<SavePoint> {
+    return {
+      release: async (): Promise<void> => {},
+      rollback: async (): Promise<void> => {},
+    };
   }
 
   public async updateMessage(

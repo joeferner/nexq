@@ -223,10 +223,11 @@ export class ApiV1QueueController extends Controller {
           attributes: message.attributes,
           delayMs: parseOptionalDurationIntoMs(message.delay),
           priority: message.priority,
+          deduplicationId: message.deduplicationId,
         } satisfies SendMessagesOptionsMessage;
       });
       const m = await this.store.sendMessages(queueName, { messages });
-      return { ids: m.ids };
+      return { results: m.results.map((r) => ({ id: r.id, error: r.error })) };
     } catch (err) {
       if (isHttpError(err)) {
         throw err;

@@ -89,6 +89,7 @@ import { DialectCreateUser } from "./dto/DialectCreateUser.js";
 import { Transaction } from "./Transaction.js";
 import { SqlSubscription } from "../sql/dto/SqlSubscription.js";
 import EventEmitter from "node:events";
+import { SavePoint } from "./dto/SavePoint.js";
 
 export interface DialectMessageNotification {
   type: "dialectMessageNotification";
@@ -205,6 +206,7 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
       null, // expires at
       options?.delayMs ? new Date(now.getTime() + options.delayMs) : null,
       options?.lastNakReason ?? null,
+      options?.deduplicationId ?? id,
     ]);
   }
 
@@ -724,6 +726,10 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
     await this.sql.run(this.database, SQL_DELETE_ALL_TOPICS, []);
     await this.sql.run(this.database, SQL_DELETE_ALL_QUEUES, []);
     await this.sql.run(this.database, SQL_DELETE_ALL_USERS, []);
+  }
+
+  public async createSavePoint(tx: Transaction, name: string): Promise<SavePoint> {
+    return this.sql.createSavePoint(tx, name);
   }
 }
 

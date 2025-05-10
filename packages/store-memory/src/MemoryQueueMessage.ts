@@ -9,6 +9,7 @@ export interface CreateMemoryQueueMessageOptions {
   delayUntil: Date | undefined;
   lastNakReason?: string;
   retainUntil: Date | undefined;
+  deduplicationId: string | undefined;
 }
 
 export class MemoryQueueMessage {
@@ -34,6 +35,7 @@ export class MemoryQueueMessage {
   public readonly sentTime: Date;
   public orderTime: Date;
   public lastNakReason: string | undefined;
+  public readonly deduplicationId: string | undefined;
 
   public constructor(options: CreateMemoryQueueMessageOptions) {
     this.id = options.id;
@@ -45,6 +47,7 @@ export class MemoryQueueMessage {
     this._delayUntil = options.delayUntil;
     this.lastNakReason = options.lastNakReason;
     this.retainUntil = options.retainUntil;
+    this.deduplicationId = options.deduplicationId;
   }
 
   public get receiptHandle(): string | undefined {
