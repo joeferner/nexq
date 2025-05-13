@@ -188,16 +188,19 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
     body: string,
     options?: SendMessageOptions & { lastNakReason?: string }
   ): Promise<void> {
-    const deduplicationId = options?.deduplicationId ?? id;
+    if (options) {
+      options.deduplicationId = options?.deduplicationId ?? id;
+    }
     try {
       return await super.sendMessage(tx, queueInfo, id, body, options);
     } catch (err) {
       if (
+        options?.deduplicationId &&
         getErrorMessage(err).includes(
           `error: duplicate key value violates unique constraint "nexq_message_deduplication_id"`
         )
       ) {
-        throw new DuplicateMessageError(deduplicationId);
+        throw new DuplicateMessageError(options.deduplicationId);
       }
       throw err;
     }

@@ -77,12 +77,17 @@ export class SqliteDialect extends Dialect<sqlite.Database, SqliteSql> {
     body: string,
     options?: SendMessageOptions & { lastNakReason?: string }
   ): Promise<void> {
-    const deduplicationId = options?.deduplicationId ?? id;
+    if (options) {
+      options.deduplicationId = options.deduplicationId ?? id;
+    }
     try {
       return await super.sendMessage(tx, queueInfo, id, body, options);
     } catch (err) {
-      if (getErrorMessage(err).includes(`UNIQUE constraint failed: index 'nexq_message_deduplication_id'`)) {
-        throw new DuplicateMessageError(deduplicationId);
+      if (
+        options?.deduplicationId &&
+        getErrorMessage(err).includes(`UNIQUE constraint failed: index 'nexq_message_deduplication_id'`)
+      ) {
+        throw new DuplicateMessageError(options.deduplicationId);
       }
       throw err;
     }

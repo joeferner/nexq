@@ -640,12 +640,18 @@ export class SqlStore implements Store {
 
         if (queueInfo.deadLetterTopicName) {
           const deadLetterTopicInfo = await this.getCachedTopicInfo(queueInfo.deadLetterTopicName);
-          await this.internalPublishMessage(tx, deadLetterTopicInfo, message.body, options);
+          await this.internalPublishMessage(tx, deadLetterTopicInfo, message.body, {
+            ...options,
+            deduplicationId: createId(),
+          });
         }
 
         if (queueInfo.deadLetterQueueName) {
           const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
-          await this.dialect.sendMessage(tx, deadLetterQueueInfo, sqlMessage.id, message.body, options);
+          await this.dialect.sendMessage(tx, deadLetterQueueInfo, sqlMessage.id, message.body, {
+            ...options,
+            deduplicationId: createId(),
+          });
         }
 
         await this.dialect.deleteMessageByMessageId(tx, queueInfo.name, sqlMessage.id);
