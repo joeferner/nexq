@@ -58,10 +58,8 @@ export class Renderer {
       root.calculateLayout(undefined, undefined, Direction.LTR);
       const container = geometryFromYogaNode(root);
       renderItems = element.render({
-        outerContainer: container,
-        innerContainer: container,
-        innerGeometry: container,
-        outerGeometry: container,
+        container: container,
+        geometry: container,
       });
     } finally {
       root.freeRecursive();

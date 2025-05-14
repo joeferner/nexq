@@ -13,7 +13,7 @@ import { Window } from "./Window.js";
 const logger = createLogger("Element");
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ElementEvents {}
+export interface ElementEvents { }
 
 export abstract class Element {
   protected yogaNode?: YogaNode;
@@ -67,7 +67,7 @@ export abstract class Element {
       return [];
     }
 
-    const container = options.innerGeometry;
+    const container = options.geometry;
 
     const layout = this.yogaNode.getComputedLayout();
     const geometry = geometryFromYogaNode(this.yogaNode);
@@ -91,14 +91,8 @@ export abstract class Element {
       width: container.width - this.borderWidthLeft - this.borderWidthRight,
       height: container.height - this.borderWidthTop - this.borderWidthBottom,
     };
-    const innerGeometry: Geometry = {
-      left: geometry.left + this.borderWidthLeft,
-      top: geometry.top + this.borderWidthTop,
-      width: geometry.width - this.borderWidthLeft - this.borderWidthRight,
-      height: geometry.height - this.borderWidthTop - this.borderWidthBottom,
-    };
 
-    return this._render({ outerContainer: container, outerGeometry: geometry, innerContainer, innerGeometry });
+    return this._render({ container: innerContainer, geometry: geometry });
   }
 
   protected _render(options: RenderOptions): RenderItem[] {
@@ -302,9 +296,9 @@ export abstract class Element {
     });
   }
 
-  protected onFocus(): void {}
+  protected onFocus(): void { }
 
-  protected onBlur(): void {}
+  protected onBlur(): void { }
 
   public get isMounted(): boolean {
     if (!this.parent) {
@@ -351,9 +345,9 @@ export abstract class Element {
     }
   }
 
-  protected elementDidMount(): void {}
+  protected elementDidMount(): void { }
 
-  protected elementWillUnmount(): void {}
+  protected elementWillUnmount(): void { }
 
   public get firstElementChild(): Element | null {
     return this._children[0] ?? null;
@@ -393,10 +387,8 @@ export abstract class Element {
 }
 
 export interface RenderOptions {
-  outerGeometry: Readonly<Geometry>;
-  outerContainer: Readonly<Geometry>;
-  innerGeometry: Readonly<Geometry>;
-  innerContainer: Readonly<Geometry>;
+  container: Readonly<Geometry>;
+  geometry: Readonly<Geometry>;
 }
 
 function borderWidth(borderStyle: string | undefined): number {

@@ -100,7 +100,7 @@ export class InputBox extends Element {
   }
 
   protected override _render(options: RenderOptions): RenderItem[] {
-    const { innerContainer: container, innerGeometry: geometry } = options;
+    const { container: container, geometry: geometry } = options;
     const results: RenderItem[] = [];
     const text = this.value.substring(this.offset, this.offset + geometry.width);
 

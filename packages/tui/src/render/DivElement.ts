@@ -34,7 +34,7 @@ export class DivElement extends Element {
   }
 
   protected override _render(options: RenderOptions): RenderItem[] {
-    const { outerContainer, outerGeometry } = options;
+    const { container, geometry } = options;
 
     const renderItems = super._render(options);
 
@@ -49,15 +49,15 @@ export class DivElement extends Element {
       borderTopColor: this.style.borderTopColor,
       borderBottomColor: this.style.borderBottomColor,
       zIndex: this.zIndex - 0.001,
-      container: outerContainer,
-      geometry: outerGeometry,
+      container,
+      geometry,
     });
 
     if (this.borderTitleText) {
       const titleRenderItems = this.borderTitleText.render({
         ...options,
-        innerContainer: outerContainer,
-        innerGeometry: outerGeometry,
+        container,
+        geometry,
       });
       const titleWidth = this.borderTitleText.clientWidth;
       const offset = Math.floor((this.clientWidth - titleWidth) / 2);

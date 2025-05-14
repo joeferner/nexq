@@ -45,7 +45,7 @@ export class Text extends Element {
   }
 
   protected override _render(options: RenderOptions): RenderItem[] {
-    const { innerContainer: container, innerGeometry: geometry } = options;
+    const { container: container, geometry: geometry } = options;
     return [
       {
         type: "text",
