@@ -5,6 +5,7 @@ import { Document } from "./Document.js";
 import { Element, RenderOptions } from "./Element.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { RenderItem } from "./RenderItem.js";
+import { Geometry } from "./Geometry.js";
 
 export interface UpdateOptions {
   title: string;
@@ -46,7 +47,7 @@ export abstract class Dialog<TShowOptions, TResults> extends DivElement {
     });
   }
 
-  protected async onShow(_options: TShowOptions): Promise<void> {}
+  protected async onShow(_options: TShowOptions): Promise<void> { }
 
   public close(result: TResults | undefined): void {
     this.style.display = Display.None;
@@ -63,11 +64,11 @@ export abstract class Dialog<TShowOptions, TResults> extends DivElement {
     super.populateLayout(node);
   }
 
-  public override render(options: RenderOptions): RenderItem[] {
+  public override render(parentGeometry: Readonly<Geometry>): RenderItem[] {
     if (!this.lastParentYogaNode) {
-      return super.render(options);
+      return super.render(parentGeometry);
     }
-    const renderItems = super.render(options);
+    const renderItems = super.render(parentGeometry);
     const left = Math.floor((this.lastParentYogaNode.getComputedWidth() - this.clientWidth) / 2);
     const top = Math.floor((this.lastParentYogaNode.getComputedHeight() - this.clientHeight) / 2);
     for (const renderItem of renderItems) {

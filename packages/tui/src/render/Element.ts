@@ -58,7 +58,7 @@ export abstract class Element {
     container.insertChild(this.yogaNode, container.getChildCount());
   }
 
-  public render(options: RenderOptions): RenderItem[] {
+  public render(parentGeometry: Readonly<Geometry>): RenderItem[] {
     if (!this.yogaNode) {
       return [];
     }
@@ -67,15 +67,13 @@ export abstract class Element {
       return [];
     }
 
-    const container = options.geometry;
-
     const layout = this.yogaNode.getComputedLayout();
     const geometry = geometryFromYogaNode(this.yogaNode);
-    geometry.top += container.top;
-    geometry.left += container.left;
+    geometry.top += parentGeometry.top;
+    geometry.left += parentGeometry.left;
     if (this.parentElement?.style.overflow === Overflow.Hidden) {
-      geometry.width = Math.min(geometry.width, container.width - layout.left);
-      geometry.height = Math.min(geometry.height, container.height - layout.top);
+      geometry.width = Math.min(geometry.width, parentGeometry.width - layout.left);
+      geometry.height = Math.min(geometry.height, parentGeometry.height - layout.top);
     }
 
     this._clientWidth = geometry.width - this.borderWidthLeft - this.borderWidthRight;
@@ -85,21 +83,14 @@ export abstract class Element {
     this._scrollWidth = this.children.reduce((p, c) => p + c.offsetWidth, 0);
     this._scrollHeight = this.children.reduce((p, c) => p + c.offsetHeight, 0);
 
-    const innerContainer: Geometry = {
-      left: container.left + this.borderWidthLeft,
-      top: container.top + this.borderWidthTop,
-      width: container.width - this.borderWidthLeft - this.borderWidthRight,
-      height: container.height - this.borderWidthTop - this.borderWidthBottom,
-    };
-
-    return this._render({ container: innerContainer, geometry: geometry });
+    return this._render({ container: parentGeometry, geometry });
   }
 
   protected _render(options: RenderOptions): RenderItem[] {
     const renderItems: RenderItem[] = [];
 
     for (const child of this._children) {
-      const childRenderItems = child.render(options);
+      const childRenderItems = child.render(options.geometry);
       for (const childRenderItem of childRenderItems) {
         childRenderItem.zIndex += this.zIndex;
         childRenderItem.geometry.top -= this.scrollTop;

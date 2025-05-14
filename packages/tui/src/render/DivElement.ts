@@ -54,11 +54,7 @@ export class DivElement extends Element {
     });
 
     if (this.borderTitleText) {
-      const titleRenderItems = this.borderTitleText.render({
-        ...options,
-        container,
-        geometry,
-      });
+      const titleRenderItems = this.borderTitleText.render(geometry);
       const titleWidth = this.borderTitleText.clientWidth;
       const offset = Math.floor((this.clientWidth - titleWidth) / 2);
       for (const titleRenderItem of titleRenderItems) {
