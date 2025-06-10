@@ -1,3 +1,5 @@
+import prettyBytes from "pretty-bytes";
+import prettyMilliseconds from "pretty-ms";
 import { NexqStyles } from "../NexqStyles.js";
 import { fgColor } from "../render/color.js";
 
@@ -37,4 +39,35 @@ export function detailsToString(details: Detail[]): string {
     }
   }
   return text;
+}
+
+export function attributesToString(attributes: Record<string, string>): string {
+  const keys = Object.keys(attributes);
+  if (keys.length === 0) {
+    return "<none>";
+  }
+  return keys.map((key) => `${key}=${attributes[key]}`).join("\n");
+}
+
+export function bodyToString(body: string): string {
+  try {
+    const json = JSON.parse(body) as unknown;
+    return JSON.stringify(json, null, 2);
+  } catch (_err) {
+    return body;
+  }
+}
+
+export function formatMs(ms: number | undefined): string | undefined {
+  if (ms === undefined) {
+    return undefined;
+  }
+  return prettyMilliseconds(ms);
+}
+
+export function formatBytes(bytes: number | undefined): string | undefined {
+  if (bytes === undefined) {
+    return undefined;
+  }
+  return prettyBytes(bytes);
 }

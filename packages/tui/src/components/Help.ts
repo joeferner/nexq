@@ -1,13 +1,14 @@
-import { FlexDirection } from "yoga-layout";
+import { FlexDirection, Wrap } from "yoga-layout";
 import { NexqStyles } from "../NexqStyles.js";
+import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
-import { Element, RenderOptions } from "../render/Element.js";
+import { Element } from "../render/Element.js";
+import { isPathMatch } from "../render/RouterElement.js";
 import { Text } from "../render/Text.js";
+import { DescribeQueue } from "./DescribeQueue.js";
 import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
-import { isPathMatch } from "../render/RouterElement.js";
 import { Topics } from "./Topics.js";
-import { DivElement } from "../render/DivElement.js";
 
 export interface HelpItem {
   id: string;
@@ -23,6 +24,9 @@ export class Help extends Element {
     super(document);
     this.id = "Help";
     this.style.flexDirection = FlexDirection.Column;
+    this.style.flexWrap = Wrap.Wrap;
+    this.style.columnGap = 3;
+    this.style.maxHeight = 4;
   }
 
   protected override elementDidMount(): void {
@@ -36,10 +40,6 @@ export class Help extends Element {
     this.window.removeEventListener("pushstate", this.boundRefreshChildren);
   }
 
-  public override render(options: RenderOptions): void {
-    super.render(options);
-  }
-
   private refreshChildren(): void {
     const pathname = this.window.location.pathname;
     if (this.lastFocus === pathname) {
@@ -47,7 +47,9 @@ export class Help extends Element {
     }
 
     let helpItems: HelpItem[];
-    if (isPathMatch(QueueMessages.PATH, pathname)) {
+    if (isPathMatch(DescribeQueue.PATH, pathname)) {
+      helpItems = DescribeQueue.HELP_ITEMS;
+    } else if (isPathMatch(QueueMessages.PATH, pathname)) {
       helpItems = QueueMessages.HELP_ITEMS;
     } else if (isPathMatch(Queues.PATH, pathname)) {
       helpItems = Queues.HELP_ITEMS;

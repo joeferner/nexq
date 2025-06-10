@@ -32,6 +32,8 @@
     "find-root": "^1.1.0",
     "named-css-colors": "^1.0.6",
     "node-match-path": "^0.6.3",
+    "pretty-bytes": "^7.0.0",
+    "pretty-ms": "^9.2.0",
     "radash": "^12.1.0",
     "yoga-layout": "^3.2.1"
   },

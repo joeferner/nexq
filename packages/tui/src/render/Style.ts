@@ -1,4 +1,15 @@
-import { Align, Display, Edge, FlexDirection, Justify, Overflow, PositionType, Node as YogaNode } from "yoga-layout";
+import {
+  Align,
+  Display,
+  Edge,
+  FlexDirection,
+  Gutter,
+  Justify,
+  Overflow,
+  PositionType,
+  Wrap,
+  Node as YogaNode,
+} from "yoga-layout";
 
 export type BorderStyle = "none" | "solid";
 
@@ -13,6 +24,9 @@ export class Style {
   public flexShrink: number | undefined;
   public alignItems = Align.FlexStart;
   public flexDirection = FlexDirection.Row;
+  public flexWrap = Wrap.NoWrap;
+  public columnGap: number | `${number}%` | undefined;
+  public rowGap: number | `${number}%` | undefined;
   public justifyContent = Justify.FlexStart;
   public positionType = PositionType.Relative;
   public display = Display.Flex;
@@ -85,8 +99,11 @@ export class Style {
     node.setFlexShrink(this.flexShrink);
     node.setAlignItems(this.alignItems);
     node.setFlexDirection(this.flexDirection);
+    node.setFlexWrap(this.flexWrap);
     node.setJustifyContent(this.justifyContent);
     node.setPositionType(this.positionType);
+    node.setGap(Gutter.Column, this.columnGap);
+    node.setGap(Gutter.Row, this.rowGap);
 
     node.setMargin(Edge.Left, this.marginLeft);
     node.setMargin(Edge.Right, this.marginRight);
