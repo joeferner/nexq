@@ -44,6 +44,11 @@ export class Queues extends DivElement {
       name: "Move Messages",
       shortcut: "ctrl-o",
     },
+    {
+      id: "describe",
+      name: "Describe",
+      shortcut: "d",
+    },
   ];
 
   public constructor(document: Document) {
@@ -211,8 +216,17 @@ export class Queues extends DivElement {
       void this.pauseResumeSelectedQueues();
     } else if (helpItem.id === "move") {
       void this.moveMessagesFromSelectedQueue();
+    } else if (helpItem.id === "describe") {
+      this.describeSelectedQueue();
     } else {
       logger.error(`unhandled help shortcut ${helpItem.id}`);
+    }
+  }
+
+  private describeSelectedQueue(): void {
+    const currentItem = this.tableView.getCurrentItem();
+    if (currentItem) {
+      this.window.history.pushState(currentItem, "", `/queue/${encodeURIComponent(currentItem.name)}/describe`);
     }
   }
 

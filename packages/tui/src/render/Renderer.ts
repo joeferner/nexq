@@ -229,11 +229,6 @@ function renderItemGeometryToAbsolute(renderItem: RenderItem, container: Geometr
 
 function renderItemToBuffer(buffer: Character[][], renderItem: RenderItem, container: Geometry): void {
   const type = renderItem.type;
-
-  if (renderItem.name?.endsWith("-title")) {
-    renderItem.name = "" + renderItem.name;
-  }
-
   const newContainer = rectIntersection(renderItem.geometry, container);
   if (!newContainer) {
     return;

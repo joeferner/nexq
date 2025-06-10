@@ -16,6 +16,7 @@ import { QueueMessages } from "./QueueMessages.js";
 import { Queues } from "./Queues.js";
 import { StatusBar } from "./StatusBar.js";
 import { Topics } from "./Topics.js";
+import { DescribeQueue } from "./DescribeQueue.js";
 
 const logger = createLogger("App");
 
@@ -44,6 +45,7 @@ export class App extends Element {
   private readonly header: Header;
   private readonly command: Command;
   private readonly queues: Queues;
+  private readonly describeQueue: DescribeQueue;
   private readonly topics: Topics;
   private readonly queueMessage: QueueMessage;
   private readonly queueMessages: QueueMessages;
@@ -75,6 +77,7 @@ export class App extends Element {
     this.command = new Command(document);
     this.command.onCommand = this.handleCommand.bind(this);
     this.queues = new Queues(document);
+    this.describeQueue = new DescribeQueue(document);
     this.queueMessage = new QueueMessage(document);
     this.queueMessages = new QueueMessages(document);
     this.topics = new Topics(document);
@@ -93,6 +96,10 @@ export class App extends Element {
 
     this.routerElement = new RouterElement(document, {
       routes: [
+        {
+          pathname: DescribeQueue.PATH,
+          element: this.describeQueue,
+        },
         {
           pathname: QueueMessage.PATH,
           element: this.queueMessage,
