@@ -6,7 +6,6 @@ import { Element, ElementEvents } from "../render/Element.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { RouterElement } from "../render/RouterElement.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { Command } from "./Command.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { Header } from "./Header.js";
@@ -17,8 +16,9 @@ import { Queues } from "./Queues.js";
 import { StatusBar } from "./StatusBar.js";
 import { Topics } from "./Topics.js";
 import { DescribeQueue } from "./DescribeQueue.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("App");
+const log = logger.getLogger("App");
 
 export interface FilterEvent {
   value: RegExp | undefined;
@@ -129,7 +129,7 @@ export class App extends Element {
     this.info = this.api.api.getInfo().then((i) => i.data);
 
     process.on("uncaughtException", (err) => {
-      logger.error("uncaughtException", err);
+      log.error("uncaughtException", err);
       StatusBar.setStatus(this.document, "Uncaught Exception", err);
     });
   }
@@ -197,7 +197,7 @@ export class App extends Element {
     try {
       regex = value.trim().length === 0 ? undefined : new RegExp(value);
     } catch (err) {
-      logger.error(`Invalid filter regex: "${value}"`, err);
+      log.error(`Invalid filter regex: "${value}"`, err);
       StatusBar.setStatus(this.document, "Invalid filter regex");
       return false;
     }

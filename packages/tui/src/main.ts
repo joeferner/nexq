@@ -1,15 +1,17 @@
 /* eslint no-console: "off" */
 
+import { FileTransport, logger, LoggerAppenderConfig, LogLevel } from "@nexq/logger";
 import { boolean, command, flag, option, optional, positional, run, string } from "cmd-ts";
 import findRoot from "find-root";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { start } from "./tui.js";
 import { getErrorMessage } from "./utils/error.js";
-import { createLogger, DEFAULT_LOG_FILE, Logger } from "./utils/logger.js";
 
-const logger = createLogger("main");
+export const DEFAULT_LOG_FILE = path.join(os.tmpdir(), "nexq-tui.log");
+const log = logger.getLogger("main");
 
 async function parseCommandLineAndStart(): Promise<void> {
   const root = findRoot(fileURLToPath(import.meta.url));
@@ -59,9 +61,16 @@ async function parseCommandLineAndStart(): Promise<void> {
     },
     handler: async (args) => {
       try {
-        Logger.configure({
-          defaultLevel: args.debug ? "debug" : "info",
-          logFile: args.logFile,
+        const appenders: LoggerAppenderConfig[] = [];
+        if (args.logFile) {
+          const logFile = args.logFile;
+          appenders.push({
+            transport: new FileTransport({ filename: logFile }),
+          });
+        }
+        logger.configure({
+          level: args.debug ? LogLevel.Debug : LogLevel.Info,
+          appenders,
         });
 
         try {
@@ -80,7 +89,7 @@ async function parseCommandLineAndStart(): Promise<void> {
           tuiVersion: packageJson.version,
         });
       } catch (err) {
-        logger.error("start failed", err);
+        log.error("start failed", err);
         console.error(getErrorMessage(err));
       }
     },

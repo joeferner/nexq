@@ -1,11 +1,12 @@
 import * as grpc from "@grpc/grpc-js";
-import { createLogger, getErrorMessage, Store } from "@nexq/core";
+import { getErrorMessage, Store } from "@nexq/core";
 import { KedaConfig } from "./config.js";
 import { ExternalScalerImpl } from "./ExternalScalerImpl.js";
 import { ExternalScalerService } from "./generated/ExternalScaler.js";
 import fs from "node:fs";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Keda:Server");
+const log = logger.getLogger("Keda:Server");
 
 export class KedaServer {
   private readonly server: grpc.Server;
@@ -75,7 +76,7 @@ export class KedaServer {
         if (err) {
           return reject(err);
         }
-        logger.info(`${serverSecurityType} grpc server started on ${this.config.bind}`);
+        log.info(`${serverSecurityType} grpc server started on ${this.config.bind}`);
         resolve();
       });
     });

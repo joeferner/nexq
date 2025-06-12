@@ -1,7 +1,6 @@
 import {
   AbortError,
   createId,
-  createLogger,
   CreateQueueOptions,
   DEFAULT_NAK_EXPIRE_BEHAVIOR,
   DEFAULT_VISIBILITY_TIMEOUT_MS,
@@ -28,8 +27,9 @@ import {
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("MemoryStore:Queue");
+const log = logger.getLogger("MemoryStore:Queue");
 
 export class MemoryQueue {
   public readonly name: string;
@@ -322,7 +322,7 @@ export class MemoryQueue {
 
       if (message.retainUntil) {
         if (now > message.retainUntil) {
-          logger.debug(`deleting message ${message.id}, exceeded message retention period`);
+          log.debug(`deleting message ${message.id}, exceeded message retention period`);
           this.messages.splice(i, 1);
           continue;
         }

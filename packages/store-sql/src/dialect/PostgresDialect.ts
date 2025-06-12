@@ -1,4 +1,4 @@
-import { createLogger, DuplicateMessageError, getErrorMessage, QueueInfo, SendMessageOptions, Time } from "@nexq/core";
+import { DuplicateMessageError, getErrorMessage, QueueInfo, SendMessageOptions, Time } from "@nexq/core";
 import fs from "node:fs";
 import pg from "pg";
 import Pool from "pg-pool";
@@ -14,6 +14,7 @@ import {
 } from "./Dialect.js";
 import { PostgresTransaction } from "./PostgresTransaction.js";
 import { Transaction } from "./Transaction.js";
+import { logger } from "@nexq/logger";
 
 interface MessageNotification {
   type: "message-delete" | "message-upsert";
@@ -44,7 +45,7 @@ interface SubscriptionNotification {
 
 type Notification = MessageNotification | QueueNotification | TopicNotification | SubscriptionNotification;
 
-const logger = createLogger("PostgresDialect");
+const log = logger.getLogger("PostgresDialect");
 
 export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
   private startListenSleep = 0;
@@ -108,7 +109,7 @@ export class PostgresDialect extends Dialect<Pool<pg.Client>, PostgresSql> {
           queueName: payloadObj.queueName,
         } satisfies DialectSubscriptionNotification);
       } else {
-        logger.warn(`unhandled notification type: "${payloadObj.type}"`);
+        log.warn(`unhandled notification type: "${payloadObj.type}"`);
       }
     });
     this.startListenSleep = 0;

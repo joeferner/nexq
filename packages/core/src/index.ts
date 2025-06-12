@@ -16,16 +16,8 @@ export { TopicNotFoundError } from "./error/TopicNotFoundError.js";
 export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlreadyExistsError.js";
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 
+export { Logger, LoggerJsonConfig } from "@nexq/logger";
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
-export {
-  createLogger,
-  DEFAULT_LOGGER_CONFIG,
-  Logger,
-  LoggerConfig,
-  LogLevel,
-  LogLevelString,
-  stringToLogLevel,
-} from "./logger.js";
 export { GetMessage, isAvailable, isDelayed, Message, ReceivedMessage } from "./Message.js";
 export {
   DEFAULT_MAX_NUMBER_OF_MESSAGES,
@@ -50,6 +42,8 @@ export { ReceiveMessageOptions } from "./dto/ReceiveMessageOptions.js";
 export { ReceiveMessagesOptions } from "./dto/ReceiveMessagesOptions.js";
 export { SendMessageOptions } from "./dto/SendMessageOptions.js";
 export { SendMessageResult } from "./dto/SendMessageResult.js";
+export { SendMessagesOptions, SendMessagesOptionsMessage } from "./dto/SendMessagesOptions.js";
+export { SendMessagesResult, SendMessagesResultMessage } from "./dto/SendMessagesResult.js";
 export { TopicInfo, topicInfoEqualCreateTopicOptions } from "./dto/TopicInfo.js";
 export { TopicInfoQueueSubscription, TopicInfoSubscription, TopicProtocol } from "./dto/TopicInfoSubscription.js";
 export { UpdateMessageOptions } from "./dto/UpdateMessageOptions.js";

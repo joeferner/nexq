@@ -8,13 +8,13 @@ import { Document } from "../render/Document.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
 import { attributesToString, Detail, detailsToString, formatBytes, formatMs } from "./details.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("DescribeQueue");
+const log = logger.getLogger("DescribeQueue");
 
 export class DescribeQueue extends DivElement {
   public static readonly PATH = "/queue/:queueName/describe";
@@ -105,7 +105,7 @@ export class DescribeQueue extends DivElement {
     if (helpItem.id === "delete") {
       void this.deleteQueue();
     } else {
-      logger.error(`unhandled help shortcut ${helpItem.id}`);
+      log.error(`unhandled help shortcut ${helpItem.id}`);
     }
   }
 
@@ -128,7 +128,7 @@ export class DescribeQueue extends DivElement {
         StatusBar.setStatus(this.document, `${this.queueName} deleted!`);
         this.window.history.popState();
       } catch (err) {
-        logger.error(`Failed to delete queue`, err);
+        log.error(`Failed to delete queue`, err);
         StatusBar.setStatus(this.document, `Failed to delete queue`, err);
       }
     }

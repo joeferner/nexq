@@ -1,3 +1,4 @@
+import { logger } from "@nexq/logger";
 import matchPath from "node-match-path";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { PeekMessagesResponseMessage } from "../client/NexqClientApi.js";
@@ -8,13 +9,12 @@ import { Document } from "../render/Document.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { Text } from "../render/Text.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
 import { attributesToString, bodyToString, Detail, detailsToString } from "./details.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
 
-const logger = createLogger("QueueMessage");
+const log = logger.getLogger("QueueMessage");
 
 export class QueueMessage extends DivElement {
   public static readonly PATH = "/queue/:queueName/:messageId";
@@ -107,7 +107,7 @@ export class QueueMessage extends DivElement {
     if (helpItem.id === "delete") {
       void this.deleteMessage();
     } else {
-      logger.error(`unhandled help shortcut ${helpItem.id}`);
+      log.error(`unhandled help shortcut ${helpItem.id}`);
     }
   }
 
@@ -133,7 +133,7 @@ export class QueueMessage extends DivElement {
         StatusBar.setStatus(this.document, `${this.messageId} deleted!`);
         this.window.history.popState();
       } catch (err) {
-        logger.error(`Failed to delete message`, err);
+        log.error(`Failed to delete message`, err);
         StatusBar.setStatus(this.document, `Failed to delete message`, err);
       }
     }

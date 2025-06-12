@@ -1,5 +1,4 @@
 import {
-  createLogger,
   CreateQueueOptions,
   CreateTopicOptions,
   CreateUserOptions,
@@ -38,15 +37,17 @@ import {
   User,
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
+  SendMessagesOptions,
+  SendMessagesResult,
+  SendMessagesResultMessage,
 } from "@nexq/core";
 import * as R from "radash";
 import { MemoryQueue } from "./MemoryQueue.js";
 import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
-import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
-import { SendMessagesResult, SendMessagesResultMessage } from "@nexq/core/build/dto/SendMessagesResult.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("MemoryStore");
+const log = logger.getLogger("MemoryStore");
 
 export const DEFAULT_POLL_INTERVAL = "30s";
 
@@ -82,7 +83,7 @@ export class MemoryStore implements Store {
 
     let pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
     if (pollIntervalMs < 1000) {
-      logger.warn(`minimum poll interval is 1s but found ${pollIntervalMs}ms`);
+      log.warn(`minimum poll interval is 1s but found ${pollIntervalMs}ms`);
       pollIntervalMs = 1000;
     }
     this.pollIntervalMs = pollIntervalMs;
@@ -103,7 +104,7 @@ export class MemoryStore implements Store {
       this.pollHandle.clear();
       this.pollHandle = undefined;
     }
-    logger.info("shutdown");
+    log.info("shutdown");
   }
 
   public async createQueue(queueName: string, options?: CreateQueueOptions): Promise<void> {
@@ -143,7 +144,7 @@ export class MemoryStore implements Store {
     } else {
       const queue = new MemoryQueue({ name: queueName, time: this.time, ...options });
       this.queues[queueName] = queue;
-      logger.info(`created new queue "${queueName}"`);
+      log.info(`created new queue "${queueName}"`);
     }
   }
 
@@ -248,7 +249,7 @@ export class MemoryStore implements Store {
           : undefined;
         for (const expiredMessage of expiredMessages) {
           if (deadLetterQueue) {
-            logger.debug(`moving message ${expiredMessage.id} to dead letter queue "${deadLetterQueue.name}"`);
+            log.debug(`moving message ${expiredMessage.id} to dead letter queue "${deadLetterQueue.name}"`);
             deadLetterQueue.sendMessage(expiredMessage.id, expiredMessage.body, {
               priority: expiredMessage.priority,
               attributes: expiredMessage.attributes,
@@ -256,7 +257,7 @@ export class MemoryStore implements Store {
             });
           }
           if (deadLetterTopic) {
-            logger.debug(`moving message ${expiredMessage.id} to dead letter topic "${deadLetterTopic.name}"`);
+            log.debug(`moving message ${expiredMessage.id} to dead letter topic "${deadLetterTopic.name}"`);
             deadLetterTopic.publishMessage(expiredMessage.body, (queueName) => this.getQueueRequired(queueName), {
               priority: expiredMessage.priority,
               attributes: expiredMessage.attributes,
@@ -265,9 +266,9 @@ export class MemoryStore implements Store {
           }
         }
       } else {
-        if (logger.isDebugEnabled()) {
+        if (log.isDebugEnabled()) {
           for (const expiredMessage of expiredMessages) {
-            logger.debug(`deleting expired message ${expiredMessage.id}`);
+            log.debug(`deleting expired message ${expiredMessage.id}`);
           }
         }
       }
@@ -338,7 +339,7 @@ export class MemoryStore implements Store {
   }
 
   public async deleteQueue(queueName: string): Promise<void> {
-    logger.info(`deleting queue: ${queueName}`);
+    log.info(`deleting queue: ${queueName}`);
     this.getQueueRequired(queueName);
 
     for (const queue of Object.values(this.queues)) {
@@ -351,7 +352,7 @@ export class MemoryStore implements Store {
   }
 
   public async purgeQueue(queueName: string): Promise<void> {
-    logger.info(`purging queue: ${queueName}`);
+    log.info(`purging queue: ${queueName}`);
     const queue = this.getQueueRequired(queueName);
     queue.purge();
   }

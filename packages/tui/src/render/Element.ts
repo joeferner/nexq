@@ -1,8 +1,8 @@
+import { logger } from "@nexq/logger";
 import EventEmitter from "events";
 import * as R from "radash";
 import Yoga, { Display, Overflow, Node as YogaNode } from "yoga-layout";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { Document } from "./Document.js";
 import { Geometry, geometryFromYogaNode } from "./Geometry.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
@@ -10,7 +10,7 @@ import { BoxRenderItem, RenderItemWithChildren } from "./RenderItem.js";
 import { Style } from "./Style.js";
 import { Window } from "./Window.js";
 
-const logger = createLogger("Element");
+const log = logger.getLogger("Element");
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ElementEvents {}
@@ -156,7 +156,7 @@ export abstract class Element {
       if (child.focused) {
         child.onBlur();
         if (currentTabElement) {
-          logger.warn("multiple focused elements");
+          log.warn("multiple focused elements");
         } else {
           currentTabElement = child;
         }
@@ -190,7 +190,7 @@ export abstract class Element {
     this.walkChildrenDeep((child) => {
       if (child.focused) {
         if (currentTabElement) {
-          logger.warn("multiple focused elements");
+          log.warn("multiple focused elements");
         } else {
           currentTabElement = child;
         }

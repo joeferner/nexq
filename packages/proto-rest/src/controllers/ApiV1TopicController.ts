@@ -1,5 +1,4 @@
 import {
-  createLogger,
   DeleteDeadLetterTopicError,
   parseOptionalDurationIntoMs,
   QueueNotFoundError,
@@ -18,8 +17,9 @@ import { SendMessageRequest } from "../dto/SendMessageRequest.js";
 import { SubscribeQueueRequest } from "../dto/SubscribeQueueRequest.js";
 import { SubscribeResponse } from "../dto/SubscribeResponse.js";
 import { isHttpError } from "../utils.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Rest:ApiV1TopicController");
+const log = logger.getLogger("Rest:ApiV1TopicController");
 
 @Tags("topic")
 @Route("api/v1/topic")
@@ -45,7 +45,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof TopicAlreadyExistsError) {
         throw createHttpError.Conflict(`topic already exists: ${err.reason}`);
       }
-      logger.error(`failed to create topic`, err);
+      log.error(`failed to create topic`, err);
       throw err;
     }
   }
@@ -62,7 +62,7 @@ export class ApiV1TopicController extends Controller {
         topics: topics.map(topicInfoToGetTopicResponse),
       };
     } catch (err) {
-      logger.error(`failed to get topics`, err);
+      log.error(`failed to get topics`, err);
       throw err;
     }
   }
@@ -83,7 +83,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof TopicNotFoundError) {
         throw createHttpError.NotFound("topic not found");
       }
-      logger.error(`failed to get topic info`, err);
+      log.error(`failed to get topic info`, err);
       throw err;
     }
   }
@@ -108,7 +108,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof DeleteDeadLetterTopicError) {
         throw createHttpError.BadRequest("cannot delete dead letter topic associated with a queue");
       }
-      logger.error(`failed to delete topic`, err);
+      log.error(`failed to delete topic`, err);
       throw err;
     }
   }
@@ -138,7 +138,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof TopicNotFoundError) {
         throw createHttpError.NotFound("topic not found");
       }
-      logger.error(`failed to publish`, err);
+      log.error(`failed to publish`, err);
       throw err;
     }
   }
@@ -170,7 +170,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to subscribe`, err);
+      log.error(`failed to subscribe`, err);
       throw err;
     }
   }
@@ -200,7 +200,7 @@ export class ApiV1TopicController extends Controller {
       if (err instanceof SubscriptionNotFoundError) {
         throw createHttpError.NotFound("subscription not found");
       }
-      logger.error(`failed to delete subscription`, err);
+      log.error(`failed to delete subscription`, err);
       throw err;
     }
   }

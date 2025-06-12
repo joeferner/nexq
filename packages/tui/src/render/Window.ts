@@ -1,3 +1,4 @@
+import { logger } from "@nexq/logger";
 import { cursorHide, cursorShow, enterAlternativeScreen, exitAlternativeScreen } from "ansi-escapes";
 import readline from "node:readline";
 import { Key } from "readline";
@@ -7,9 +8,8 @@ import { History, PopStateEvent, PushStateEvent } from "./History.js";
 import { KeyboardEvent } from "./KeyboardEvent.js";
 import { EditableLocation, Location } from "./Location.js";
 import { Renderer } from "./Renderer.js";
-import { createLogger } from "../utils/logger.js";
 
-const logger = createLogger("window");
+const log = logger.getLogger("window");
 
 export interface WindowOptions {
   url?: string;
@@ -121,7 +121,7 @@ export class Window extends Element {
           void this.refresh();
         }
       } catch (err) {
-        logger.error("failed to process stdin.data", err);
+        log.error("failed to process stdin.data", err);
       }
     });
     process.stdin.on("keypress", (chunk: string | undefined, key: Key | undefined) => {
@@ -155,7 +155,7 @@ export class Window extends Element {
           void this.refresh();
         }
       } catch (err) {
-        logger.error("failed to process stdin.keypress", err);
+        log.error("failed to process stdin.keypress", err);
       }
     });
     process.stdin.resume();

@@ -1,3 +1,4 @@
+import { logger } from "@nexq/logger";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { GetQueueResponse } from "../client/NexqClientApi.js";
@@ -7,13 +8,12 @@ import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { App, FilterEvent } from "./App.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
 import { SortDirection, TableView } from "./TableView.js";
 
-const logger = createLogger("Queues");
+const log = logger.getLogger("Queues");
 
 export class Queues extends DivElement {
   public static readonly PATH = "/queue";
@@ -188,7 +188,7 @@ export class Queues extends DivElement {
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = undefined;
       }
-      logger.info("refreshQueues");
+      log.info("refreshQueues");
       const resp = await app.api.api.getQueues();
       this.queues = resp.data.queues;
       this.borderTitle =
@@ -219,7 +219,7 @@ export class Queues extends DivElement {
     } else if (helpItem.id === "describe") {
       this.describeSelectedQueue();
     } else {
-      logger.error(`unhandled help shortcut ${helpItem.id}`);
+      log.error(`unhandled help shortcut ${helpItem.id}`);
     }
   }
 
@@ -253,7 +253,7 @@ export class Queues extends DivElement {
         StatusBar.setStatus(this.document, `Messages moved from "${sourceQueueName}" to "${result.targetQueueName}"`);
         void this.refreshQueues();
       } catch (err) {
-        logger.error(`failed to move messages from "${sourceQueueName}" to "${result.targetQueueName}"`, err);
+        log.error(`failed to move messages from "${sourceQueueName}" to "${result.targetQueueName}"`, err);
         StatusBar.setStatus(this.document, `Failed to move messages`, err);
       }
     }
@@ -285,7 +285,7 @@ export class Queues extends DivElement {
         StatusBar.setStatus(this.document, `${queueNames} purged`);
         void this.refreshQueues();
       } catch (err) {
-        logger.error(`Failed to purge one or more queues`, err);
+        log.error(`Failed to purge one or more queues`, err);
         StatusBar.setStatus(this.document, `Failed to purge one or more queues`, err);
       }
     }
@@ -317,7 +317,7 @@ export class Queues extends DivElement {
         StatusBar.setStatus(this.document, `${queueNames} deleted!`);
         void this.refreshQueues();
       } catch (err) {
-        logger.error(`Failed to delete one or more queues`, err);
+        log.error(`Failed to delete one or more queues`, err);
         StatusBar.setStatus(this.document, `Failed to delete one or more queues`, err);
       }
     }
@@ -359,7 +359,7 @@ export class Queues extends DivElement {
       }
       void this.refreshQueues();
     } catch (err) {
-      logger.error(`Failed to pause/resume one or more queues`, err);
+      log.error(`Failed to pause/resume one or more queues`, err);
       StatusBar.setStatus(this.document, `Failed to pause/resume one or more queues`, err);
     }
   }

@@ -1,7 +1,6 @@
 import {
   AbortError,
   createId,
-  createLogger,
   CreateQueueOptions,
   CreateTopicOptions,
   CreateUserOptions,
@@ -44,9 +43,10 @@ import {
   User,
   UserAccessKeyIdAlreadyExistsError,
   UsernameAlreadyExistsError,
+  SendMessagesOptions,
+  SendMessagesResult,
+  SendMessagesResultMessage,
 } from "@nexq/core";
-import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
-import { SendMessagesResult, SendMessagesResultMessage } from "@nexq/core/build/dto/SendMessagesResult.js";
 import {
   DialectMessageNotification,
   DialectQueueNotification,
@@ -59,8 +59,9 @@ import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 import { clearRecord } from "./utils.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("SqlStore");
+const log = logger.getLogger("SqlStore");
 
 export const DEFAULT_POLL_INTERVAL = "30s";
 
@@ -150,7 +151,7 @@ export class SqlStore implements Store {
 
     let pollIntervalMs = parseDurationIntoMs(options.config.pollInterval ?? DEFAULT_POLL_INTERVAL);
     if (pollIntervalMs < 1000) {
-      logger.warn(`minimum poll interval is 1s but found ${pollIntervalMs}ms`);
+      log.warn(`minimum poll interval is 1s but found ${pollIntervalMs}ms`);
       pollIntervalMs = 1000;
     }
     this.pollIntervalMs = pollIntervalMs;
@@ -497,7 +498,7 @@ export class SqlStore implements Store {
           const lastTouched = this.queueTouched[queueInfo.name];
           const newExpires = new Date(lastTouched.getTime() + queueInfo.expiresMs);
           queueInfo.expiresAt = newExpires;
-          logger.debug(`updating queue expires at "${queueInfo.name}" = ${newExpires.toISOString()}`);
+          log.debug(`updating queue expires at "${queueInfo.name}" = ${newExpires.toISOString()}`);
           await this.dialect.updateQueueExpiresAt(queueInfo.name, newExpires);
 
           // check that queueTouched didn't update while we were updating the expires at
@@ -526,7 +527,7 @@ export class SqlStore implements Store {
 
       for (const queueInfo of queueInfos) {
         if (queueInfo.expiresAt && queueInfo.expiresAt < now) {
-          logger.info(
+          log.info(
             `deleting expired queue "${queueInfo.name}" (queue expired at: ${queueInfo.expiresAt.toISOString()}, now: ${now.toISOString()})`
           );
           try {
@@ -536,7 +537,7 @@ export class SqlStore implements Store {
             if (err instanceof QueueNotFoundError) {
               continue;
             }
-            logger.error(`failed to delete queue: ${queueInfo.name}`, err);
+            log.error(`failed to delete queue: ${queueInfo.name}`, err);
           }
         }
       }
@@ -545,7 +546,7 @@ export class SqlStore implements Store {
         try {
           await this.pollQueue(queueInfo, now);
         } catch (err) {
-          logger.error(`failed to poll queue: ${queueInfo.name}`, err);
+          log.error(`failed to poll queue: ${queueInfo.name}`, err);
         }
       }
     } finally {
@@ -573,7 +574,7 @@ export class SqlStore implements Store {
     if (queueInfo.messageRetentionPeriodMs !== undefined) {
       const results = await this.dialect.deleteExpiredMessagesOverRetention(queueInfo.name, now);
       if (results.changes > 0) {
-        logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded message retention`);
+        log.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded message retention`);
       }
     }
 
@@ -584,7 +585,7 @@ export class SqlStore implements Store {
         now
       );
       if (results.changes > 0) {
-        logger.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded receive count`);
+        log.debug(`deleted ${results.changes} messages from "${queueInfo.name}" that exceeded receive count`);
       }
     }
 
@@ -593,7 +594,7 @@ export class SqlStore implements Store {
     } else if (queueInfo.nakExpireBehavior === "moveToEnd") {
       const results = await this.dialect.moveExpiredMessagesToEndOfQueue(queueInfo);
       if (results.changes > 0) {
-        logger.debug(`moved ${results.changes} messages from "${queueInfo.name}" to end of queue`);
+        log.debug(`moved ${results.changes} messages from "${queueInfo.name}" to end of queue`);
       }
     } else if (isDecreasePriorityByNakExpireBehavior(queueInfo.nakExpireBehavior)) {
       const results = await this.dialect.decreasePriorityOfExpiredMessages(
@@ -601,7 +602,7 @@ export class SqlStore implements Store {
         queueInfo.nakExpireBehavior.decreasePriorityBy
       );
       if (results.changes > 0) {
-        logger.debug(
+        log.debug(
           `decrease the priority of ${results.changes} messages in "${queueInfo.name}" by ${queueInfo.nakExpireBehavior.decreasePriorityBy}`
         );
       }
@@ -619,7 +620,7 @@ export class SqlStore implements Store {
     const deadLetterQueueInfo = await this.getCachedQueueInfo(queueInfo.deadLetterQueueName);
     const results = await this.dialect.moveExpiredMessagesToDeadLetter(undefined, queueInfo, deadLetterQueueInfo);
     if (results.changes > 0) {
-      logger.debug(
+      log.debug(
         `moved ${results.changes} messages from "${queueInfo.name}" to dead letter "${queueInfo.deadLetterQueueName}"`
       );
     }
@@ -664,7 +665,7 @@ export class SqlStore implements Store {
       if (queueInfo.deadLetterQueueName) {
         to.push(`dead letter queue "${queueInfo.deadLetterQueueName}"`);
       }
-      logger.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
+      log.debug(`moved ${expiredSqlMessages.length} messages from "${queueInfo.name}" to ${to.join(",")}`);
     });
   }
 
@@ -720,7 +721,7 @@ export class SqlStore implements Store {
   }
 
   public async deleteQueue(queueName: string): Promise<void> {
-    logger.info(`deleting queue: "${queueName}"`);
+    log.info(`deleting queue: "${queueName}"`);
     const queue = await this.getCachedQueueInfo(queueName);
     const dependentQueues = await this.dialect.findQueueNamesWithDeadLetterQueueName(queueName);
     if (dependentQueues.length > 0) {
@@ -731,7 +732,7 @@ export class SqlStore implements Store {
   }
 
   public async purgeQueue(queueName: string): Promise<void> {
-    logger.info(`purging queue: ${queueName}`);
+    log.info(`purging queue: ${queueName}`);
     await this.dialect.purgeQueue(queueName);
   }
 

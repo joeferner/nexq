@@ -1,3 +1,4 @@
+import { logger } from "@nexq/logger";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
 import { GetTopicResponse } from "../client/NexqClientApi.js";
@@ -7,13 +8,12 @@ import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
 import { TableView } from "./TableView.js";
 
-const logger = createLogger("Topics");
+const log = logger.getLogger("Topics");
 
 export class Topics extends DivElement {
   public static readonly PATH = "/topic";
@@ -99,7 +99,7 @@ export class Topics extends DivElement {
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = undefined;
       }
-      logger.info("refreshTopics");
+      log.info("refreshTopics");
       const resp = await app.api.api.getTopics();
       const topics = resp.data.topics;
       this.borderTitle =
@@ -122,7 +122,7 @@ export class Topics extends DivElement {
     if (helpItem.id === "delete") {
       void this.deleteSelectedTopics();
     } else {
-      logger.error(`unhandled help shortcut ${helpItem.id}`);
+      log.error(`unhandled help shortcut ${helpItem.id}`);
     }
   }
 
@@ -152,7 +152,7 @@ export class Topics extends DivElement {
         StatusBar.setStatus(this.document, `${topicNames} deleted!`);
         void this.refreshTopics();
       } catch (err) {
-        logger.error(`Failed to delete one or more topics`, err);
+        log.error(`Failed to delete one or more topics`, err);
         StatusBar.setStatus(this.document, `Failed to delete one or more topics`, err);
       }
     }

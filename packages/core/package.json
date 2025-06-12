@@ -20,6 +20,7 @@
     "type": "git"
   },
   "dependencies": {
+    "@nexq/logger": "^1.0.0",
     "bcryptjs": "^3.0.2",
     "radash": "^12.1.0",
     "temporal-polyfill": "^0.2.5",

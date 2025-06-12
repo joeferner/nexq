@@ -1,6 +1,5 @@
 import {
   AbortError,
-  createLogger,
   DeleteDeadLetterQueueError,
   DurationParseError,
   InvalidUpdateError,
@@ -12,8 +11,8 @@ import {
   ReceiptHandleIsInvalidError,
   Store,
   TopicNotFoundError,
+  SendMessagesOptionsMessage,
 } from "@nexq/core";
-import { SendMessagesOptionsMessage } from "@nexq/core/build/dto/SendMessagesOptions.js";
 import express from "express";
 import createHttpError from "http-errors";
 import {
@@ -45,8 +44,9 @@ import { SendMessagesRequest } from "../dto/SendMessagesRequest.js";
 import { SendMessagesResponse } from "../dto/SendMessagesResponse.js";
 import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
 import { isHttpError } from "../utils.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Rest:ApiV1QueueController");
+const log = logger.getLogger("Rest:ApiV1QueueController");
 
 export interface User {
   userId: number;
@@ -99,7 +99,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof TopicNotFoundError && err.topicName === request.deadLetterTopicName) {
         throw createHttpError.NotFound(`dead letter topic not found`);
       }
-      logger.error(`failed to create queue`, err);
+      log.error(`failed to create queue`, err);
       throw err;
     }
   }
@@ -116,7 +116,7 @@ export class ApiV1QueueController extends Controller {
         queues: queues.map(queueInfoToGetQueueResponse),
       };
     } catch (err) {
-      logger.error(`failed to get queues`, err);
+      log.error(`failed to get queues`, err);
       throw err;
     }
   }
@@ -137,7 +137,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to get queue info`, err);
+      log.error(`failed to get queue info`, err);
       throw err;
     }
   }
@@ -162,7 +162,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof DeleteDeadLetterQueueError) {
         throw createHttpError.BadRequest("cannot delete dead letter queue associated with a queue");
       }
-      logger.error(`failed to delete queue`, err);
+      log.error(`failed to delete queue`, err);
       throw err;
     }
   }
@@ -196,7 +196,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to send message`, err);
+      log.error(`failed to send message`, err);
       throw err;
     }
   }
@@ -235,7 +235,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to send messages`, err);
+      log.error(`failed to send messages`, err);
       throw err;
     }
   }
@@ -259,7 +259,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to pause queue`, err);
+      log.error(`failed to pause queue`, err);
       throw err;
     }
   }
@@ -283,7 +283,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to resume queue`, err);
+      log.error(`failed to resume queue`, err);
       throw err;
     }
   }
@@ -313,7 +313,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to move messages`, err);
+      log.error(`failed to move messages`, err);
       throw err;
     }
   }
@@ -347,7 +347,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof ReceiptHandleIsInvalidError) {
         throw createHttpError.NotFound("message found but receipt handle does not match");
       }
-      logger.error(`failed to delete message`, err);
+      log.error(`failed to delete message`, err);
       throw err;
     }
   }
@@ -391,7 +391,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof InvalidUpdateError) {
         throw createHttpError.BadRequest(err.message);
       }
-      logger.error(`failed to update message`, err);
+      log.error(`failed to update message`, err);
       throw err;
     }
   }
@@ -429,7 +429,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof ReceiptHandleIsInvalidError) {
         throw createHttpError.NotFound("message found but receipt handle does not match");
       }
-      logger.error(`failed to nak message`, err);
+      log.error(`failed to nak message`, err);
       throw err;
     }
   }
@@ -450,7 +450,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to purge queue`, err);
+      log.error(`failed to purge queue`, err);
       throw err;
     }
   }
@@ -498,10 +498,10 @@ export class ApiV1QueueController extends Controller {
         throw createHttpError.NotFound("queue not found");
       }
       if (err instanceof AbortError) {
-        logger.debug("receive aborted");
+        log.debug("receive aborted");
         throw createHttpError.RequestTimeout();
       }
-      logger.error(`failed to receive messages`, err);
+      log.error(`failed to receive messages`, err);
       throw err;
     }
   }
@@ -553,7 +553,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof QueueNotFoundError) {
         throw createHttpError.NotFound("queue not found");
       }
-      logger.error(`failed to peek messages`, err);
+      log.error(`failed to peek messages`, err);
       throw err;
     }
   }
@@ -593,7 +593,7 @@ export class ApiV1QueueController extends Controller {
       if (err instanceof MessageNotFoundError) {
         throw createHttpError.NotFound("message not found");
       }
-      logger.error(`failed to get message`, err);
+      log.error(`failed to get message`, err);
       throw err;
     }
   }

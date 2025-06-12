@@ -1,4 +1,4 @@
-import { createLogger, parseBind, Store } from "@nexq/core";
+import { parseBind, Store } from "@nexq/core";
 import express, {
   Express,
   Request as ExpressRequest,
@@ -14,8 +14,9 @@ import { PrometheusConfig } from "./config.js";
 import { isHttpError } from "./utils.js";
 import createHttpError from "http-errors";
 import { serverMetrics } from "./serverMetrics.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Prometheus:Server");
+const log = logger.getLogger("Prometheus:Server");
 
 export class PrometheusServer {
   private readonly app: Express;
@@ -36,7 +37,7 @@ export class PrometheusServer {
     );
     this.app.use(json());
     this.app.use((req, _resp, next) => {
-      logger.debug(`request ${req.method}: ${req.path}`);
+      log.debug(`request ${req.method}: ${req.path}`);
       next();
     });
 
@@ -50,7 +51,7 @@ export class PrometheusServer {
         if (isHttpError(err)) {
           return next(err);
         }
-        logger.error("failed to serve metrics", err);
+        log.error("failed to serve metrics", err);
         return next(createHttpError.InternalServerError("failed to serve metrics"));
       }
     });
@@ -71,7 +72,7 @@ export class PrometheusServer {
       const { port, hostname } = parseBind(this.config.http.bind, "0.0.0.0", 7887);
       // eslint-disable-next-line @typescript-eslint/no-misused-promises
       this.httpServer = http.createServer(this.app).listen(port, hostname);
-      logger.info(`http server started http://${this.config.http.bind}`);
+      log.info(`http server started http://${this.config.http.bind}`);
     }
     if (this.config.https) {
       const { port, hostname } = parseBind(this.config.https.bind, "0.0.0.0", 7888);
@@ -85,7 +86,7 @@ export class PrometheusServer {
       };
       // eslint-disable-next-line @typescript-eslint/no-misused-promises
       this.httpsServer = https.createServer(httpsOptions, this.app).listen(port, hostname);
-      logger.info(`https server started https://${this.config.https.bind}`);
+      log.info(`https server started https://${this.config.https.bind}`);
     }
   }
 

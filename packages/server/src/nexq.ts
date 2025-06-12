@@ -1,6 +1,7 @@
 /* eslint no-console: "off" */
 
-import { createLogger, DEFAULT_LOGGER_CONFIG, Logger, RealTime, Store, Time } from "@nexq/core";
+import { RealTime, Store, Time } from "@nexq/core";
+import { logger } from "@nexq/logger";
 import { KedaServer } from "@nexq/proto-keda";
 import { PrometheusServer } from "@nexq/proto-prometheus";
 import { RestServer } from "@nexq/proto-rest";
@@ -13,7 +14,7 @@ import { ConfigParseError } from "./error/ConfigParseError.js";
 import { MemoryStoreConfig, NexqConfig, SqlStoreConfig, validateNexqConfig } from "./NexqConfig.js";
 import { applyConfigOverrides, envSubstitution } from "./utils.js";
 
-const logger = createLogger("NexQ");
+const log = logger.getLogger("NexQ");
 
 export interface StartOptions {
   configFilename: string;
@@ -30,8 +31,10 @@ export async function start(options: StartOptions): Promise<void> {
 `);
   const fullConfigFilename = path.resolve(options.configFilename);
   const config = await loadConfig(fullConfigFilename, options.configOverrides);
-  Logger.configure(config.logger ?? DEFAULT_LOGGER_CONFIG);
-  logger.info(`using config "${fullConfigFilename}"`);
+  if (config.logger) {
+    logger.configure(config.logger);
+  }
+  log.info(`using config "${fullConfigFilename}"`);
   const time = new RealTime();
   const store = await createStore(config, time);
   void store.poll();
@@ -88,12 +91,12 @@ async function createStore(config: NexqConfig, time: Time): Promise<Store> {
   switch (config.store.type) {
     case "memory": {
       const storeConfig: MemoryStoreConfig = config.store;
-      logger.info("Using memory store");
+      log.info("Using memory store");
       return await MemoryStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });
     }
     case "sql": {
       const storeConfig: SqlStoreConfig = config.store;
-      logger.info(
+      log.info(
         `Using sql store: ${storeConfig.type}: ${SqlStore.maskPasswordInConnectionString(storeConfig.connectionString)}`
       );
       return await SqlStore.create({ initialUsers: config.initialUsers, config: storeConfig, time });

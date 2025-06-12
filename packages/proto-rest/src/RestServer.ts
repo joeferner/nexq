@@ -1,4 +1,4 @@
-import { createLogger, parseBind, Store } from "@nexq/core";
+import { parseBind, Store } from "@nexq/core";
 import express, {
   Express,
   Request as ExpressRequest,
@@ -20,8 +20,9 @@ import { RestConfig } from "./config.js";
 import { iocContainer } from "./ioc.js";
 import { RegisterRoutes } from "./routes/routes.js";
 import { isHttpError } from "./utils.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Rest:Server");
+const log = logger.getLogger("Rest:Server");
 
 export class RestServer {
   private readonly app: Express;
@@ -50,7 +51,7 @@ export class RestServer {
     );
     this.app.use(json());
     this.app.use((req, _resp, next) => {
-      logger.debug(`request ${req.method}: ${req.path}`);
+      log.debug(`request ${req.method}: ${req.path}`);
       next();
     });
     this.app.get("/", (_req, res) => {
@@ -92,9 +93,9 @@ export class RestServer {
       const { port, hostname } = parseBind(this.config.http.bind, "0.0.0.0", 7887);
       // eslint-disable-next-line @typescript-eslint/no-misused-promises
       this.httpServer = http.createServer(this.app).listen(port, hostname);
-      logger.info(`http server started http://${this.config.http.bind}`);
+      log.info(`http server started http://${this.config.http.bind}`);
       for (const auth of this.config.auth ?? []) {
-        logger.info(`  using auth: ${auth.type}`);
+        log.info(`  using auth: ${auth.type}`);
       }
     }
     if (this.config.https) {
@@ -109,7 +110,7 @@ export class RestServer {
       };
       // eslint-disable-next-line @typescript-eslint/no-misused-promises
       this.httpsServer = https.createServer(httpsOptions, this.app).listen(port, hostname);
-      logger.info(`https server started https://${this.config.https.bind}`);
+      log.info(`https server started https://${this.config.https.bind}`);
     }
   }
 

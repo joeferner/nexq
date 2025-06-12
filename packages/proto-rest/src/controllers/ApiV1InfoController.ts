@@ -1,12 +1,12 @@
-import { createLogger } from "@nexq/core";
 import findRoot from "find-root";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Controller, Get, Route, SuccessResponse, Tags } from "tsoa";
 import { GetInfoResponse } from "../dto/GetInfoResponse.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("Rest:ApiV1InfoController");
+const log = logger.getLogger("Rest:ApiV1InfoController");
 
 export interface User {
   userId: number;
@@ -55,7 +55,7 @@ export class ApiV1InfoController extends Controller {
       const info = await this.loadInfo();
       return info;
     } catch (err) {
-      logger.error(`failed to get info`, err);
+      log.error(`failed to get info`, err);
       throw err;
     }
   }

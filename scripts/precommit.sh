@@ -7,6 +7,12 @@ cd "${SCRIPT_DIR}/.."
 
 source ./scripts/_utils.sh
 
+banner "checking for invalid code..."
+if grep -R --exclude-dir=node_modules 'import.*from.*/build' packages; then
+  echo "should not import from /build"
+  exit 1
+fi
+
 banner "Installing..."
 npm install --workspaces --no-save
 

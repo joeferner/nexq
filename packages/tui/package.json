@@ -24,6 +24,7 @@
     "type": "git"
   },
   "dependencies": {
+    "@nexq/logger": "^1.0.0",
     "ansi-escapes": "^7.0.0",
     "ansi-sequence-parser": "^1.1.3",
     "ansis": "^3.17.0",

@@ -1,4 +1,3 @@
-import { createLogger } from "@nexq/core";
 import * as pg from "pg";
 import { Client as PgClient } from "pg";
 import Pool from "pg-pool";
@@ -8,9 +7,10 @@ import { SavePoint } from "../dialect/dto/SavePoint.js";
 import { Sql } from "./Sql.js";
 import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("SqlStore:PostgresSql");
-const sqlLogger = createLogger("SQL");
+const log = logger.getLogger("SqlStore:PostgresSql");
+const sqlLog = logger.getLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;
 const MIGRATION_NOTIFY = 2;
@@ -44,8 +44,8 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     params: unknown[]
   ): Promise<RunResult> {
     const sql = this.getQuery(queryName).trim();
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: run: ${sql}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: run: ${sql}`);
     }
     this.transformParams(params);
     const results = await this.getClient(db).query({
@@ -58,8 +58,8 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
 
   protected override async runRawSql(db: Pool<PgClient>, sql: string, params: unknown[]): Promise<RunResult> {
     sql = this.transformSql(sql);
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: run: ${sql.trim()}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: run: ${sql.trim()}`);
     }
     this.transformParams(params);
     const results = await db.query(sql, params);
@@ -72,8 +72,8 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     params: unknown[]
   ): Promise<TRow[]> {
     const sql = this.getQuery(queryName).trim();
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: all: ${sql}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: all: ${sql}`);
     }
     this.transformParams(params);
     const results = await this.getClient(db).query({
@@ -135,7 +135,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     if (migrations.rows.some((m) => m.version === MIGRATION_VERSION_INITIAL)) {
       return;
     }
-    logger.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
+    log.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
 
     await database.query(`
         CREATE TABLE nexq_queue(
@@ -236,7 +236,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     if (migrations.rows.some((m) => m.version === MIGRATION_NOTIFY)) {
       return;
     }
-    logger.info(`running migration ${MIGRATION_NOTIFY} - notify`);
+    log.info(`running migration ${MIGRATION_NOTIFY} - notify`);
 
     await database.query(`
       CREATE OR REPLACE FUNCTION nexq_message_notify() RETURNS TRIGGER as $process_record$
@@ -270,7 +270,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     if (migrations.rows.some((m) => m.version === MIGRATION_NOTIFY_ALL)) {
       return;
     }
-    logger.info(`running migration ${MIGRATION_NOTIFY_ALL} - notify all`);
+    log.info(`running migration ${MIGRATION_NOTIFY_ALL} - notify all`);
 
     // add type to nexq_message_notify
     await database.query(`
@@ -364,7 +364,7 @@ export class PostgresSql extends Sql<Pool<PgClient>> {
     if (migrations.rows.some((m) => m.version === MIGRATION_DEDUPLICATION)) {
       return;
     }
-    logger.info(`running migration ${MIGRATION_DEDUPLICATION} - deduplication`);
+    log.info(`running migration ${MIGRATION_DEDUPLICATION} - deduplication`);
 
     await database.query(`
       ALTER TABLE

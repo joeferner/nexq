@@ -1,4 +1,3 @@
-import { createLogger } from "@nexq/core";
 import sqlite from "better-sqlite3";
 import * as R from "radash";
 import { Sql } from "./Sql.js";
@@ -6,9 +5,10 @@ import { RunResult } from "./dto/RunResult.js";
 import { SqlMigration } from "./dto/SqlMigration.js";
 import { isTransaction, Transaction } from "../dialect/Transaction.js";
 import { isSqliteTransaction } from "../dialect/SqliteTransaction.js";
+import { logger } from "@nexq/logger";
 
-const logger = createLogger("SqlStore:SqliteSql");
-const sqlLogger = createLogger("SQL");
+const log = logger.getLogger("SqlStore:SqliteSql");
+const sqlLog = logger.getLogger("SQL");
 
 const MIGRATION_VERSION_INITIAL = 1;
 const MIGRATION_VERSION_DEDUPLICATION = 2;
@@ -25,8 +25,8 @@ export class SqliteSql extends Sql<sqlite.Database> {
     queryName: string,
     params: unknown[]
   ): Promise<RunResult> {
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: run: ${this.getQuery(queryName).trim()}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: run: ${this.getQuery(queryName).trim()}`);
     }
     this.transformParams(params);
     const stmt = this.prepare(db, queryName);
@@ -35,8 +35,8 @@ export class SqliteSql extends Sql<sqlite.Database> {
   }
 
   protected override async runRawSql(db: sqlite.Database, sql: string, params: unknown[]): Promise<RunResult> {
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: run: ${sql.trim()}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: run: ${sql.trim()}`);
     }
     this.transformParams(params);
     const stmt = db.prepare(sql);
@@ -49,8 +49,8 @@ export class SqliteSql extends Sql<sqlite.Database> {
     queryName: string,
     params: unknown[]
   ): Promise<TRow[]> {
-    if (sqlLogger.isDebugEnabled()) {
-      sqlLogger.debug(`sql: all: ${this.getQuery(queryName).trim()}`);
+    if (sqlLog.isDebugEnabled()) {
+      sqlLog.debug(`sql: all: ${this.getQuery(queryName).trim()}`);
     }
     this.transformParams(params);
     const stmt = this.prepare(db, queryName);
@@ -101,7 +101,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
 
   private async migrateInitial(database: sqlite.Database, migrations: SqlMigration[]): Promise<void> {
     if (!migrations.some((m) => m.version === MIGRATION_VERSION_INITIAL)) {
-      logger.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
+      log.info(`running migration ${MIGRATION_VERSION_INITIAL} - initial`);
 
       database.exec(`
         CREATE TABLE nexq_queue(
@@ -199,7 +199,7 @@ export class SqliteSql extends Sql<sqlite.Database> {
 
   private async migrateDeduplicationId(database: sqlite.Database, migrations: SqlMigration[]): Promise<void> {
     if (!migrations.some((m) => m.version === MIGRATION_VERSION_DEDUPLICATION)) {
-      logger.info(`running migration ${MIGRATION_VERSION_DEDUPLICATION} - deduplication`);
+      log.info(`running migration ${MIGRATION_VERSION_DEDUPLICATION} - deduplication`);
 
       database.exec(`ALTER TABLE nexq_message ADD COLUMN deduplication_id TEXT DEFAULT (hex(randomblob(16)))`);
       database.exec(`

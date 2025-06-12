@@ -1,9 +1,9 @@
+import { logger } from "@nexq/logger";
 import { Color as AnsiSequenceColor, parseAnsiSequences } from "ansi-sequence-parser";
 import * as ansis from "ansis";
 import { getNamedColors, NamedColor } from "named-css-colors";
-import { createLogger } from "../utils/logger.js";
 
-const logger = createLogger("Color");
+const log = logger.getLogger("Color");
 const namedColors = getNamedColors();
 
 export function fgColor(color: string): ansis.Ansis {
@@ -26,7 +26,7 @@ function toHexColor(color: string): string {
     return namedColor;
   }
 
-  logger.warn(`unknown color: ${color}`);
+  log.warn(`unknown color: ${color}`);
   return color;
 }
 
@@ -80,10 +80,10 @@ export function ansiColorToColorString(color: AnsiSequenceColor): string {
     if (namedColor) {
       return namedColor;
     }
-    logger.warn(`color not supported "${JSON.stringify(color.type)}"`);
+    log.warn(`color not supported "${JSON.stringify(color.type)}"`);
     return "#ffffff";
   } else {
-    logger.warn(`color not supported "${JSON.stringify(color.type)}"`);
+    log.warn(`color not supported "${JSON.stringify(color.type)}"`);
     return "#ffffff";
   }
 }

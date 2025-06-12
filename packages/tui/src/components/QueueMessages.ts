@@ -1,3 +1,4 @@
+import { logger } from "@nexq/logger";
 import matchPath from "node-match-path";
 import * as R from "radash";
 import { Align, FlexDirection, Overflow } from "yoga-layout";
@@ -8,13 +9,12 @@ import { DivElement } from "../render/DivElement.js";
 import { Document } from "../render/Document.js";
 import { KeyboardEvent } from "../render/KeyboardEvent.js";
 import { isInputMatch } from "../utils/input.js";
-import { createLogger } from "../utils/logger.js";
 import { App } from "./App.js";
 import { HelpItem } from "./Help.js";
 import { StatusBar } from "./StatusBar.js";
 import { SortDirection, TableView } from "./TableView.js";
 
-const logger = createLogger("QueueMessages");
+const log = logger.getLogger("QueueMessages");
 
 type QueueMessagesRow = PeekMessagesResponseMessage & { index: number };
 
@@ -168,7 +168,7 @@ export class QueueMessages extends DivElement {
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = undefined;
       }
-      logger.info("refreshMessages");
+      log.info("refreshMessages");
       const resp = await app.api.api.peekMessages(this.queueName, {
         maxNumberOfMessages: 100,
         includeDelayed: true,
@@ -191,7 +191,7 @@ export class QueueMessages extends DivElement {
     if (helpItem.id === "delete") {
       void this.deleteSelectedMessage();
     } else {
-      logger.error(`unhandled help shortcut ${helpItem.id}`);
+      log.error(`unhandled help shortcut ${helpItem.id}`);
     }
   }
 
@@ -221,7 +221,7 @@ export class QueueMessages extends DivElement {
         StatusBar.setStatus(this.document, `${messageIds} deleted!`);
         void this.refreshMessages();
       } catch (err) {
-        logger.error(`Failed to delete one or more messages`, err);
+        log.error(`Failed to delete one or more messages`, err);
         StatusBar.setStatus(this.document, `Failed to delete one or more messages`, err);
       }
     }

@@ -1,15 +1,15 @@
+import { logger } from "@nexq/logger";
 import { cursorHide, cursorShow, cursorTo } from "ansi-escapes";
 import { createAnsiSequenceParser } from "ansi-sequence-parser";
 import * as ansis from "ansis";
 import Yoga, { Direction } from "yoga-layout";
-import { createLogger } from "../utils/logger.js";
 import { ansiColorToColorString, bgColor, fgColor } from "./color.js";
 import { Element } from "./Element.js";
 import { Geometry, geometryFromYogaNode, rectIntersection } from "./Geometry.js";
 import { BoxRenderItem, findRenderItem, RenderItem, TextRenderItem } from "./RenderItem.js";
 import { BorderStyle } from "./Style.js";
 
-const logger = createLogger("Renderer");
+const log = logger.getLogger("Renderer");
 
 interface Character {
   value: string;
@@ -79,7 +79,7 @@ export class Renderer {
   }
 
   public render(element: Element): void {
-    const startTime = Date.now();
+    const t = log.time();
     this._width = process.stdout.columns ?? 80;
     this._height = process.stdout.rows ?? 40;
 
@@ -134,9 +134,7 @@ export class Renderer {
     this.previousHeight = this._height;
     this.bufferIndex = secondaryBufferIndex;
 
-    const endTime = Date.now();
-    const deltaT = endTime - startTime;
-    logger.debug(`render ${deltaT}ms, ${((1 / deltaT) * 1000).toFixed(2)}fps`);
+    t.debug(`render ${((1 / t.duration) * 1000).toFixed(2)}fps`);
   }
 }
 
