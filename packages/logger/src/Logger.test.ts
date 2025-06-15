@@ -2,10 +2,11 @@ import { describe, expect, test } from "vitest";
 import { Logger } from "./Logger.js";
 import { MemoryTransport } from "./transport/MemoryTransport.js";
 import { LogLevel } from "./LogLevel.js";
+import { MessageContext } from "./MessageContext.js";
 
 describe("Logger", () => {
   test("level", () => {
-    const logger = new Logger(undefined, undefined);
+    const logger = new Logger();
     const memoryTransport = new MemoryTransport();
 
     logger.configure({
@@ -23,7 +24,7 @@ describe("Logger", () => {
   });
 
   test("transport level", () => {
-    const logger = new Logger(undefined, undefined);
+    const logger = new Logger();
     const memoryTransportDefault = new MemoryTransport();
     const memoryTransportInfo = new MemoryTransport();
     const memoryTransportWarn = new MemoryTransport();
@@ -52,5 +53,23 @@ describe("Logger", () => {
 
     expect(memoryTransportWarn.messages.length).toBe(1);
     expect(memoryTransportWarn.messages[0].message).toBe("testWarn");
+  });
+
+  test("message context", () => {
+    const logger = new Logger();
+    const memoryTransport = new MemoryTransport();
+    logger.configure({
+      level: LogLevel.Debug,
+      appenders: [
+        { transport: memoryTransport },
+      ],
+    });
+
+    const messageContext = new MessageContext({ value: 42 });
+    logger.info('test message', 42, messageContext);
+
+    expect(memoryTransport.messages[0].message).toBe('test message');
+    expect(memoryTransport.messages[0].params).toStrictEqual([42]);
+    expect(memoryTransport.messages[0].messageContext).toStrictEqual(messageContext);
   });
 });

@@ -5,6 +5,7 @@ import { LoggerAppenderConfig, LoggerConfig, LoggerJsonConfig, toLoggerConfig } 
 import { Timer } from "./Timer.js";
 import { LogLevel } from "./LogLevel.js";
 import { ConsoleTransport } from "./transport/ConsoleTransport.js";
+import { MessageContext } from "./MessageContext.js";
 
 export interface ILogger {
   isDebugEnabled(): boolean;
@@ -34,7 +35,7 @@ export class Logger implements ILogger {
   private appenders: Readonly<Readonly<Required<LoggerAppenderConfig>>[]>;
   private readonly children: Logger[] = [];
 
-  public constructor(parent: Logger | undefined, name: string | undefined) {
+  public constructor(name?: string, parent?: Logger) {
     this.name = name;
     if (parent) {
       parent.children.push(this);
@@ -116,6 +117,12 @@ export class Logger implements ILogger {
         continue;
       }
 
+      let messageContext: MessageContext | undefined;
+      if (params.length > 0 && params[params.length - 1] instanceof MessageContext) {
+        messageContext = params[params.length - 1];
+        params = params.slice(0, params.length - 1);
+      }
+
       appender.transport.log(
         {
           time: new Date(),
@@ -123,6 +130,7 @@ export class Logger implements ILogger {
           level,
           message,
           params,
+          messageContext
         },
         appender.formatter
       );
@@ -184,6 +192,6 @@ export class Logger implements ILogger {
     if (existingChild) {
       return existingChild;
     }
-    return new Logger(this, name);
+    return new Logger(name, this);
   }
 }

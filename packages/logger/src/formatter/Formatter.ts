@@ -1,4 +1,5 @@
 import { LogLevel } from "../LogLevel.js";
+import { MessageContext } from "../MessageContext.js";
 import { FormatterJsonConfig } from "./config.js";
 
 export type FormatterOptions = object;
@@ -15,6 +16,7 @@ export interface Message {
   message: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   params: any[];
+  messageContext?: MessageContext;
 }
 
 export interface FormatterMessageOptions {

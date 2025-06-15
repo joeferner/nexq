@@ -10,4 +10,4 @@ export { LogLevel, LogLevelString, toLogLevel } from "./LogLevel.js";
 /**
  * Root logger
  */
-export const logger = new Logger(undefined, undefined);
+export const logger = new Logger();
