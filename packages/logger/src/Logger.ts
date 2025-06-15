@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PatternFormatter } from "./formatter/PatternFormatter.js";
 import { LoggerAppenderConfig, LoggerConfig, LoggerJsonConfig, toLoggerConfig } from "./LoggerConfig.js";
-import { LoggerTime } from "./LoggerTime.js";
+import { Timer } from "./Timer.js";
 import { LogLevel } from "./LogLevel.js";
 import { ConsoleTransport } from "./transport/ConsoleTransport.js";
 
@@ -169,8 +169,8 @@ export class Logger implements ILogger {
     this.log(LogLevel.Emergency, message, ...params);
   }
 
-  public time(): LoggerTime {
-    return new LoggerTime(this);
+  public time(): Timer {
+    return new Timer(this);
   }
 
   /**

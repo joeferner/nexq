@@ -2,8 +2,8 @@
 import { ILogger, Logger } from "./Logger.js";
 import { LogLevel } from "./LogLevel.js";
 
-export class LoggerTime implements ILogger {
-  private readonly startTime: number;
+export class Timer implements ILogger {
+  private startTime: number;
 
   public constructor(private readonly logger: Logger) {
     this.startTime = Date.now();
@@ -11,6 +11,10 @@ export class LoggerTime implements ILogger {
 
   public get duration(): number {
     return Date.now() - this.startTime;
+  }
+
+  public reset(): void {
+    this.startTime = Date.now();
   }
 
   public get durationString(): string {
