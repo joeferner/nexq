@@ -5,7 +5,8 @@
 import { describe, expect, test } from "vitest";
 import { Message } from "../formatter/Formatter.js";
 import { PatternFormatter } from "../formatter/PatternFormatter.js";
-import { LogLevel, logLevelToString } from "../LogLevel.js";
+import { LogLevel } from "../LoggerConfig.js";
+import { logLevelToString } from "../LoggerConfig.utils.js";
 import { ConsoleTransport } from "./ConsoleTransport.js";
 
 describe("ConsoleTransport", () => {

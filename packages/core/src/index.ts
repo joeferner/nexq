@@ -16,7 +16,7 @@ export { TopicNotFoundError } from "./error/TopicNotFoundError.js";
 export { UserAccessKeyIdAlreadyExistsError } from "./error/UserAccessKeyIdAlreadyExistsError.js";
 export { UsernameAlreadyExistsError } from "./error/UsernameAlreadyExistsError.js";
 
-export { Logger, LoggerJsonConfig } from "@nexq/logger";
+export { Logger, JsonConfig as LoggerJsonConfig } from "@nexq/logger";
 export { AuthBasicConfig, AuthConfig, HttpConfig, HttpsConfig } from "./config.js";
 export { GetMessage, isAvailable, isDelayed, Message, ReceivedMessage } from "./Message.js";
 export {

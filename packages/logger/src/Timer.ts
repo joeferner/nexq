@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ILogger, Logger } from "./Logger.js";
-import { LogLevel } from "./LogLevel.js";
+import { LogLevel } from "./LoggerConfig.js";
 
 export class Timer implements ILogger {
   private startTime: number;

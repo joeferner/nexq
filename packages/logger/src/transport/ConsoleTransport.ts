@@ -1,5 +1,5 @@
-import { Formatter, Message } from "../formatter/Formatter.js";
-import { LogLevel } from "../LogLevel.js";
+import { Message } from "../formatter/Formatter.js";
+import { LogLevel } from "../LoggerConfig.js";
 import { toBoolean } from "../utils.js";
 import { TransportJsonConfigObj } from "./config.js";
 import { toTransportOptions, Transport, TransportOptions } from "./Transport.js";
@@ -40,7 +40,7 @@ export class ConsoleTransport implements Transport {
     this.enableColor = opts.enableColor ?? true;
   }
 
-  public log(message: Message, formatter: Formatter): void {
+  public log(message: Message): void {
     const formattedMessage = formatter.formatMessage(message, { enableColor: this.enableColor });
     if (message.level <= LogLevel.Error) {
       // eslint-disable-next-line no-console

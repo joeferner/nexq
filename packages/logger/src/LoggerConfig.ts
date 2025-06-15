@@ -1,75 +1,65 @@
-import { FormatterJsonConfig, formatterJsonConfigToFormatter } from "./formatter/config.js";
-import { Formatter } from "./formatter/Formatter.js";
-import { isLogLevel, LogLevel, LogLevelString, toLogLevel } from "./LogLevel.js";
-import { TransportJsonConfig, transportJsonConfigToTransport } from "./transport/config.js";
 import { Transport } from "./transport/Transport.js";
-import { isString } from "./utils.js";
 
-export interface LoggerConfig {
+export enum LogLevel {
+  Trace = 90,
+  Debug = 80,
+  Info = 70,
+  Notice = 60,
+  Warn = 50,
+  Error = 40,
+  Critical = 30,
+  Alert = 20,
+  Emergency = 10,
+  Off = 0,
+}
+
+export type LogLevelString =
+  | "trace"
+  | "debug"
+  | "info"
+  | "notice"
+  | "warn"
+  | "error"
+  | "critical"
+  | "alert"
+  | "emergency"
+  | "off";
+
+export interface Config {
   level: LogLevel;
-  appenders?: LoggerAppenderConfig[];
-  logger?: Record<string, LoggerConfig>;
+  appenders?: AppenderConfig[];
+  filters?: FilterConfig[];
 }
 
-export interface LoggerAppenderConfig {
+export interface AppenderConfig {
   level?: LogLevel;
-  formatter?: Formatter;
-  transport?: Transport;
+  transport: Transport;
 }
 
-function isLoggerConfig(config: LoggerConfig | LoggerJsonConfig): config is LoggerConfig {
-  if (!isLogLevel(config.level)) {
-    return false;
-  }
-  return true;
+export interface FilterConfig {
+  level?: LogLevel;
+  namePattern?: string;
+  transports?: Transport[];
 }
 
-export interface LoggerJsonConfig {
-  level: LogLevelString;
-  appenders?: LoggerJsonAppenderConfig[];
-  logger?: Record<string, LoggerJsonConfig | string>;
+export interface JsonConfig {
+  level: LogLevelString | LogLevel;
+  transports?: Record<string, JsonTransportConfig | string> | (string | JsonTransportConfig)[];
+  rootTransports?: string[];
+  filters?: Record<string, JsonFilterConfig | LogLevelString | LogLevel> | JsonFilterWithNamePatternConfig[];
 }
 
-export interface LoggerJsonAppenderConfig {
-  level?: LogLevelString;
-  formatter?: FormatterJsonConfig;
-  transport?: TransportJsonConfig;
+export interface JsonTransportConfig {
+  type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [name: string]: any;
 }
 
-function loggerJsonConfigToLoggerConfig(config: LoggerJsonConfig): LoggerConfig {
-  let logger: Record<string, LoggerConfig> | undefined;
-  if (config.logger) {
-    logger = {};
-    for (const loggerKey of Object.keys(config.logger)) {
-      const loggerValue = config.logger[loggerKey];
-      if (isString(loggerValue)) {
-        logger[loggerKey] = {
-          level: toLogLevel(loggerValue as LogLevelString),
-        };
-      } else {
-        logger[loggerKey] = loggerJsonConfigToLoggerConfig(loggerValue);
-      }
-    }
-  }
-
-  return {
-    level: toLogLevel(config.level),
-    appenders: config.appenders?.map(appenderJsonConfigToAppender),
-    logger,
-  };
+export interface JsonFilterConfig {
+  level?: LogLevelString | LogLevel;
+  transports?: string[];
 }
 
-function appenderJsonConfigToAppender(config: LoggerJsonAppenderConfig): LoggerAppenderConfig {
-  return {
-    level: config.level ? toLogLevel(config.level) : undefined,
-    formatter: config.formatter ? formatterJsonConfigToFormatter(config.formatter) : undefined,
-    transport: config.transport ? transportJsonConfigToTransport(config.transport) : undefined,
-  };
-}
-
-export function toLoggerConfig(config: LoggerConfig | LoggerJsonConfig): LoggerConfig {
-  if (isLoggerConfig(config)) {
-    return config;
-  }
-  return loggerJsonConfigToLoggerConfig(config);
+export interface JsonFilterWithNamePatternConfig extends JsonFilterConfig {
+  namePattern: string;
 }

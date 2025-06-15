@@ -1,4 +1,5 @@
-import { LogLevel, logLevelToString } from "../LogLevel.js";
+import { LogLevel } from "../LoggerConfig.js";
+import { logLevelToString } from "../LoggerConfig.utils.js";
 import { anyToString, toString } from "../utils.js";
 import { FormatterJsonConfigObj } from "./config.js";
 import { Formatter, FormatterMessageOptions, FormatterOptions, Message, toFormatterOptions } from "./Formatter.js";

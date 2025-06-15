@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { Logger } from "./Logger.js";
 import { MemoryTransport } from "./transport/MemoryTransport.js";
-import { LogLevel } from "./LogLevel.js";
 import { MessageContext } from "./MessageContext.js";
+import { LogLevel } from "./LoggerConfig.js";
 
 describe("Logger", () => {
   test("level", () => {

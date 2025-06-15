@@ -30,7 +30,7 @@ export class FileTransport implements Transport {
     this.filename = opts.filename;
   }
 
-  public log(message: Message, formatter: Formatter): void {
+  public log(message: Message): void {
     const formattedMessage = formatter.formatMessage(message, { enableColor: false });
     try {
       fs.appendFileSync(this.filename, `${formattedMessage}\n`);

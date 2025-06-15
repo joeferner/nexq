@@ -1,4 +1,4 @@
-import { LogLevel } from "../LogLevel.js";
+import { LogLevel } from "../LoggerConfig.js";
 import { MessageContext } from "../MessageContext.js";
 import { FormatterJsonConfig } from "./config.js";
 

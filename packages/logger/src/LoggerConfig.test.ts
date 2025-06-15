@@ -1,65 +1,97 @@
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test } from "vitest";
-import { LoggerConfig, LoggerJsonConfig, toLoggerConfig } from "./LoggerConfig.js";
-import { LogLevel } from "./LogLevel.js";
-import { PatternFormatter } from "./formatter/PatternFormatter.js";
+import { Config, JsonConfig, LogLevel, } from "./LoggerConfig.js";
+import { toConfig } from "./LoggerConfig.utils.js";
 import { ConsoleTransport } from "./transport/ConsoleTransport.js";
 import { FileTransport } from "./transport/FileTransport.js";
-import path from "node:path";
-import os from "node:os";
 
 describe("LoggerConfig", () => {
-  describe("toLoggerConfig", () => {
-    test("no conversion needed", () => {
-      const config: LoggerConfig = {
+  describe("toConfig", () => {
+    const filename = path.join(os.tmpdir(), 'LoggerConfig.ts');
+
+    function validateToConfig(config: JsonConfig, expected: Required<Config>): void {
+      expect(toConfig(config)).toStrictEqual(expected);
+    }
+
+    test("no level conversion needed", () => {
+      const config: JsonConfig = {
         level: LogLevel.Debug,
       };
-      expect(toLoggerConfig(config)).toStrictEqual(config);
-    });
-
-    test("conversion needed", () => {
-      const config: LoggerJsonConfig = {
-        level: "debug",
-      };
-      const expected: LoggerConfig = {
+      const expected: Required<Config> = {
         level: LogLevel.Debug,
-        appenders: undefined,
-        logger: undefined,
+        appenders: [{
+          transport: new ConsoleTransport()
+        }],
+        filters: []
       };
-      expect(toLoggerConfig(config)).toStrictEqual(expected);
+      validateToConfig(config, expected);
     });
 
-    test("formatter: pattern", () => {
-      const jsonConfig: LoggerJsonConfig = {
+    test("level conversion", () => {
+      const config: JsonConfig = {
         level: "debug",
-        appenders: [{ formatter: "pattern" }],
       };
-      const config = toLoggerConfig(jsonConfig);
-      expect(config.appenders?.[0].formatter).toBeInstanceOf(PatternFormatter);
+      const expected: Required<Config> = {
+        level: LogLevel.Debug,
+        appenders: [{
+          transport: new ConsoleTransport()
+        }],
+        filters: []
+      };
+      validateToConfig(config, expected);
     });
 
-    test("transport: console", () => {
-      const jsonConfig: LoggerJsonConfig = {
+    test("transports array", () => {
+      const config: JsonConfig = {
         level: "debug",
-        appenders: [{ transport: "console" }],
+        transports: ['console', { type: 'file', filename }]
       };
-      const config = toLoggerConfig(jsonConfig);
-      expect(config.appenders?.[0].transport).toBeInstanceOf(ConsoleTransport);
+      const expected: Required<Config> = {
+        level: LogLevel.Debug,
+        appenders: [{
+          transport: new ConsoleTransport()
+        }, {
+          transport: new FileTransport({ filename })
+        }],
+        filters: []
+      };
+      validateToConfig(config, expected);
     });
 
-    test("transport: file", () => {
-      const jsonConfig: LoggerJsonConfig = {
+    test("filter: record", () => {
+      const jsonConfig: JsonConfig = {
         level: "debug",
-        appenders: [
-          {
-            transport: {
-              name: "file",
-              filename: path.join(os.tmpdir(), "test.log"),
-            },
-          },
-        ],
+        transports: [{ name: 'console', type: 'console' }],
+        filters: {
+          'testDebug': 'debug',
+          'testInfo': LogLevel.Info,
+          'testWarn': {
+            level: LogLevel.Warn,
+            transports: ['console']
+          }
+        }
       };
-      const config = toLoggerConfig(jsonConfig);
-      expect(config.appenders?.[0].transport).toBeInstanceOf(FileTransport);
+      const config = toConfig(jsonConfig);
+      expect(Object.keys(config.filters).length).toBe(0);
+      expect(config.appenders.length).toBe(1);
+      expect(config.appenders[0].level).toBeUndefined();
+      expect(config.appenders[0].transport).toBeInstanceOf(ConsoleTransport);
+
+      expect(config.filters.length).toBe(3);
+
+      expect(config.filters[0].namePattern).toBe('testDebug');
+      expect(config.filters[0].level).toBe(LogLevel.Debug);
+      expect(config.filters[0].transports).toBeUndefined();
+
+      expect(config.filters[0].namePattern).toBe('testInfo');
+      expect(config.filters[0].level).toBe(LogLevel.Info);
+      expect(config.filters[0].transports).toBeUndefined();
+
+      expect(config.filters[0].namePattern).toBe('testWarn');
+      expect(config.filters[0].level).toBe(LogLevel.Warn);
+      expect(config.filters[0].transports?.length).toBe(1);
+      expect(config.filters[0].transports?.[0]).toStrictEqual(config.appenders[0].transport);
     });
   });
 });

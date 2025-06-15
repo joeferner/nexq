@@ -1,4 +1,4 @@
-import { Formatter, Message } from "../formatter/Formatter.js";
+import { Message } from "../formatter/Formatter.js";
 import { toInteger } from "../utils.js";
 import { TransportJsonConfigObj } from "./config.js";
 import { toTransportOptions, Transport, TransportOptions } from "./Transport.js";
@@ -38,7 +38,7 @@ export class MemoryTransport implements Transport {
     this.maxMessages = opts.maxMessages;
   }
 
-  public log(message: Message, _formatter: Formatter): void {
+  public log(message: Message): void {
     this.messages.push(message);
     if (this.maxMessages !== undefined && this.messages.length > this.maxMessages) {
       this.messages.splice(0, this.messages.length - this.maxMessages);

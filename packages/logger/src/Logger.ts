@@ -1,11 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { PatternFormatter } from "./formatter/PatternFormatter.js";
-import { LoggerAppenderConfig, LoggerConfig, LoggerJsonConfig, toLoggerConfig } from "./LoggerConfig.js";
-import { Timer } from "./Timer.js";
-import { LogLevel } from "./LogLevel.js";
-import { ConsoleTransport } from "./transport/ConsoleTransport.js";
+import { AppenderConfig, Config, JsonConfig, LogLevel } from "./LoggerConfig.js";
+import { toConfig } from "./LoggerConfig.utils.js";
 import { MessageContext } from "./MessageContext.js";
+import { Timer } from "./Timer.js";
+import { ConsoleTransport } from "./transport/ConsoleTransport.js";
 
 export interface ILogger {
   isDebugEnabled(): boolean;
@@ -32,7 +31,7 @@ export interface ILogger {
 export class Logger implements ILogger {
   private readonly name: string | undefined;
   private level: LogLevel;
-  private appenders: Readonly<Readonly<Required<LoggerAppenderConfig>>[]>;
+  private appenders: Readonly<Readonly<Required<AppenderConfig>>[]>;
   private readonly children: Logger[] = [];
 
   public constructor(name?: string, parent?: Logger) {
@@ -44,7 +43,6 @@ export class Logger implements ILogger {
       this.appenders = [
         {
           level: LogLevel.Info,
-          formatter: new PatternFormatter(),
           transport: new ConsoleTransport(),
         },
       ];
@@ -52,23 +50,18 @@ export class Logger implements ILogger {
     this.level = Math.max(...this.appenders.map((a) => a.level));
   }
 
-  public configure(config: LoggerConfig | LoggerJsonConfig): void {
-    const loggerConfig = toLoggerConfig(config);
+  public configure(config: Config | JsonConfig): void {
+    const loggerConfig = toConfig(config);
     this.appenders = (loggerConfig.appenders ?? [{ level: loggerConfig.level }]).map((appender) => {
       return {
         level: appender.level ?? loggerConfig.level,
-        formatter: appender.formatter ?? new PatternFormatter(),
         transport: appender.transport ?? new ConsoleTransport(),
-      } satisfies Required<LoggerAppenderConfig>;
+      } satisfies Required<AppenderConfig>;
     });
     this.level = Math.max(...this.appenders.map((a) => a.level));
 
     for (const child of this.children) {
-      if (!child.name) {
-        continue;
-      }
-      const childConfig = loggerConfig.logger?.[child.name];
-      child.configure(childConfig ?? config);
+      child.configure(config);
     }
   }
 
@@ -131,8 +124,7 @@ export class Logger implements ILogger {
           message,
           params,
           messageContext
-        },
-        appender.formatter
+        }
       );
     }
   }
@@ -187,7 +179,7 @@ export class Logger implements ILogger {
    * @param name The name of the new logger
    * @returns The child logger
    */
-  public getLogger(name: string): Logger {
+  public getLogger(name: string): ILogger {
     const existingChild = this.children.find((c) => c.name === name);
     if (existingChild) {
       return existingChild;

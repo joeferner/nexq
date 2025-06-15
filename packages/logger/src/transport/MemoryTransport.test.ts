@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { Message } from "../formatter/Formatter.js";
 import { PatternFormatter } from "../formatter/PatternFormatter.js";
-import { LogLevel } from "../LogLevel.js";
 import { MemoryTransport } from "./MemoryTransport.js";
+import { LogLevel } from "../LoggerConfig.js";
 
 describe("MemoryTransport", () => {
   const message: Message = {

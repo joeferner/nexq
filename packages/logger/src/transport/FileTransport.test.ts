@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { PatternFormatter } from "../formatter/PatternFormatter.js";
-import { LogLevel } from "../LogLevel.js";
 import { FileTransport } from "./FileTransport.js";
+import { LogLevel } from "../LoggerConfig.js";
 
 describe("FileTransport", () => {
   const tmpdir = os.tmpdir();

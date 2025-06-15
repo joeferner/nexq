@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { LogLevel } from "../LogLevel.js";
 import { PatternFormatter } from "./PatternFormatter.js";
+import { LogLevel } from "../LoggerConfig.js";
 
 describe("PatternFormatter", () => {
   const formatter = new PatternFormatter();

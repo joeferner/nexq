@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { LogLevel } from "../LogLevel.js";
 import { JsonFormatter } from "./JsonFormatter.js";
+import { LogLevel } from "../LoggerConfig.js";
 
 describe("JsonFormatter", () => {
   test("with formatting", () => {

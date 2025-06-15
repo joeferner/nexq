@@ -1,4 +1,4 @@
-import { Formatter, Message } from "../formatter/Formatter.js";
+import { Message } from "../formatter/Formatter.js";
 import { TransportJsonConfigObj } from "./config.js";
 
 export type TransportOptions = object;
@@ -8,5 +8,5 @@ export function toTransportOptions(_options: TransportJsonConfigObj | TransportO
 }
 
 export interface Transport {
-  log(message: Message, formatter: Formatter): void;
+  log(message: Message): void;
 }

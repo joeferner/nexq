@@ -1,26 +1,31 @@
-export type LogLevelString =
-  | "trace"
-  | "debug"
-  | "info"
-  | "notice"
-  | "warn"
-  | "error"
-  | "critical"
-  | "alert"
-  | "emergency"
-  | "off";
+import { formatterJsonConfigToFormatter } from "./formatter/config.js";
+import { AppenderConfig, Config, JsonConfig, JsonTransportConfig, LogLevel, LogLevelString } from "./LoggerConfig.js";
+import { transportJsonConfigToTransport } from "./transport/config.js";
+import { Transport } from "./transport/Transport.js";
 
-export enum LogLevel {
-  Trace = 90,
-  Debug = 80,
-  Info = 70,
-  Notice = 60,
-  Warn = 50,
-  Error = 40,
-  Critical = 30,
-  Alert = 20,
-  Emergency = 10,
-  Off = 0,
+export function toConfig(config: Config | JsonConfig): Required<Config> {
+  return {
+    level: toLogLevel(config.level),
+    appenders,
+    filters
+  }
+}
+
+function jsonConfigToConfig(config: JsonConfig): Required<Config> {
+  const transports: Record<string, Transport> = {};
+  for (const [transportName, transportConfig] of Object.entries(config.transports ?? {})) {
+    transports[transportName] = jsonTransportConfigToTransport(transportConfig);
+  }
+
+  return {
+    level: toLogLevel(config.level),
+    appenders: transports,
+    logger,
+  };
+}
+
+function jsonTransportConfigToTransport(transport: JsonTransportConfig): Transport {
+
 }
 
 const LOG_LEVEL_TO_STRING: Readonly<Record<LogLevel, LogLevelString>> = {
@@ -53,6 +58,12 @@ const STRING_TO_LOG_LEVEL: Readonly<Record<LogLevelString, LogLevel>> = {
 export function isLogLevel(logLevel: any): logLevel is LogLevel {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   return Object.values(LogLevel).includes(logLevel);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isLogLevelString(logLevel: any): logLevel is LogLevelString {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+  return Object.values(LOG_LEVEL_TO_STRING).includes(logLevel);
 }
 
 export function logLevelToString(logLevel: LogLevelString | LogLevel): string {
