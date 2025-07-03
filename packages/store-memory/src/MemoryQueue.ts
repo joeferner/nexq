@@ -28,6 +28,12 @@ import {
 import * as R from "radash";
 import { MemoryQueueMessage } from "./MemoryQueueMessage.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
+import { DeleteMessagesMessage } from "@nexq/core/build/dto/DeleteMessagesMessage.js";
+import {
+  DeleteMessagesResult,
+  DeleteMessagesResultError,
+  DeleteMessagesResultMessage,
+} from "@nexq/core/build/dto/DeleteMessagesResult.js";
 
 const logger = createLogger("MemoryStore:Queue");
 
@@ -419,6 +425,35 @@ export class MemoryQueue {
     if (messages.length === 0) {
       throw new MessageNotFoundError(this.name, id);
     }
+  }
+
+  public deleteMessages(messages: DeleteMessagesMessage[]): DeleteMessagesResult {
+    const results: Record<string, DeleteMessagesResultMessage> = {};
+    for (const message of messages) {
+      try {
+        this.deleteMessage(message.messageId, message.receiptHandle);
+        results[message.messageId] = {
+          deleted: true,
+        };
+      } catch (err) {
+        if (err instanceof MessageNotFoundError) {
+          results[message.messageId] = {
+            deleted: false,
+            error: DeleteMessagesResultError.MessageNotFound,
+            errorMessage: err.message,
+          };
+        } else if (err instanceof ReceiptHandleIsInvalidError) {
+          results[message.messageId] = {
+            deleted: false,
+            error: DeleteMessagesResultError.ReceiptHandleIsInvalid,
+            errorMessage: err.message,
+          };
+        } else {
+          throw err;
+        }
+      }
+    }
+    return { messages: results };
   }
 
   public purge(): void {

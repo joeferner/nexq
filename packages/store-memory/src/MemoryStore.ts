@@ -45,6 +45,8 @@ import { MemoryTopic } from "./MemoryTopic.js";
 import { MemoryUser } from "./MemoryUser.js";
 import { SendMessagesOptions } from "@nexq/core/build/dto/SendMessagesOptions.js";
 import { SendMessagesResult, SendMessagesResultMessage } from "@nexq/core/build/dto/SendMessagesResult.js";
+import { DeleteMessagesMessage } from "@nexq/core/build/dto/DeleteMessagesMessage.js";
+import { DeleteMessagesResult } from "@nexq/core/build/dto/DeleteMessagesResult.js";
 
 const logger = createLogger("MemoryStore");
 
@@ -335,6 +337,11 @@ export class MemoryStore implements Store {
   public async deleteMessage(queueName: string, messageId: string, receiptHandle?: string): Promise<void> {
     const queue = this.getQueueRequired(queueName);
     queue.deleteMessage(messageId, receiptHandle);
+  }
+
+  public async deleteMessages(queueName: string, messages: DeleteMessagesMessage[]): Promise<DeleteMessagesResult> {
+    const queue = this.getQueueRequired(queueName);
+    return queue.deleteMessages(messages);
   }
 
   public async deleteQueue(queueName: string): Promise<void> {

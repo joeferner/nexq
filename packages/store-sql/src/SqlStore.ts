@@ -59,6 +59,8 @@ import { Transaction } from "./dialect/Transaction.js";
 import { NewQueueMessageEvent, ResumeEvent } from "./events.js";
 import { sqlMessageToMessage } from "./sql/dto/SqlMessage.js";
 import { clearRecord } from "./utils.js";
+import { DeleteMessagesMessage } from "@nexq/core/build/dto/DeleteMessagesMessage.js";
+import { DeleteMessagesResult } from "@nexq/core/build/dto/DeleteMessagesResult.js";
 
 const logger = createLogger("SqlStore");
 
@@ -713,10 +715,17 @@ export class SqlStore implements Store {
   public async deleteMessage(queueName: string, messageId: string, receiptHandle?: string): Promise<void> {
     const queue = await this.getCachedQueueInfo(queueName);
     if (receiptHandle) {
-      await this.dialect.deleteMessageByMessageIdAndReceiptHandle(queue.name, messageId, receiptHandle);
+      await this.dialect.deleteMessageByMessageIdAndReceiptHandle(undefined, queue.name, messageId, receiptHandle);
     } else {
       await this.dialect.deleteMessageByMessageId(undefined, queue.name, messageId);
     }
+  }
+
+  public async deleteMessages(queueName: string, messages: DeleteMessagesMessage[]): Promise<DeleteMessagesResult> {
+    const queue = await this.getCachedQueueInfo(queueName);
+    return await this.dialect.withTransaction(async (tx) => {
+      return await this.dialect.deleteMessages(tx, queue.name, messages);
+    });
   }
 
   public async deleteQueue(queueName: string): Promise<void> {

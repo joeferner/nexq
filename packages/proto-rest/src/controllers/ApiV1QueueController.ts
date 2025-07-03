@@ -45,6 +45,8 @@ import { SendMessagesRequest } from "../dto/SendMessagesRequest.js";
 import { SendMessagesResponse } from "../dto/SendMessagesResponse.js";
 import { UpdateMessageRequest } from "../dto/UpdateMessageRequest.js";
 import { isHttpError } from "../utils.js";
+import { DeleteMessagesRequest } from "../dto/DeleteMessagesRequest.js";
+import { DeleteMessagesResponse } from "../dto/DeleteMessagesResponse.js";
 
 const logger = createLogger("Rest:ApiV1QueueController");
 
@@ -348,6 +350,33 @@ export class ApiV1QueueController extends Controller {
         throw createHttpError.NotFound("message found but receipt handle does not match");
       }
       logger.error(`failed to delete message`, err);
+      throw err;
+    }
+  }
+
+  /**
+   * delete messages from a queue
+   *
+   * @param queueName the name of the queue to send to
+   * @param messageId the id of the message to delete
+   * @param receiptHandle optional receipt handle
+   * @example queueName "queue1"
+   * @example messageId "1effd43f-efc0-64a0-abb1-a262ad6a08d6"
+   */
+  @Delete("{queueName}/messages")
+  @SuccessResponse("200", "Messages deleted")
+  @Response<void>(404, "queue not found")
+  public async deleteMessages(
+    @Path() queueName: string,
+    @Body() body: DeleteMessagesRequest
+  ): Promise<DeleteMessagesResponse> {
+    try {
+      return await this.store.deleteMessages(queueName, body.messages);
+    } catch (err) {
+      if (err instanceof QueueNotFoundError) {
+        throw createHttpError.NotFound("queue not found");
+      }
+      logger.error(`failed to delete messages`, err);
       throw err;
     }
   }

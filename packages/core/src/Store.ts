@@ -1,6 +1,8 @@
 import { CreateQueueOptions, NakExpireBehaviorOptions } from "./dto/CreateQueueOptions.js";
 import { CreateTopicOptions } from "./dto/CreateTopicOptions.js";
 import { CreateUserOptions } from "./dto/CreateUserOptions.js";
+import { DeleteMessagesMessage } from "./dto/DeleteMessagesMessage.js";
+import { DeleteMessagesResult } from "./dto/DeleteMessagesResult.js";
 import { MoveMessagesResult } from "./dto/MoveMessagesResult.js";
 import { PeekMessagesOptions } from "./dto/PeekMessagesOptions.js";
 import { QueueInfo } from "./dto/QueueInfo.js";
@@ -49,6 +51,7 @@ export interface Store {
   ): Promise<void>;
   nakMessage(queueName: string, messageId: string, receiptHandle: string, reason?: string): Promise<void>;
   deleteMessage(queueName: string, messageId: string, receiptHandle?: string): Promise<void>;
+  deleteMessages(queueName: string, messages: DeleteMessagesMessage[]): Promise<DeleteMessagesResult>;
   deleteQueue(queueName: string): Promise<void>;
   purgeQueue(queueName: string): Promise<void>;
   moveMessages(sourceQueueName: string, targetQueueName: string): Promise<MoveMessagesResult>;

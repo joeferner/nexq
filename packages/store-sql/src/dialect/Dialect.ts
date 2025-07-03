@@ -90,6 +90,12 @@ import { Transaction } from "./Transaction.js";
 import { SqlSubscription } from "../sql/dto/SqlSubscription.js";
 import EventEmitter from "node:events";
 import { SavePoint } from "./dto/SavePoint.js";
+import { DeleteMessagesMessage } from "@nexq/core/build/dto/DeleteMessagesMessage.js";
+import {
+  DeleteMessagesResult,
+  DeleteMessagesResultError,
+  DeleteMessagesResultMessage,
+} from "@nexq/core/build/dto/DeleteMessagesResult.js";
 
 export interface DialectMessageNotification {
   type: "dialectMessageNotification";
@@ -594,17 +600,18 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
   }
 
   public async deleteMessageByMessageIdAndReceiptHandle(
+    tx: Transaction | undefined,
     queueName: string,
     messageId: string,
     receiptHandle: string
   ): Promise<void> {
-    const results = await this.sql.run(this.database, SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE, [
+    const results = await this.sql.run(tx ?? this.database, SQL_DELETE_MESSAGE_BY_MESSAGE_ID_AND_RECEIPT_HANDLE, [
       queueName,
       messageId,
       receiptHandle,
     ]);
     if (results.changes !== 1) {
-      const message = await this.findMessageById(queueName, messageId);
+      const message = await this.findMessageById(tx ?? this.database, queueName, messageId);
       if (!message) {
         throw new MessageNotFoundError(queueName, messageId);
       }
@@ -617,8 +624,49 @@ export abstract class Dialect<TDatabase, TSql extends Sql<TDatabase>> extends Ev
     }
   }
 
-  public async findMessageById(queueName: string, messageId: string): Promise<SqlMessage | undefined> {
-    const rows = await this.sql.all(this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, queueName, messageId]);
+  public async deleteMessages(
+    tx: Transaction,
+    queueName: string,
+    messages: DeleteMessagesMessage[]
+  ): Promise<DeleteMessagesResult> {
+    const results: Record<string, DeleteMessagesResultMessage> = {};
+    for (const message of messages) {
+      try {
+        if (message.receiptHandle) {
+          await this.deleteMessageByMessageIdAndReceiptHandle(tx, queueName, message.messageId, message.receiptHandle);
+        } else {
+          await this.deleteMessageByMessageId(tx, queueName, message.messageId);
+        }
+        results[message.messageId] = {
+          deleted: true,
+        };
+      } catch (err) {
+        if (err instanceof MessageNotFoundError) {
+          results[message.messageId] = {
+            deleted: false,
+            error: DeleteMessagesResultError.MessageNotFound,
+            errorMessage: err.message,
+          };
+        } else if (err instanceof ReceiptHandleIsInvalidError) {
+          results[message.messageId] = {
+            deleted: false,
+            error: DeleteMessagesResultError.ReceiptHandleIsInvalid,
+            errorMessage: err.message,
+          };
+        } else {
+          throw err;
+        }
+      }
+    }
+    return { messages: results };
+  }
+
+  public async findMessageById(
+    tx: Transaction | TDatabase | undefined,
+    queueName: string,
+    messageId: string
+  ): Promise<SqlMessage | undefined> {
+    const rows = await this.sql.all(tx ?? this.database, SQL_FIND_MESSAGE_BY_ID, [queueName, queueName, messageId]);
     if (rows.length === 0) {
       return undefined;
     }

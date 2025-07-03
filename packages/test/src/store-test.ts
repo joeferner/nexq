@@ -8,6 +8,7 @@ import {
   TopicProtocol,
   verifyPassword,
 } from "@nexq/core";
+import { DeleteMessagesResultError, DeleteMessagesResultMessage } from "@nexq/core/build/dto/DeleteMessagesResult.js";
 import * as R from "radash";
 import { afterEach, assert, beforeEach, describe, expect, test } from "vitest";
 import { MockTime } from "./MockTime.js";
@@ -970,6 +971,86 @@ export async function runStoreTest(options: {
       // update message
       await store.deleteMessage(QUEUE1_NAME, message1.id, recvMessage1?.receiptHandle);
       await assertQueueEmpty(store, QUEUE1_NAME);
+    });
+
+    test("delete messages", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      const message2 = await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY);
+      const receiveMessage1 = await store.receiveMessage(QUEUE1_NAME);
+
+      // delete messages
+      const results = await store.deleteMessages(QUEUE1_NAME, [
+        {
+          messageId: message2.id,
+        },
+        {
+          messageId: message1.id,
+          receiptHandle: receiveMessage1?.receiptHandle,
+        },
+      ]);
+
+      expect(Object.keys(results.messages).length).toBe(2);
+      expect(results.messages[message1.id]).toEqual({
+        deleted: true,
+      } satisfies DeleteMessagesResultMessage);
+      expect(results.messages[message2.id]).toEqual({
+        deleted: true,
+      } satisfies DeleteMessagesResultMessage);
+    });
+
+    test("delete messages - bad queue name", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+
+      await expect(async () => store.deleteMessages(QUEUE2_NAME, [{ messageId: message1.id }])).rejects.toThrowError(
+        `queue "${QUEUE2_NAME}" not found`
+      );
+    });
+
+    test("delete messages - mix of bad message ids and receipt handles", async () => {
+      // create the queue
+      await store.createQueue(QUEUE1_NAME);
+
+      // send a message
+      const message1 = await store.sendMessage(QUEUE1_NAME, MESSAGE1_BODY);
+      const message2 = await store.sendMessage(QUEUE1_NAME, MESSAGE2_BODY);
+      const receiveMessage1 = await store.receiveMessage(QUEUE1_NAME);
+
+      // delete messages
+      const results = await store.deleteMessages(QUEUE1_NAME, [
+        {
+          messageId: message2.id,
+        },
+        {
+          messageId: message1.id,
+          receiptHandle: receiveMessage1?.receiptHandle + "bad",
+        },
+        {
+          messageId: "bad message id",
+        },
+      ]);
+
+      expect(Object.keys(results.messages).length).toBe(3);
+      expect(results.messages["bad message id"]).toEqual({
+        deleted: false,
+        error: DeleteMessagesResultError.MessageNotFound,
+        errorMessage: `message id "bad message id" is invalid for queue "queue1"`,
+      } satisfies DeleteMessagesResultMessage);
+      expect(results.messages[message1.id]).toEqual({
+        deleted: false,
+        error: DeleteMessagesResultError.ReceiptHandleIsInvalid,
+        errorMessage: `receipt handle "${receiveMessage1?.receiptHandle + "bad"}" is invalid for queue "queue1"`,
+      } satisfies DeleteMessagesResultMessage);
+      expect(results.messages[message2.id]).toEqual({
+        deleted: true,
+      } satisfies DeleteMessagesResultMessage);
     });
 
     test("dead letter queue", async () => {
