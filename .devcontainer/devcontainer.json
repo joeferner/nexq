@@ -1,0 +1,91 @@
+{
+  "name": "NexQ (Rust + web UI)",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/nexq",
+  "shutdownAction": "stopCompose",
+  "overrideCommand": false,
+  "remoteUser": "vscode",
+
+  // Only the dev container itself starts. The memory/sqlite backends cover most
+  // development; postgres, opensearch and elasticsearch are started on demand
+  // (see .devcontainer/README.md).
+  "runServices": ["app"],
+
+  "features": {
+    // Build the NexQ image and test the Helm chart from inside the container
+    // (plan Q20-Q22).
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    // Web UI: Angular and React are both on the table (plan Q18).
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    // Acceptance bar for the SQS/SNS facades is "unmodified aws-cli works"
+    // (plan Q9/Q10).
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "minikube": "none"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "forwardPorts": [8080, 9090, 9091, 4200, 5173],
+  "portsAttributes": {
+    "8080": { "label": "NexQ HTTP (REST / SQS / SNS facades)" },
+    "9090": { "label": "Prometheus metrics" },
+    "9091": { "label": "KEDA external scaler (gRPC)" },
+    "4200": { "label": "Angular dev server" },
+    "5173": { "label": "Vite dev server (React)" }
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "bierner.markdown-emoji",
+        "smulyono.reveal",
+        "streetsidesoftware.code-spell-checker",
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "fill-labs.dependi",
+        "vadimcn.vscode-lldb",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "angular.ng-template",
+        "dsznajder.es7-react-js-snippets",
+        "42crunch.vscode-openapi",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        "humao.rest-client"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "editor.formatOnSave": true,
+        "[rust]": {
+          "editor.defaultFormatter": "rust-lang.rust-analyzer"
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[html]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "files.watcherExclude": {
+          "**/target/**": true,
+          "**/node_modules/**": true
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

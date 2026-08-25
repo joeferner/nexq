@@ -1,0 +1,103 @@
+name: nexq-dev
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Required by the docker-in-docker feature (building the NexQ image, Helm
+    # chart testing against k3d/kind — plan Q20/Q21/Q22).
+    privileged: true
+    command: sleep infinity
+    volumes:
+      - ../..:/workspaces:cached
+      # Named volumes so cargo's registry and build artifacts survive rebuilds
+      # and don't cross the bind-mount boundary (much faster incremental builds).
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/workspaces/nexq/target
+      - node-modules:/workspaces/nexq/ui/node_modules
+    environment:
+      # Backend connection strings — see .devcontainer/README.md
+      NEXQ_POSTGRES_URL: postgres://nexq:nexq@postgres:5432/nexq
+      NEXQ_OPENSEARCH_URL: http://opensearch:9200
+      NEXQ_ELASTICSEARCH_URL: http://elasticsearch:9200
+      DATABASE_URL: postgres://nexq:nexq@postgres:5432/nexq
+      RUST_BACKTRACE: "1"
+      RUST_LOG: nexq=debug,info
+      CARGO_TARGET_DIR: /workspaces/nexq/target
+
+  # None of the backing stores below are started with the dev container — the
+  # memory and sqlite backends cover most development, and each JVM-based store
+  # is ~1GB of RAM. Start what you need on demand:
+  #   docker compose -f .devcontainer/docker-compose.yml up -d postgres
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexq
+      POSTGRES_PASSWORD: nexq
+      POSTGRES_DB: nexq
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexq -d nexq"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  opensearch:
+    image: opensearchproject/opensearch:2
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: NexQ-dev-Passw0rd!
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  cargo-registry:
+  cargo-target:
+  node-modules:
+  postgres-data:
+  opensearch-data:
+  elasticsearch-data:
