@@ -1,0 +1,29 @@
+# Minimal NexQ config. Copy to `nexq.toml` and change the secret.
+#
+# Only the credential below is required; every other key has a default, shown
+# commented out at the bottom. Any key can be overridden by an environment
+# variable, nested keys joined with a double underscore:
+#
+#   NEXQ_AWS_API__BIND_ADDR=127.0.0.1:9000
+#
+# A different config file can be named with NEXQ_CONFIG=/path/to/file.toml.
+
+# Credentials are shared by every facade. The SQS/SNS facade uses the pair for
+# SigV4 signing; the REST facade takes "<key_id>.<secret>" as a bearer token.
+[[auth.credentials]]
+name = "dev"
+key_id = "AKIANEXQDEV"
+secret = "change-me"
+
+# To reach this with the real AWS CLI:
+#
+#   aws configure --profile nexq        # the key_id and secret above, any region
+#   aws --profile nexq --endpoint-url http://localhost:8080 sqs list-queues
+
+# Defaults, for reference:
+#
+# [aws_api]
+# enabled = true
+# bind_addr = "0.0.0.0:8080"
+# public_base_url = "http://localhost:8080"   # what queue URLs are built from
+# account_id = "000000000000"                 # 12 digits, as in a real SQS URL

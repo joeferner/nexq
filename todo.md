@@ -1,0 +1,145 @@
+# TODO
+
+**Current goal: the unmodified `aws sqs` CLI drives NexQ end to end, against the
+in-memory backend, single node.**
+
+Nothing else is in scope until that works. It is the highest-risk part of the whole
+design — SigV4 verification and AWS wire-protocol fidelity either work with real AWS
+tooling or they don't — and it is also the smallest thing that proves the architecture,
+since the SQS facade is a translation layer over the core operation set, so building it
+exercises the engine and the facade boundary at once.
+
+Deliberately **out** of this milestone: the REST facade, the `nexq` CLI, SNS, durable
+backends, priority, position-in-queue, DLQ, clustering/HA, metrics, KEDA, web UI,
+Docker/Helm. Those are sketched at the bottom and should stay untouched until
+`aws sqs` works.
+
+Target definition of done:
+
+```sh
+aws configure --profile nexq          # key/secret issued by NexQ, any region
+aws --profile nexq --endpoint-url http://localhost:8080 sqs create-queue --queue-name jobs
+aws --profile nexq --endpoint-url http://localhost:8080 sqs send-message --queue-url ... --message-body hi
+aws --profile nexq --endpoint-url http://localhost:8080 sqs receive-message --queue-url ... --wait-time-seconds 10
+aws --profile nexq --endpoint-url http://localhost:8080 sqs delete-message --queue-url ... --receipt-handle ...
+```
+
+---
+
+## M1 — A signed request gets a valid response
+
+Prove the protocol and auth path before writing any queue logic. `list-queues` on an
+empty server is the smallest request that exercises all of it.
+
+- [x] Config: per-facade listener sections plus a shared credential registry, as a
+      TOML file with `NEXQ_*__*` environment overrides
+- [ ] Axum server in `nexq-server`, mounting the SQS facade at the root
+- [ ] Identify the wire protocol the installed `aws-cli` v2 actually sends — AWS JSON
+      1.0 (`Content-Type: application/x-amz-json-1.0`, `X-Amz-Target: AmazonSQS.<Op>`),
+      not the older Query/XML protocol. Capture a real request before writing the
+      parser rather than working from memory.
+- [ ] Request routing off `X-Amz-Target`, with JSON body decode
+- [ ] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
+      against the client's signature
+- [ ] Reject with SQS's own error shapes: `InvalidClientTokenId`,
+      `SignatureDoesNotMatch`, and the JSON protocol's `__type` envelope
+- [ ] `ListQueues` returning an empty list
+- [ ] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
+      with a bad secret**
+
+Notes worth pinning down here, since getting them wrong is silent and confusing:
+
+- SigV4 only needs signer and verifier to agree on the region string; it need not be a
+  real AWS region.
+- The Query/XML protocol still matters for older SDKs, but is deliberately deferred
+  until the JSON path works.
+
+## M2 — Queue lifecycle against the memory backend
+
+- [ ] Domain model: queue, message, receipt handle
+- [ ] `Store` trait — settle the `dyn`-dispatch approach now, since it shapes every
+      later backend, but keep the surface to what this milestone needs
+- [ ] Memory store in `nexq-core`
+- [ ] `nexq-store-conformance` suite covering the operations implemented so far,
+      running green against the memory store
+- [ ] Core engine operations: create, delete, list
+- [ ] Queue URL construction from the configured public base URL — the CLI sends every
+      subsequent request to whatever URL `CreateQueue`/`GetQueueUrl` returns, so a
+      wrong host here breaks the client silently
+- [ ] Pick and document the fake account id used in queue URLs
+- [ ] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`
+- [ ] `QueueAlreadyExists` / `QueueDoesNotExist` error parity
+- [ ] **Gate: create, list, get-url, and delete a queue via `aws sqs`**
+
+## M3 — The produce/consume loop
+
+- [ ] `enqueue`, `claim_next`, `ack` in the engine and memory store
+- [ ] `SendMessage`, `ReceiveMessage`, `DeleteMessage`
+- [ ] `MD5OfMessageBody` in send/receive responses — some SDKs verify this checksum
+      and will error out if it is absent or wrong
+- [ ] Opaque receipt handles, and `ReceiptHandleIsInvalid` on a stale one
+- [ ] `MaxNumberOfMessages`, and the SQS response-shape rules for an empty receive
+- [ ] **Gate: send a message, receive it, delete it, confirm it does not come back**
+
+## M4 — Long-polling receive
+
+The first piece of NexQ's own design to land, and the reason the primary holds
+in-process waiters instead of polling a backend.
+
+- [ ] In-process waiter registry per queue, woken by the enqueue path
+- [ ] `WaitTimeSeconds` honored, returning empty on timeout
+- [ ] Wake ordering re-evaluated at wake time rather than fixed at registration
+- [ ] **Gate: `receive-message --wait-time-seconds 20` blocks, then returns
+      immediately when a message is sent from another terminal**
+
+## M5 — Visibility timeout and redelivery
+
+- [ ] Lease/visibility timeout on claim, with an in-process expiry timer
+- [ ] Redelivery on expiry, and `ApproximateReceiveCount`
+- [ ] `ChangeMessageVisibility`
+- [ ] `VisibilityTimeout` as a queue attribute and a per-receive override
+- [ ] **Gate: receive without deleting, wait out the timeout, receive it again**
+
+## M6 — The rest of what the CLI commonly exercises
+
+- [ ] `GetQueueAttributes` / `SetQueueAttributes`, including the approximate-count
+      attributes
+- [ ] `PurgeQueue`
+- [ ] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`
+- [ ] Message attributes, with their own MD5
+- [ ] `DelaySeconds` on send and as a queue attribute
+- [ ] Audit which operations `aws-cli` and the SDKs actually reach for, and stop
+      there — replicating the full API surface is an explicit non-goal
+
+## M7 — Lock it in
+
+- [ ] Acceptance test that drives a real `aws-cli` against a running NexQ, scripted
+      rather than manual
+- [ ] Run it in CI, with `aws-cli` available to the job
+- [ ] Repeat the run against at least one AWS SDK in another language, since SDK
+      behavior differs from the CLI's in checksum validation and retries
+- [ ] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end
+
+---
+
+## After this milestone
+
+Rough order, not yet committed — revisit once M1–M7 are done and the facade boundary
+has been exercised for real:
+
+1. REST facade with the extended feature set, plus the OpenAPI spec and generated
+   clients
+2. Priority, position-in-queue, and DLQ + redrive in the core engine
+3. Durable backends: SQLite, then Postgres, against the conformance suite
+4. The `nexq` CLI over the generated client
+5. Prometheus metrics; Dockerfile and single-node Helm chart
+6. Multi-node HA: lease election, transparent proxying, rehydration on failover
+7. OpenSearch/Elasticsearch backends
+8. Web UI, then the KEDA external scaler
+
+## Decisions still open
+
+- `Store` trait dispatch strategy — needed in M2
+- Whether the Query/XML protocol gets supported alongside AWS JSON 1.0, and when
+- One key per principal vs. one shared key per deployment
+- Frontend framework for the eventual web UI

@@ -38,10 +38,13 @@ nexq-keda = { path = "crates/nexq-keda" }
 nexq-client = { path = "crates/nexq-client" }
 
 # External dependencies are declared here (single version across the workspace)
-# and inherited by members with `dep = { workspace = true }`. Intentionally
-# commented out until the crate that needs one actually exists, so the
-# placeholder tree builds with no network access.
+# and inherited by members with `dep = { workspace = true }`. The commented-out
+# entries are the intended choices, uncommented as the crate that needs one is
+# actually built.
 #
+figment = { version = "0.10.19", features = ["toml", "env"] }
+serde = { version = "1.0.229", features = ["derive"] }
+
 # tokio = { version = "1", features = ["full"] }
 # axum = "0.8"
 # aide = { version = "0.15", features = ["axum", "scalar"] }

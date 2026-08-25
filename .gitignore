@@ -4,3 +4,6 @@ node_modules/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local config, copied from nexq.example.toml. May hold real secrets.
+nexq.toml
