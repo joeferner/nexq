@@ -1,0 +1,19 @@
+[package]
+name = "nexq-store-search"
+description = "OpenSearch and Elasticsearch storage backends for NexQ"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["opensearch", "elasticsearch"]
+opensearch = []
+elasticsearch = []
+
+[dependencies]
+nexq-core = { workspace = true }
+
+[lints]
+workspace = true

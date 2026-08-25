@@ -1,0 +1,18 @@
+[package]
+name = "nexq-cli"
+description = "NexQ command-line interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nexq"
+path = "src/main.rs"
+
+[dependencies]
+nexq-client = { workspace = true }
+
+[lints]
+workspace = true

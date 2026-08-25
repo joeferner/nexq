@@ -1,0 +1,19 @@
+[package]
+name = "nexq-store-sql"
+description = "Postgres and SQLite storage backends for NexQ"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["postgres", "sqlite"]
+postgres = []
+sqlite = []
+
+[dependencies]
+nexq-core = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+description = "Build tasks: dump the OpenAPI spec, generate clients, build the web UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+# Will depend on nexq-api-rest to dump the spec from the real router.
+
+[lints]
+workspace = true

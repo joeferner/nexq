@@ -1,0 +1,66 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/nexq-core",
+    "crates/nexq-store-sql",
+    "crates/nexq-store-search",
+    "crates/nexq-store-conformance",
+    "crates/nexq-api-rest",
+    "crates/nexq-api-aws",
+    "crates/nexq-metrics",
+    "crates/nexq-keda",
+    "crates/nexq-client",
+    "crates/nexq-cli",
+    "crates/nexq-server",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+authors = ["Joe Ferner"]
+
+# Internal crates. Dependencies point one way only:
+#   nexq-core <- stores/facades <- nexq-server
+# and nexq-cli depends on nexq-client alone, so the CLI stays a small,
+# standalone binary for air-gapped environments.
+[workspace.dependencies]
+nexq-core = { path = "crates/nexq-core" }
+nexq-store-sql = { path = "crates/nexq-store-sql" }
+nexq-store-search = { path = "crates/nexq-store-search" }
+nexq-store-conformance = { path = "crates/nexq-store-conformance" }
+nexq-api-rest = { path = "crates/nexq-api-rest" }
+nexq-api-aws = { path = "crates/nexq-api-aws" }
+nexq-metrics = { path = "crates/nexq-metrics" }
+nexq-keda = { path = "crates/nexq-keda" }
+nexq-client = { path = "crates/nexq-client" }
+
+# External dependencies are declared here (single version across the workspace)
+# and inherited by members with `dep = { workspace = true }`. Intentionally
+# commented out until the crate that needs one actually exists, so the
+# placeholder tree builds with no network access.
+#
+# tokio = { version = "1", features = ["full"] }
+# axum = "0.8"
+# aide = { version = "0.15", features = ["axum", "scalar"] }
+# schemars = "1"
+# serde = { version = "1", features = ["derive"] }
+# serde_json = "1"
+# sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls"] }
+# reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# clap = { version = "4", features = ["derive"] }
+# figment = { version = "0.10", features = ["toml", "env"] }
+# tonic = "0.13"
+# prometheus-client = "0.24"
+# thiserror = "2"
+# tracing = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+todo = "allow"           # placeholder tree; tighten once crates are implemented
+unwrap_used = "warn"

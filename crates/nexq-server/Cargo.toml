@@ -1,0 +1,31 @@
+[package]
+name = "nexq-server"
+description = "NexQ server: wires storage backends, protocol facades, and clustering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nexq-server"
+path = "src/main.rs"
+
+[features]
+default = ["postgres", "sqlite", "opensearch", "elasticsearch"]
+postgres = ["nexq-store-sql/postgres"]
+sqlite = ["nexq-store-sql/sqlite"]
+opensearch = ["nexq-store-search/opensearch"]
+elasticsearch = ["nexq-store-search/elasticsearch"]
+
+[dependencies]
+nexq-core = { workspace = true }
+nexq-store-sql = { workspace = true }
+nexq-store-search = { workspace = true }
+nexq-api-rest = { workspace = true }
+nexq-api-aws = { workspace = true }
+nexq-metrics = { workspace = true }
+nexq-keda = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "nexq-core"
+description = "NexQ domain model, engine, and the Store trait every backend implements"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
