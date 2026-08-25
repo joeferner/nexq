@@ -23,6 +23,11 @@ RUN apt-get update \
 
 USER vscode
 
+# Mount point for the claude-data volume. Docker seeds a new named volume from
+# whatever is at the target path in the image, ownership included — without this
+# the volume dir would be created root-owned and Claude Code couldn't write to it.
+RUN mkdir -p /home/vscode/.claude
+
 RUN rustup component add rustfmt clippy rust-src rust-analyzer \
     && rustup target add x86_64-unknown-linux-musl
 

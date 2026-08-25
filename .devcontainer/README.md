@@ -56,6 +56,37 @@ OpenSearch are reachable by service name from inside the container; they aren't
 forwarded to the host by default (add a `ports:` entry to the compose file if you
 want to point a host-side client at them).
 
+## Git over SSH
+
+The host's `~/.ssh` is bind-mounted read-only at `~/.ssh-host`, and `post-create.sh`
+copies the private keys (`id_*`, `*.pem`) and `config` into `~/.ssh` with mode 0600 —
+ssh refuses keys that are group/world readable, and host bind mounts don't reliably
+preserve the bits. `known_hosts` is *not* copied; the image already pins github.com.
+A forwarded `SSH_AUTH_SOCK` from the host, if present, takes precedence over the
+copied keys.
+
+`post-create.sh` prints whether `git@github.com` authenticated. If it didn't:
+
+```bash
+ls -l ~/.ssh-host                    # is the host dir actually mounted?
+ssh -vT git@github.com               # which key is ssh offering?
+```
+
+Passphrase-protected keys need an agent — either run `ssh-add` on the host before
+opening the container (VS Code forwards the agent), or `eval $(ssh-agent) && ssh-add`
+inside it. On a Windows host the mount resolves via `%USERPROFILE%\.ssh`.
+
+## Claude Code history
+
+`~/.claude` is the named volume `nexq-claude-data`, so transcripts, prompt history
+and credentials survive `Dev Containers: Rebuild Container`. `CLAUDE_CONFIG_DIR` is
+set to that same path (its default) because otherwise `~/.claude.json` — prompt
+history, project trust, MCP config — would sit outside the volume.
+
+```bash
+docker volume rm nexq-claude-data    # wipe it (container must be down)
+```
+
 ## Caching
 
 `target/` and cargo's registry are named volumes rather than bind mounts — build

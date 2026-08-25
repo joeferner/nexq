@@ -12,6 +12,23 @@
   // (see .devcontainer/README.md).
   "runServices": ["app"],
 
+  "mounts": [
+    // Claude Code state — transcripts, prompt history, credentials, todos — in a
+    // named volume so `Rebuild Container` doesn't throw the history away.
+    "source=nexq-claude-data,target=/home/vscode/.claude,type=volume",
+    // Host SSH keys, read-only; post-create.sh copies them into ~/.ssh with the
+    // permissions ssh insists on. HOME is set on Linux/macOS hosts, USERPROFILE on
+    // Windows, and the one that isn't set expands to an empty string.
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh-host,readonly,type=bind"
+  ],
+
+  "remoteEnv": {
+    // Without this, ~/.claude.json (prompt history, project trust, MCP config)
+    // sits outside the volume above and is lost on rebuild. Pointing it at the
+    // default path keeps everything else working exactly as it does normally.
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+  },
+
   "features": {
     // Build the NexQ image and test the Helm chart from inside the container
     // (plan Q20-Q22).
