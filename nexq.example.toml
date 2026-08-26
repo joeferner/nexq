@@ -38,6 +38,27 @@ secret = "change-me"
 # private_key = "/etc/nexq/key.pem"
 # client_ca   = "/etc/nexq/client-ca.pem"     # optional: require client certs (mTLS)
 #
+# NexQ's own REST API — its own listener, on the next port along, so both facades serve
+# by default without either having to be moved first. Set `enabled = false` to serve only
+# the SQS/SNS facade. Far fewer settings than [aws_api], because most of that section
+# exists to satisfy AWS: REST needs no account id, no region, and no public base URL,
+# since a resource is addressed by name in the path rather than by a URL the server hands
+# out and the client has to send back.
+#
+# [rest_api]
+# enabled = true
+# bind_addr = "0.0.0.0:8081"
+#
+# TLS is per facade and is not inherited, in either direction — so the SQS facade can stay
+# on a private interface in plain HTTP while REST serves the network over TLS. Both wanting
+# the same certificate means naming it twice, which is the right trade for not having
+# "switch on TLS here" quietly mean "switch it on everywhere".
+#
+# [rest_api.tls]
+# certificate = "/etc/nexq/fullchain.pem"
+# private_key = "/etc/nexq/key.pem"
+# client_ca   = "/etc/nexq/client-ca.pem"
+#
 # Trust anchors for connections NexQ *makes* rather than serves. Nothing uses this
 # yet — it is here for the nexq client and CLI, and later for TLS to SQL and search
 # backends. Only these anchors are used; the platform's own store is not consulted.

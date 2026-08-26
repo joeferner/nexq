@@ -13,7 +13,8 @@ pub mod waiters;
 mod test_support;
 
 pub use config::{
-    AuthConfig, AwsApiConfig, ClientTlsConfig, Config, Credential, Secret, ServerTlsConfig,
+    AuthConfig, AwsApiConfig, ClientTlsConfig, Config, Credential, RestApiConfig, Secret,
+    ServerTlsConfig,
 };
 pub use engine::{Engine, EngineError};
 pub use model::{

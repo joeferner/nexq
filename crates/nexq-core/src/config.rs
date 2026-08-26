@@ -22,6 +22,9 @@
 //! [aws_api]
 //! bind_addr = "0.0.0.0:8080"
 //! public_base_url = "http://localhost:8080"
+//!
+//! [rest_api]
+//! bind_addr = "0.0.0.0:8081"
 //! ```
 //!
 //! ```no_run
@@ -66,11 +69,15 @@ pub struct Config {
     #[serde(default)]
     pub aws_api: AwsApiConfig,
 
+    /// NexQ's own REST facade.
+    #[serde(default)]
+    pub rest_api: RestApiConfig,
+
     /// Trust anchors for connections NexQ makes, rather than serves. See
     /// [`ClientTlsConfig`] — nothing consumes it yet.
     #[serde(default)]
     pub client_tls: Option<ClientTlsConfig>,
-    // Later: `rest`, `metrics`, `keda`, `cluster`, `queues`.
+    // Later: `metrics`, `keda`, `cluster`, `queues`.
 }
 
 /// The credential registry. NexQ is its own trust root, unrelated to AWS IAM.
@@ -185,6 +192,48 @@ pub struct AwsApiConfig {
     pub tls: Option<ServerTlsConfig>,
 }
 
+/// NexQ's own REST facade.
+///
+/// Its own section and its own listener, like every facade, so a deployment can serve
+/// one, the other, or both. Deliberately a **separate port** rather than a path prefix on
+/// [`AwsApiConfig::bind_addr`]: the SQS protocol puts its operation in a header and posts
+/// everything to `/`, so the two cannot share a listener without one of them giving up
+/// its natural URL shape. Separate ports also mean one facade can be firewalled or
+/// TLS-terminated differently from the other, which is the usual reason to want the
+/// SQS facade internal and REST reachable.
+///
+/// Much smaller than [`AwsApiConfig`] because most of that section exists to satisfy AWS:
+/// no account id, no region, no clock skew, and no `public_base_url`, since a REST
+/// resource is addressed by name in the path rather than by a URL the server hands out
+/// and the client must send back.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestApiConfig {
+    /// Whether to serve this facade at all. Each facade is independently switchable.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Address to bind. Defaults to `0.0.0.0:8081`.
+    ///
+    /// One past the SQS facade's port, so the default config serves both without either
+    /// having to be moved first.
+    #[serde(default = "RestApiConfig::default_bind_addr")]
+    pub bind_addr: SocketAddr,
+
+    /// Serve HTTPS rather than HTTP. Absent means plain HTTP — see [`ServerTlsConfig`].
+    ///
+    /// Independent of [`AwsApiConfig::tls`]: the two facades hold separate certificates
+    /// and neither inherits the other's. That is more verbose in the common case where
+    /// both want the same certificate, and it is the right default anyway — one facade
+    /// bound to a private interface in plain HTTP while the other serves the network over
+    /// TLS is a configuration an operator should be able to write, and inheritance would
+    /// turn switching on TLS for one into switching it on for both.
+    #[serde(default)]
+    pub tls: Option<ServerTlsConfig>,
+    // Later, if the OpenAPI `servers` list or a `Location` header needs one:
+    // `public_base_url`. Not added before something reads it.
+}
+
 /// Check that a configured file exists and can be opened.
 ///
 /// Reports the config key rather than only the path, since "no such file" about a bare
@@ -230,6 +279,24 @@ pub struct ServerTlsConfig {
     /// certificate and not the reverse.
     #[serde(default)]
     pub client_ca: Option<PathBuf>,
+}
+
+impl ServerTlsConfig {
+    /// Check every configured path can be opened, reporting failures under `section`.
+    ///
+    /// Takes the section name rather than assuming one, since the same table appears
+    /// under each facade and an error that named the wrong one would send an operator to
+    /// edit a setting that was never the problem.
+    fn validate(&self, section: &str) -> Result<(), figment::Error> {
+        readable(&format!("{section}.tls.certificate"), &self.certificate)?;
+        readable(&format!("{section}.tls.private_key"), &self.private_key)?;
+
+        if let Some(client_ca) = &self.client_ca {
+            readable(&format!("{section}.tls.client_ca"), client_ca)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// TLS for connections NexQ *makes* — NexQ as the client.
@@ -357,10 +424,10 @@ impl Config {
             .split(ENV_NESTED_SEPARATOR)
     }
 
-    /// Whether this facade serves HTTPS.
-    pub fn is_tls(&self) -> bool {
-        self.aws_api.tls.is_some()
-    }
+    // There was a `Config::is_tls` here, meaning `aws_api.tls.is_some()`. Removed rather
+    // than kept alongside a REST equivalent: at the top level the name cannot say which
+    // facade it is about, and with two of them it would read as "this deployment serves
+    // TLS" while answering something narrower. Each facade's `tls` field is the question.
 
     /// Checks that can't be expressed as types.
     fn validate(&self) -> Result<(), figment::Error> {
@@ -388,12 +455,33 @@ impl Config {
         // Checked here so a mistyped path stops the server coming up, rather than
         // surfacing as a handshake failure to whoever connects first.
         if let Some(tls) = &self.aws_api.tls {
-            readable("aws_api.tls.certificate", &tls.certificate)?;
-            readable("aws_api.tls.private_key", &tls.private_key)?;
+            tls.validate("aws_api")?;
+        }
 
-            if let Some(client_ca) = &tls.client_ca {
-                readable("aws_api.tls.client_ca", client_ca)?;
-            }
+        if let Some(tls) = &self.rest_api.tls {
+            tls.validate("rest_api")?;
+        }
+
+        // Two facades default to two ports, so this is only reachable by an operator
+        // having set one of them — most likely by copying the other section. The OS would
+        // refuse the second bind anyway, but "Address already in use" does not say which
+        // facade lost, and which one loses depends on the order they happen to be bound.
+        //
+        // Only equal addresses are caught. Overlapping-but-unequal ones — `0.0.0.0:8080`
+        // against `127.0.0.1:8080` — collide too, and are left to the OS: deciding
+        // whether two socket addresses overlap means reimplementing the kernel's rules
+        // for wildcards and dual-stack sockets, and getting that subtly wrong would
+        // refuse configurations that work.
+        if self.aws_api.enabled
+            && self.rest_api.enabled
+            && self.aws_api.bind_addr == self.rest_api.bind_addr
+        {
+            return Err(format!(
+                "aws_api.bind_addr and rest_api.bind_addr are both {}: each facade needs \
+                 its own listener, so give one of them another port or disable it",
+                self.aws_api.bind_addr
+            )
+            .into());
         }
 
         if let Some(client_tls) = &self.client_tls {
@@ -508,6 +596,23 @@ impl Default for AwsApiConfig {
     }
 }
 
+impl RestApiConfig {
+    fn default_bind_addr() -> SocketAddr {
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 8081))
+    }
+}
+
+impl Default for RestApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind_addr: Self::default_bind_addr(),
+            // Plain HTTP unless a certificate says otherwise.
+            tls: None,
+        }
+    }
+}
+
 impl Secret {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
@@ -577,6 +682,149 @@ mod tests {
             assert_eq!(credential.name, "dev");
             assert_eq!(credential.secret.expose(), "shhh");
             assert!(config.auth.credential("AKIAWRONG").is_none());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn the_rest_facade_defaults_to_its_own_port() {
+        Jail::expect_with(|jail| {
+            jail.create_file(DEFAULT_CONFIG_FILE, MINIMAL)?;
+            let config = Config::load().expect("load");
+
+            assert!(config.rest_api.enabled);
+            assert_eq!(config.rest_api.bind_addr.to_string(), "0.0.0.0:8081");
+            assert!(config.rest_api.tls.is_none(), "plain HTTP by default");
+
+            assert_ne!(
+                config.aws_api.bind_addr, config.rest_api.bind_addr,
+                "the defaults must let both facades run without either being moved first"
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn a_facade_can_be_switched_off_without_touching_the_other() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!("{MINIMAL}\n[rest_api]\nenabled = false\n"),
+            )?;
+            let config = Config::load().expect("load");
+
+            assert!(!config.rest_api.enabled);
+            assert!(config.aws_api.enabled, "one facade off is not both off");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn rest_values_come_from_the_file_and_the_environment() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!("{MINIMAL}\n[rest_api]\nbind_addr = \"127.0.0.1:9100\"\n"),
+            )?;
+            assert_eq!(
+                Config::load().expect("load").rest_api.bind_addr.to_string(),
+                "127.0.0.1:9100"
+            );
+
+            jail.set_env("NEXQ_REST_API__BIND_ADDR", "127.0.0.1:9200");
+            assert_eq!(
+                Config::load().expect("load").rest_api.bind_addr.to_string(),
+                "127.0.0.1:9200",
+                "the environment overrides the file, as it does for every other key"
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn two_enabled_facades_on_one_address_is_an_error() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!(
+                    "{MINIMAL}\n\
+                     [aws_api]\nbind_addr = \"0.0.0.0:8080\"\n\
+                     [rest_api]\nbind_addr = \"0.0.0.0:8080\"\n"
+                ),
+            )?;
+            let error = Config::load().expect_err("each facade needs its own listener");
+            let message = error.to_string();
+
+            // Both keys, since either one is the one the operator may want to change.
+            assert!(message.contains("aws_api.bind_addr"), "{error}");
+            assert!(message.contains("rest_api.bind_addr"), "{error}");
+            Ok(())
+        });
+    }
+
+    /// The clash only matters between facades that are both going to bind.
+    #[test]
+    fn one_address_is_fine_when_only_one_facade_is_enabled() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!(
+                    "{MINIMAL}\n\
+                     [aws_api]\nbind_addr = \"0.0.0.0:8080\"\n\
+                     [rest_api]\nbind_addr = \"0.0.0.0:8080\"\nenabled = false\n"
+                ),
+            )?;
+            Config::load().expect("a disabled facade binds nothing to collide with");
+            Ok(())
+        });
+    }
+
+    /// The same table under a different facade, reusing `nexq-core::tls`'s loader — so
+    /// what this has to prove is that the error names `rest_api` and not `aws_api`.
+    #[test]
+    fn an_unreadable_rest_certificate_names_the_rest_section() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!(
+                    "{MINIMAL}\n[rest_api.tls]\n\
+                     certificate = \"nope.pem\"\nprivate_key = \"nope.key\"\n"
+                ),
+            )?;
+            let error = Config::load().expect_err("a missing certificate stops startup");
+            let message = error.to_string();
+
+            assert!(
+                message.contains("rest_api.tls.certificate"),
+                "the error must send the operator to the right section: {error}"
+            );
+            assert!(!message.contains("aws_api"), "{error}");
+            Ok(())
+        });
+    }
+
+    /// TLS on one facade must not switch it on for the other, in either direction.
+    #[test]
+    fn each_facade_holds_its_own_certificate() {
+        Jail::expect_with(|jail| {
+            // Content is irrelevant: startup validation checks a path can be *opened*,
+            // and `nexq_core::tls` is what later decides whether it is a certificate.
+            jail.create_file("cert.pem", "not a real certificate")?;
+            jail.create_file("key.pem", "not a real key")?;
+            jail.create_file(
+                DEFAULT_CONFIG_FILE,
+                &format!(
+                    "{MINIMAL}\n[aws_api.tls]\n\
+                     certificate = \"cert.pem\"\nprivate_key = \"key.pem\"\n"
+                ),
+            )?;
+            let config = Config::load().expect("load");
+
+            assert!(config.aws_api.tls.is_some());
+            assert!(
+                config.rest_api.tls.is_none(),
+                "REST must not inherit the SQS facade's certificate"
+            );
             Ok(())
         });
     }
@@ -778,6 +1026,11 @@ mod tests {
             assert!(config.aws_api.enabled);
             assert_eq!(config.aws_api.base_url(), "http://localhost:8080");
             assert_eq!(config.aws_api.account_id, "000000000000");
+
+            // Every `[rest_api]` line in the example is commented out, so this checks the
+            // documented defaults are the real ones rather than checking the file parses.
+            assert!(config.rest_api.enabled);
+            assert_eq!(config.rest_api.bind_addr.to_string(), "0.0.0.0:8081");
             Ok(())
         });
     }

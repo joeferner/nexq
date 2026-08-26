@@ -1,444 +1,282 @@
 # TODO
 
-**Current goal: the unmodified `aws sqs` CLI drives NexQ end to end, against the
-in-memory backend, single node.**
+**Current goal: NexQ's own REST API, and then everything that is built on top of it —
+the CLI, the web UI, metrics, and the search backends.**
 
-Nothing else is in scope until that works. It is the highest-risk part of the whole
-design — SigV4 verification and AWS wire-protocol fidelity either work with real AWS
-tooling or they don't — and it is also the smallest thing that proves the architecture,
-since the SQS facade is a translation layer over the core operation set, so building it
-exercises the engine and the facade boundary at once.
+M1–M8 are done and have been removed from this file; the `aws sqs` CLI drives NexQ end
+to end against the in-memory backend, single node, over HTTP or HTTPS. What was learned
+building it lives in [crates/nexq-api-aws/README.md](crates/nexq-api-aws/README.md), in
+the code, and in the tests — not here. Use `git log` for the narrative.
 
-Deliberately **out** of this milestone: the REST facade, the `nexq` CLI, SNS, durable
-backends, priority, position-in-queue, DLQ, clustering/HA, metrics, KEDA, web UI,
-Docker/Helm. Those are sketched at the bottom and should stay untouched until
-`aws sqs` works.
+Everything below follows one dependency chain, which is why it is in this order:
 
-Target definition of done:
-
-```sh
-aws configure --profile nexq          # key/secret issued by NexQ, any region
-aws --profile nexq --endpoint-url http://localhost:8080 sqs create-queue --queue-name jobs
-aws --profile nexq --endpoint-url http://localhost:8080 sqs send-message --queue-url ... --message-body hi
-aws --profile nexq --endpoint-url http://localhost:8080 sqs receive-message --queue-url ... --wait-time-seconds 10
-aws --profile nexq --endpoint-url http://localhost:8080 sqs delete-message --queue-url ... --receipt-handle ...
 ```
+REST (the contract)  ->  CLI          } both generated from one OpenAPI spec
+                     ->  web UI       } so neither hand-maintains a second contract
+                     ->  metrics      } which needs the counts REST already reports
+                     ->  search store } the first backend that is not in-process
+```
+
+Deliberately **out** of scope until those are done: SNS, multi-node HA, the SQS ingest
+bridge, KEDA's gRPC scaler, Docker/Helm. Sketched at the bottom.
+
+**Sequencing note, flagged rather than silently reordered.** This order puts the search
+backends (M14) ahead of SQLite/Postgres (M15), and that has two costs worth knowing
+about before committing to it:
+
+- Every store is gated on the same conformance suite, and search is the harder of the
+  two to get through it — no transactions, so claim has to become a compare-and-swap,
+  and a write is not immediately searchable. Doing it first means the first durable
+  backend is also the one that has to invent the claim protocol, with no easier backend
+  having proved the suite is passable by anything but the in-memory store.
+- M12 and M13 put an operator in front of a queue whose entire contents disappear on
+  restart. Fine for a demo, awkward as the state a web UI and a metrics endpoint exist
+  to show.
+
+Neither is a reason not to proceed — the search backends are the differentiating ones
+and the memory store is genuinely enough to build a UI against. But pulling M15 forward
+ahead of M14 is a one-line change to this file and it would remove both costs.
 
 ---
 
-## ✅ M1 — A signed request gets a valid response
+## M9 — The REST facade, contract-first
 
-Prove the protocol and auth path before writing any queue logic. `list-queues` on an
-empty server is the smallest request that exercises all of it.
+The plan's Q12 makes REST the complete surface, not a second-class one: the core
+engine's operation set is the single source of truth, the SQS facade is a
+compatibility-only subset of it, and **no capability may exist only behind SQS**. So
+this milestone is parity plus the plumbing, and M10 is the extensions REST exists for.
 
-- [x] Config: per-facade listener sections plus a shared credential registry, as a
-      TOML file with `NEXQ_*__*` environment overrides
-- [x] Axum server in `nexq-api-aws`, owning its own listener, with graceful shutdown;
-      `nexq-server` binds and runs it only when `aws_api.enabled`
-- [x] Identify the wire protocol the installed `aws-cli` v2 actually sends — captured
-      from `aws --debug sqs list-queues` against the running facade, see below
-- [x] Request routing off `X-Amz-Target`, with JSON body decode — operations are a
-      typed enum, so "not built yet" and "no such operation" are distinct answers
-- [x] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
-      against the client's signature. Verified against a real botocore signature
-      captured from `aws --debug`, so correctness does not rest on reading the spec
-      correctly — see `reproduces_a_signature_that_botocore_computed`.
-- [x] Reject with SQS's own error shapes: `InvalidClientTokenId`,
-      `SignatureDoesNotMatch`, and the JSON protocol's `__type` envelope
-- [x] Reject stale signatures with a clock-skew window — `RequestTimeTooSkewed`, within
-      `aws_api.max_clock_skew_secs` (default 900, as AWS allows). Checked in both
-      directions and before the signature is recomputed. `0` disables it, which the
-      server warns about at startup, since that restores indefinite replayability.
-- [x] `ListQueues` returning an empty list — an empty object, since real SQS omits
-      `QueueUrls` when there are none and `aws sqs list-queues` then prints nothing
-- [x] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
-      with a bad secret.** Against the real `aws-cli` 2.36.30: correct credentials
-      exit 0 with no output; a wrong secret reports `SignatureDoesNotMatch`; an
-      unknown key id reports `InvalidClientTokenId`; an unsigned request gets
-      `403 MissingAuthenticationToken`. Any region string works, as designed.
+Q18a is the constraint that shapes it: the spec is generated from the route and type
+definitions, and every client — the CLI, the SPA, any published SDK — is generated from
+that one spec. Nothing downstream is hand-written, so nothing downstream can disagree.
 
-What `aws-cli` 2.36.30 sends for `sqs list-queues`, captured against the facade:
+- [x] `[rest_api]` config: `enabled`, `bind_addr`, and `[rest_api.tls]`, sharing
+      `ServerTlsConfig` and so `nexq-core::tls` — which is where the loader already lives
+      precisely so this facade gets that one rather than a second copy. Startup validation
+      is shared too, factored into `ServerTlsConfig::validate(section)` so each facade
+      names its own keys: a bad REST certificate says `rest_api.tls.certificate` and never
+      mentions `aws_api`.
 
-```
-POST / HTTP/1.1
-X-Amz-Target: AmazonSQS.ListQueues
-Content-Type: application/x-amz-json-1.0
-x-amzn-query-mode: true
-X-Amz-Date: 20260826T005924Z
-Authorization: AWS4-HMAC-SHA256 Credential=AKIANEXQDEV/20260826/us-east-1/sqs/aws4_request,
-  SignedHeaders=content-type;host;x-amz-date;x-amz-target;x-amzn-query-mode, Signature=...
+      Defaults to `0.0.0.0:8081`, enabled — one past the SQS facade, so a config holding
+      nothing but credentials serves both without either having to be moved first. A test
+      asserts the two defaults differ, so a later change cannot quietly make them collide.
 
-{}
-```
+      A separate **port** rather than a path prefix, because the SQS protocol puts its
+      operation in a header and posts everything to `/`: the two cannot share a listener
+      without one of them giving up its natural URL shape. It also lets one facade be
+      firewalled or TLS-terminated differently from the other, which is the usual reason to
+      want SQS internal and REST reachable.
 
-Notes worth pinning down here, since getting them wrong is silent and confusing:
+      TLS is **per facade and not inherited**, in either direction. More verbose when both
+      want the same certificate, and still right: plain HTTP on a private interface for SQS
+      while REST serves the network over TLS is a configuration an operator should be able
+      to write, and inheritance would turn "switch on TLS here" into "switch it on
+      everywhere".
 
-- `x-amzn-query-mode: true` is sent on every request and is part of the signed
-  headers. It asks for Query-protocol-shaped errors over the JSON protocol, so error
-  responses have to account for it rather than assuming plain JSON error shapes.
-- The credential scope names the service as `sqs`, and the region is whatever the
-  client is configured with — SigV4 only needs signer and verifier to agree on it, so
-  it need not be a real AWS region.
-- The CLI surfaces a non-AWS error body verbatim: a plain 501 came back as
-  `An error occurred (501) when calling the ListQueues operation: <body>`. Useful for
-  debugging now, and a reminder that error shapes are what the CLI reports on.
-- The Query/XML protocol still matters for older SDKs, but is deliberately deferred
-  until the JSON path works.
+      No `public_base_url`, and no account id, region, or clock skew — most of `[aws_api]`
+      exists to satisfy AWS. A REST resource is addressed by name in the path rather than by
+      a URL the server hands out and the client must send back. A comment marks where one
+      would go if the OpenAPI `servers` list or a `Location` header turns out to need it.
 
-## ✅ M2 — Queue lifecycle against the memory backend
+      Two things beyond the item. Both facades on one `bind_addr` is now a startup error
+      naming both keys — not hypothetical, since a port collision while checking this
+      produced exactly the failure it prevents: `Address already in use (os error 98)`,
+      naming neither the facade nor the setting, and which facade loses depends on the order
+      they happen to be bound. Only *equal* addresses are caught; `0.0.0.0:8080` against
+      `127.0.0.1:8080` collides too and is deliberately left to the OS, since deciding
+      whether two socket addresses overlap means reimplementing the kernel's wildcard and
+      dual-stack rules, and getting that subtly wrong would refuse configurations that work.
+      And `Config::is_tls` is gone: it meant `aws_api.tls.is_some()`, had no callers, and at
+      the top level cannot say which facade it is about — with two of them it reads as "this
+      deployment serves TLS" while answering something narrower.
 
-- [x] Domain model: queue, message, receipt handle — `QueueName` validates on
-      construction, `Message` and `ClaimedMessage` separate the durable item from a
-      time-limited claim
-- [x] `Store` trait, behind `dyn` via `async-trait`, covering queue lifecycle only —
-      create, get, delete, list — plus a `StoreError` that separates "no such queue"
-      from "the backend broke"
-- [x] Memory store in `nexq-store-memory`, its own crate alongside the other backends
-- [x] `nexq-store-conformance` suite covering the operations implemented so far,
-      running green against the memory store. 25 cases generated as individual
-      `#[tokio::test]`s by `conformance_tests!(new_store)`; verified to _fail_ by
-      deliberately breaking five contract promises in the memory store
-- [x] Core engine operations: create, get, delete, list — with idempotent creation
-      decided here, so every facade inherits it
-- [x] Queue URL construction _and parsing_ from the configured public base URL — the
-      CLI sends every subsequent request to whatever URL `CreateQueue`/`GetQueueUrl`
-      returns, so both directions have to agree; `QueueUrls` owns the format and a
-      round-trip test pins it
-- [x] The account id in queue URLs is config (`aws_api.account_id`), not a constant,
-      defaulting to `000000000000` and validated as exactly 12 digits. Changing it
-      invalidates queue URLs clients already hold, which the docs now say.
-- [x] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`, including
-      `QueueNamePrefix` and the `VisibilityTimeout`/`DelaySeconds`/
-      `ReceiveMessageWaitTimeSeconds` attributes
-- [x] `QueueNameExists` / `QueueDoesNotExist` error parity, plus
-      `InvalidParameterValue`, `InvalidAttributeName`, and `InvalidAttributeValue`
-- [x] **Gate: create, list, get-url, and delete a queue via `aws sqs`** — verified
-      against the real `aws-cli`, including idempotent re-create, a conflicting
-      re-create, prefix filtering, and deleting by the URL `create-queue` returned
-- [x] Paging on `ListQueues` — `MaxResults` and `NextToken`, by cursor rather than
-      offset, so churn between pages cannot skip or repeat a queue. A token comes back
-      whenever more remain, even unasked, rather than truncating at the 1000 cap
-      silently. Verified with botocore's own paginator (`--page-size`, `--max-items`,
-      `--starting-token`).
+      **`nexq-core::tls::server_config` is not called for REST yet**, because there is no
+      REST listener to build a `ServerConfig` for; that arrives with the server below. What
+      is done here is the config surface and its startup validation.
 
-## ✅ M3 — The produce/consume loop
+      7 tests. The three that carry the weight were each checked to go red against a
+      deliberate mutation: the clash check removed, the default port moved onto 8080, and
+      the REST certificate error made to name `aws_api`.
+- [ ] Both facades in one process, over one `Engine` — a message sent over SQS must be
+      receivable over REST, with a test saying so. `nexq-server`'s `JoinSet` supervisor
+      already runs one listener; two is the case it was written for
+- [ ] Bearer auth: `<key_id>.<secret>` against the same credential registry the SQS
+      facade signs against, per Q10b and the promise already made in
+      [nexq.example.toml](nexq.example.toml). Constant-time comparison of the secret, and
+      a `401` carrying `WWW-Authenticate: Bearer`. Deliberately not SigV4 — that
+      constraint exists only to satisfy unmodified AWS SDKs, and nothing here is one
+- [ ] Axum + `aide`: `ApiRouter`, and `#[derive(JsonSchema)]` beside the existing
+      `Serialize`/`Deserialize`, so route registration *is* the documentation source. The
+      alternative considered and rejected in Q18a was `utoipa`, whose per-handler
+      `#[utoipa::path(...)]` amounts to writing the OpenAPI structure by hand
+- [ ] The generated spec is **committed**, and a test fails when the committed copy and
+      the generated one differ. Without that, the contract can change in a way no diff
+      shows, and every generated client changes with it silently
+- [ ] Resource-shaped routes, not a transliteration of SQS. Queue *name* in the path
+      rather than a queue URL in a parameter — the URL-as-identifier is an AWS artifact
+      that exists because SQS has accounts and regions to encode. Paging keeps the M2
+      cursor tokens, since keyset paging is the store's guarantee and not a wire detail
+- [ ] One error envelope: HTTP status, a stable machine-readable code, and a message.
+      Distinct from the SQS facade's `__type` shape and mapped from the same
+      `EngineError` values, so the two facades cannot disagree about what went wrong
+- [ ] Parity surface: create/get/list/delete queue, get and set attributes, purge,
+      send/receive/delete/change-visibility, and the three batch operations. Idempotent
+      creation is inherited from the engine rather than re-decided
+- [ ] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
+      mechanism with two protocol faces, per Q3a, not a second implementation. Includes
+      the shutdown path: `begin_draining` has to release REST's waiters too, or graceful
+      shutdown regains the 19.7 seconds M4 removed
+- [ ] `nexq-client` generated from the spec, and used by something in-tree, so "the
+      generated client works" is a fact rather than an assumption
+- [ ] **Gate: `cargo xtask acceptance-rest` — a `curl`-level suite that exercises the
+      surface over the wire, plus the same round trip through the generated client.** Two
+      callers because a hand-written HTTP call proves the protocol and a generated one
+      proves the spec describes it. Checked to go red, as with the M7 suites
 
-- [x] `enqueue`, `claim_next`, `ack` in the engine and memory store, including
-      priority ordering, per-queue delay, and a new receipt handle on each redelivery
-- [x] `SendMessage`, `ReceiveMessage`, `DeleteMessage`, including per-message
-      `DelaySeconds` and a per-receive `VisibilityTimeout`
-- [x] `MD5OfMessageBody` in send/receive responses — some SDKs verify this checksum
-      and will error out if it is absent or wrong. Note the field is `MD5OfMessageBody`
-      on send but `MD5OfBody` on receive; botocore checked both against a live server
-- [x] Opaque receipt handles, and `ReceiptHandleIsInvalid` on a stale one
-- [x] `MaxNumberOfMessages`, and the SQS response-shape rules for an empty receive
-      (`Messages` omitted, not an empty array)
-- [x] **Gate: send a message, receive it, delete it, confirm it does not come back** —
-      verified against the real `aws-cli`
-- [x] Message system attributes on receive. Both `AttributeNames` (deprecated) and
-      `MessageSystemAttributeNames` are honoured, and a request carrying both gets the
-      union. `All` and the Query protocol's `.*` return every attribute there is:
-      `SentTimestamp`, `ApproximateReceiveCount`, `ApproximateFirstReceiveTimestamp`.
-      An attribute named explicitly that NexQ has no value for — `SenderId`, or a FIFO
-      attribute — is refused with `InvalidAttributeName`, while `All` stays silent about
-      it, since `All` means "whatever you have". Verified against the real `aws-cli`,
-      which does not filter the names client-side
-- [x] `MessageAttributes` on send and receive, with their own MD5. `String`, `Number`,
-      and `Binary`, custom labels included, validated against SQS's own published rules
-      and counted towards the message size limit. On receive, selected with
-      `MessageAttributeNames` — `All`, `.*`, exact names, or a `bar.*` prefix — and a
-      name the message does not carry is a miss rather than an error, since the name is
-      the producer's to choose.
+## M10 — Priority, position-in-queue, DLQ and redrive
 
-      `MD5OfMessageAttributes` is checked against four digests **AWS itself published**
-      in the `aws-cli` documentation examples, whose outputs are real SQS responses. That
-      also settled a question the spec text does not: on receive the digest covers the
-      attributes *returned*, not every attribute the message holds — AWS's own example
-      shows a different digest for the same message when only one of its two attributes
-      was requested. Verified end to end against the real `aws-cli`, with the digest
-      cross-checked against an independent implementation of the encoding.
+The features REST exists to expose. All three are unreachable from any AWS facade, which
+is why they waited for one that can reach them.
 
-## ✅ M4 — Long-polling receive
+- [ ] **Priority.** `Priority` and the store's priority ordering have existed since M3
+      and no facade can set or read them — REST can. Default stays the middle of the
+      road, so an unset priority behaves as it does today
+- [ ] **Position in queue.** `Store::position_of`, per-backend by construction (Q7): an
+      index into an ordered structure for memory, a count query for SQL and search. Two
+      semantics to settle and then *document*, because both answers surprise someone:
+      whether position counts only currently-visible messages, and that a
+      higher-priority arrival moves you backwards. Approximate by nature, and named
+      `Approximate…` for the same reason SQS names its counts that way
+- [ ] **Dead-letter queues.** A DLQ is its own queue, first-class rather than a special
+      case (Q8), so it already has a backend setting — defaulting to its source's,
+      overridable, which is the point: a live queue on `memory` with its DLQ on something
+      durable is a sensible configuration and needs no new concept
+- [ ] A redrive policy on the source — `maxReceiveCount` and a target — enforced where
+      the claim lapses, since that is the moment a delivery count increments. Needs
+      `Store` support and conformance cases; a DLQ that only moves messages when someone
+      happens to call receive is one that quietly does not
+- [ ] Redrive back out: move messages from a DLQ to a target queue, inspectable and
+      cancellable while it runs
+- [ ] The four SQS operations deferred **with** DLQ in M6, now that there is something
+      for them to report on: `ListDeadLetterSourceQueues`, `StartMessageMoveTask`,
+      `CancelMessageMoveTask`, `ListMessageMoveTasks`. Plus `RedrivePolicy`, which
+      `GetQueueAttributes` currently refuses with a stated reason
+- [ ] Message expiry and `MessageRetentionPeriod`, **promoted from Future** because the
+      question it was waiting on is answered here: an expired message is dropped or
+      dead-lettered, and there was no DLQ to send it to before now. A sweep rather than a
+      per-message timer, so the cost scales with queues and not with messages
+- [ ] **Gate: a message that fails `maxReceiveCount` times lands in its DLQ, is visible
+      there, and can be redriven back — over REST, and reported by
+      `GetQueueAttributes` over SQS.** Both facades, because M9's promise is that the
+      extended engine stays one engine
 
-The first piece of NexQ's own design to land, and the reason the primary holds
-in-process waiters instead of polling a backend.
+## M11 — The `nexq` CLI
 
-- [x] In-process waiter registry per queue, woken by the enqueue path —
-      `nexq-core::waiters`, one `Notify` per queue that has actually been waited on, and
-      the entry is dropped with the queue. A waiter is armed _before_ it looks at the
-      queue, which is what makes a lost wake impossible: anything enqueued from that
-      moment either finds the waiter registered or is seen by the look itself
-- [x] `WaitTimeSeconds` honored, returning empty on timeout. Omitting it falls back to
-      the queue's `ReceiveMessageWaitTimeSeconds`, which had been stored since M2 and
-      never used, so a queue can now make long polling its consumers' default. Capped at
-      20 seconds in the engine as well as the facade, so config cannot get around the
-      protocol's limit
-- [x] Wake ordering re-evaluated at wake time rather than fixed at registration — a
-      wake carries no payload, so a woken consumer re-runs the claim and gets whatever
-      ranks first _then_. Pinned by a test where the enqueue that causes the wake is a
-      delayed message: the waiter must find nothing and keep waiting rather than be
-      handed the message that woke it
-- [x] The wait applies to the first message only. Asking for ten when three exist
-      returns three rather than holding the request open for seven more, which is SQS's
-      behaviour and the useful one
-- [x] Shutdown releases waiters instead of waiting for them. Long polls are in-flight
-      requests, so graceful shutdown took **19.7 seconds** with one outstanding; the
-      engine is now told to stop waiting when shutdown starts, and it takes **0.01
-      seconds**. Waiters get their normal empty answer rather than a dropped connection
-- [x] Deleting a queue releases the consumers waiting on it, rather than leaving them
-      parked on a queue that no longer exists
-- [x] **Gate: `receive-message --wait-time-seconds 20` blocks, then returns
-      immediately when a message is sent from another terminal** — verified against the
-      real `aws-cli`: returned 4.03s after the receive began, on a send 3s in, rather
-      than waiting out the 20s
+Q13: a complete, self-sufficient replacement for `aws-cli`, not a supplement to it. The
+earlier framing — "operators can just use the real `aws` CLI for standard operations" —
+assumed `aws-cli` is available, which is exactly what does not hold in the closed and
+air-gapped environments this project targets.
 
-What does _not_ wake a waiter yet, and is M5's timer rather than an event: a delay
-elapsing, and a visibility timeout lapsing. Both make a message claimable without an
-enqueue, so a consumer only learns about them on its next receive.
+- [ ] Built on `nexq-client` **alone**, as the workspace dependency comment already
+      states, so the binary stays small and drags in no server code
+- [ ] `aws-cli`-style conventions per Q15: verb-noun commands (`create-queue`,
+      `get-queue-position`), and `--output table|json|text`. JMESPath `--query` is
+      explicitly the lower-priority part of "style" and can come later
+- [ ] Full surface, extensions included — it is generated from the same spec, so
+      completeness is close to free and a gap is a bug rather than a scoping decision
+- [ ] Endpoint and token configuration: a profile file plus `NEXQ_ENDPOINT` /
+      `NEXQ_TOKEN` overrides, matching the server's own file-plus-env convention (Q23)
+      rather than inventing a second one
+- [ ] `[client_tls]` finally gets its **first consumer**. M8 built and tested it with
+      nothing using it, deliberately; this is the milestone that proves the loader was
+      right, including a self-signed authority, which is the normal case on-prem
+- [ ] No cluster awareness, per Q14 — the CLI connects to whatever node it is pointed at
+      and that node proxies. Worth stating in the code, since "the CLI should find the
+      primary" is the intuitive wrong answer
+- [ ] **Gate: an acceptance suite driving the built `nexq` binary the way
+      `acceptance-cli` drives `aws`** — the same operations, run against a real server,
+      plus a check that the binary needs nothing at runtime beyond itself
 
-## ✅ M5 — Visibility timeout and redelivery
+## M12 — Web UI
 
-Mostly landed early, since a claim that cannot expire would hand the same message to
-two consumers. Expiry is noticed when someone next tries to claim, which is where it
-belongs — see Future for why that is not a timer.
+Angular with [Optimus UI](https://optimus.openng.org/installation), already decided
+below. `ui/` exists and is empty. Its client is generated from M9's spec, so the UI is
+layout and wiring rather than contract work.
 
-- [x] Visibility timeout on claim, honoured on the next claim attempt
-- [x] Redelivery on expiry, under a new receipt handle that invalidates the old one
-- [x] `VisibilityTimeout` as a queue attribute and a per-receive override
-- [x] **Gate: receive without deleting, wait out the timeout, receive it again** —
-      verified against the real `aws-cli` with `--visibility-timeout 1`
-- [x] `ApproximateReceiveCount` surfaced to clients, counting the delivery in progress
-      so a first receive reports `1`. `ApproximateFirstReceiveTimestamp` came with it,
-      and stays pinned to the first delivery rather than the latest
-- [x] `ChangeMessageVisibility`, counted from now rather than from the receive, so the
-      one call both extends a claim that needs longer and shortens one that does not.
-      The handle stays valid, since this changes when a claim ends and not whose it is.
+- [ ] Two decisions to settle first, both flagged under "Decisions still open" because
+      they are not obvious: **how the browser authenticates** (the bearer token is a
+      long-lived `<key_id>.<secret>` and putting that in `localStorage` is a real
+      exposure), and **whether `cargo build` may require Node** (Q21's air-gapped
+      constraint says the answer is no, which means either an off-by-default cargo
+      feature or a committed bundle)
+- [ ] Generated client from the committed spec, in the same codegen step as any other
+      client. A hand-written API layer in the SPA is the exact duplication Q18a exists to
+      prevent
+- [ ] Served as embedded static assets by the REST facade, with an SPA fallback route —
+      one binary, one port, nothing to deploy separately, which is the whole point for
+      the single-VM target
+- [ ] Views, in the order they earn their keep: queue list with depths, queue detail with
+      attributes and message peek, DLQ management with redrive, and position lookup.
+      Cluster status and bridge management have nothing behind them yet
+- [ ] **Gate: create a queue, send to it, watch it appear, drive a message to the DLQ,
+      and redrive it — entirely from the browser, against a binary built with no network
+      access**
 
-      `VisibilityTimeout: 0` hands the message straight back, which is the useful edge —
-      a consumer that cannot do the work returns it instead of holding it until the claim
-      lapses. That is a client action making a message claimable, so it **wakes a waiting
-      consumer** exactly as an enqueue does; a non-zero timeout deliberately does not,
-      since the message stays invisible and waking anyone would just send them to the
-      store for nothing. Verified against the real `aws-cli`: a long poller got a
-      handed-back message in 3.8s rather than timing out at 20.
+## M13 — Prometheus metrics
 
-      `MessageNotInflight` is not distinguished from `ReceiptHandleIsInvalid` — a receipt
-      handle only exists while a claim does, so the two are the same condition here.
+Q16 sequences this ahead of KEDA's gRPC scaler deliberately: the endpoint is cheap, it
+serves general observability rather than only KEDA, and KEDA's `prometheus` scaler can
+read it as-is. The gRPC external scaler is the larger, KEDA-specific lift and waits.
 
-## ✅ M6 — The rest of what the CLI commonly exercises
+- [ ] Where it listens is a decision, not a detail: a separate `[metrics]` `bind_addr` is
+      the convention, and it matters here because `/metrics` publishes **queue names and
+      depths** — putting that unauthenticated on the public listener hands out the
+      topology
+- [ ] Queue depth per priority as a gauge, which is the series KEDA scales on and the
+      reason priority is in the model at all
+- [ ] The M6 counts as gauges (visible, not-visible, delayed), DLQ depth, counters for
+      enqueue/claim/ack/expiry/dead-letter, a receive-wait histogram, a gauge of parked
+      long-poll waiters, and build info
+- [ ] A scrape must not cost a full scan. `message_counts` is an aggregate that is nearly
+      free in memory and is not on a real backend, so the cheap-aggregate requirement
+      belongs in the `Store` contract **before** M14 and M15 implement against it —
+      otherwise a 15-second scrape interval quietly becomes the heaviest query the
+      backend serves
+- [ ] **Gate: `promtool check metrics` passes, and a KEDA `prometheus` ScaledObject
+      scales a deployment off a real queue's depth** — documented as a working example
+      rather than asserted to work
 
-- [x] `GetQueueAttributes` / `SetQueueAttributes`, including the approximate-count
-      attributes. Ten reported under `All`: the three settable ones, the three counts,
-      `CreatedTimestamp`, `LastModifiedTimestamp`, `MaximumMessageSize`, and `QueueArn`.
+## M14 — OpenSearch and Elasticsearch backends
 
-      `SetQueueAttributes` is a genuine partial update — naming `VisibilityTimeout` does
-      not reset `DelaySeconds` — and is all-or-nothing, so a request mixing a good
-      attribute with a bad one changes neither. Read-only attributes are refused rather
-      than ignored.
+One crate for both, as `nexq-store-search` already says: they share nearly all of their
+wire protocol. This is the first backend that is not in-process, and the first to make
+the conformance suite earn its existence.
 
-      Timestamps are epoch **seconds** here, where a message's are milliseconds; the same
-      codebase now does both, so there is a test naming the distinction. `Queue` gained
-      `last_modified_at`, since reporting the creation time for both would have been a
-      plausible-looking lie.
+- [ ] **The conformance suite is the gate and it passes unmodified.** If a case needs
+      relaxing to accommodate this backend, that is a finding about the contract to be
+      settled explicitly, not a test to loosen
+- [ ] Claim as a compare-and-swap via `if_seq_no`/`if_primary_term` — the same optimistic
+      concurrency primitive Q1a picks for the leadership lease. There are no
+      transactions, so "hand this message to exactly one consumer" has to be built from
+      conditional writes
+- [ ] Refresh visibility, which is the trap: a write is not immediately searchable, and
+      the conformance suite assumes read-your-writes throughout (send, then receive).
+      `refresh=wait_for` on writes buys correctness at a latency cost, and where that
+      cost is paid should be a deliberate choice rather than a default nobody chose
+- [ ] `position_of` as a count query (Q7), and `message_counts` as an aggregation cheap
+      enough for M13's scrape interval
+- [ ] `[client_tls]`'s second consumer, plus authentication to the cluster — these are
+      *outbound* credentials, the same category the plan is careful to keep separate from
+      NexQ's own trust root
+- [ ] CI needs a service container for the first time, which **breaks the property every
+      suite has had so far**: no secrets, no services, runs unchanged on a pull request
+      from a fork. Worth keeping the rest of CI free of it rather than accepting the
+      regression everywhere
+- [ ] **Gate: the conformance suite green against a real OpenSearch and a real
+      Elasticsearch, and verified to go red against a broken claim** — a distributed
+      store that cannot fail the suite has not been tested by it
 
-      Attributes NexQ knows but cannot answer — `MessageRetentionPeriod`, `RedrivePolicy`,
-      the FIFO four, the SSE three, `Policy` — are refused with `InvalidAttributeValue`
-      and a reason, rather than `InvalidAttributeName`, since the client has not made a
-      spelling mistake. `All` omits them silently, as with message system attributes.
-
-      New config: `aws_api.region`, default `us-east-1`, used *only* for the region slot
-      in a queue ARN. It is not checked against what a client signs with — any region
-      still works. Verified against the real `aws-cli`.
-
-- [x] `PurgeQueue` — empties a queue and keeps it, taking **in-flight messages with
-      it**, so a consumer holding a receipt handle across a purge finds it invalid. A
-      backend that only deleted what was visible would leave claimed messages to reappear
-      when their claims lapsed, which is a purge that quietly did not purge; the
-      conformance case for it fails against exactly that mutation.
-
-      No rate limit, unlike SQS, which refuses a second purge within sixty seconds with
-      `PurgeQueueInProgress`. That error covers SQS's purge being asynchronous; this one
-      has finished when it answers, so refusing would be a limitation invented for its own
-      sake. Verified: three purges in a row all succeed.
-
-      The only operation logged at `info` rather than `debug`, since it is the one that
-      destroys data irrecoverably — the line carries how many messages went.
-
-- [x] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`, sharing
-      a `batch` module for entry parsing and result rendering. **Partial success is the
-      point**: each entry succeeds or fails on its own, and a batch with one bad entry
-      answers `200` with both `Successful` and `Failed` lists. Verified against the real
-      `aws-cli`.
-
-      Each batch entry runs the *same code* a lone request does — `send_one`,
-      `delete_one`, `change_one` — rather than a second implementation that could drift.
-      A test asserts a batched send and a single send produce the same
-      `MD5OfMessageAttributes`.
-
-      Nothing reaches the engine: batching decomposes into operations it already has.
-      One storage round trip per batch is an optimisation for a backend that can do it,
-      not a change in meaning.
-
-      Five failures reject the whole batch, all about the *list* rather than its
-      contents: `EmptyBatchRequest`, `TooManyEntriesInBatchRequest`,
-      `BatchEntryIdsNotDistinct`, `InvalidBatchEntryId`, `BatchRequestTooLong`. A missing
-      queue joins them — the `QueueUrl` belongs to the request, so ten copies of
-      `QueueDoesNotExist` in a `Failed` list would be worse than one raised error, and
-      SDKs raise on the latter while the former can be silently ignored.
-
-      `SenderFault` is read off the error's status rather than tracked separately: a 4xx
-      *means* the caller was wrong. `VisibilityTimeout` is optional per entry, as SQS's
-      model marks it, falling back to the queue's configured timeout.
-
-- [x] All 23 SQS operations are now recognised, not just the 14 implemented — so
-      `TagQueue` answers `NotImplemented` rather than `UnknownOperationException`, which
-      would send a client looking for a typo it has not made
-- [x] Audit which operations `aws-cli` and the SDKs actually reach for, and stop
-      there — replicating the full API surface is an explicit non-goal.
-
-      Done empirically: every one of SQS's 23 operations has an `aws sqs` subcommand, and
-      all 23 were driven against a running NexQ with well-formed arguments. The 14
-      implemented ones **all work**; the other 9 all answer `NotImplemented` cleanly, so
-      the CLI reports something a human can act on rather than a parse failure.
-
-      The finding that mattered was a negative one: 28 requests arrived, 23 distinct
-      operations, and **exactly the ones asked for**. The CLI makes no implicit calls — no
-      `GetQueueAttributes` behind a receive, no `ListQueues` behind a lookup — so nothing
-      already working secretly depends on an operation that is not built. That is what
-      makes stopping here safe rather than merely convenient.
-
-      Verdict on the remaining 9, by what each would actually need:
-
-      - **Access policies** (`AddPermission`, `RemovePermission`, and the `Policy`
-        attribute) — **not planned**. Implementing them means implementing an
-        IAM-policy evaluator, a second authorization model beside NexQ's own credential
-        registry. Two models deciding the same question is worse than one, so this is a
-        deliberate no rather than a not-yet.
-      - **DLQ and redrive** (`ListDeadLetterSourceQueues`, `StartMessageMoveTask`,
-        `CancelMessageMoveTask`, `ListMessageMoveTasks`) — deferred **with DLQ itself**,
-        which is already on the list after this milestone. They are the API around a
-        feature, not features of their own, and building them first would mean four
-        operations reporting on something that does not exist.
-      - **Tagging** (`TagQueue`, `UntagQueue`, `ListQueueTags`) — the only honest
-        maybe, moved to Future. It needs nothing of the engine, just a string map on a
-        queue, and NexQ would attach no meaning to it. Worth building if
-        infrastructure-as-code support becomes a goal, since a Terraform
-        `aws_sqs_queue` sets tags; worth nothing otherwise.
-
-## ✅ M7 — Lock it in
-
-- [x] Acceptance test that drives a real `aws-cli` against a running NexQ, scripted
-      rather than manual — `cargo xtask acceptance-cli`, or `make acceptance-cli`. Twelve checks
-      covering the queue lifecycle, paging through botocore's own paginator, the
-      produce/consume loop, message and system attributes, long polling, visibility
-      changes, batches with a partial failure, queue attributes and counts, purge,
-      the authentication failures, and `NotImplemented` on a real operation we do not
-      have.
-
-      In `xtask` rather than a shell script so it runs the same way on a laptop as in CI
-      — a script only CI runs is a script that rots. It builds the server itself, finds
-      a free port, waits for the port to answer rather than sleeping, and reports every
-      failing check rather than stopping at the first.
-
-      Deliberately **not** part of `make pre-commit`: it takes about a minute of wall
-      clock, most of it the CLI's own startup cost across ~50 invocations plus the real
-      long-poll waits it has to sit through.
-
-      Checked that it *fails* as well as passes, by breaking three things in turn: a
-      wrong body MD5 (caught by "send, receive, delete"), a long poll that returns at
-      once (caught by "long polling"), and SigV4 accepting any signature (caught by
-      "authentication"). A green acceptance suite that cannot go red is decoration.
-
-- [x] Run it in CI, with `aws-cli` available to the job — its own `acceptance` job.
-      Nothing to install: GitHub's ubuntu runners ship AWS CLI 2.36.24, checked against
-      their published runner manifest rather than assumed, and near-identical to the
-      2.36.30 used locally. **No secrets and no service containers**, since NexQ is its
-      own trust root and the memory backend needs nothing — so it runs on a pull request
-      from a fork exactly as it does locally. The job also prints `aws --version`, so a
-      runner image dropping the CLI fails loudly instead of mysteriously.
-- [x] Repeat the run against at least one AWS SDK in another language, since SDK
-      behavior differs from the CLI's in checksum validation and retries — the AWS SDK
-      for JavaScript, in `acceptance/node/`, run by `cargo xtask acceptance-node` or
-      `make acceptance-node`. Node rather than Python because the CLI _is_ botocore, so a
-      Python SDK would have re-tested the same implementation.
-
-      That worry turned out to be exactly right. **This SDK validates the MD5s and
-      botocore does not**: `SendMessage`, `SendMessageBatch`, and `ReceiveMessage` each
-      recompute the body digest in middleware the client installs by default, and throw
-      rather than return. Confirmed by reading the middleware wiring, then by breaking
-      NexQ's digest and watching it refuse the message with
-      `Invalid MD5 checksum on messages: <ids>`. Until this suite existed, nothing had
-      held NexQ's checksums to a client that checks them — the CLI suite only caught a
-      wrong digest because it asserts the literal value.
-
-      Second finding: the SDK deserialises errors into **typed classes** picked from the
-      `__type` field, so `instanceof QueueDoesNotExist` is a check on the error envelope
-      by something not written against us. Breaking a code turned it into a generic
-      `SQSServiceException`, which the suite caught. Breaking the *namespace* did not —
-      the SDK matches only the part after the `#`, so `com.amazonaws.sqs` is decorative
-      to this client. Worth knowing rather than assuming.
-
-      Seven checks, chosen for where the two clients differ rather than to repeat the CLI
-      suite: the round trip and the batch under MD5 validation, typed errors, long
-      polling against the SDK's own timeouts, its paginator, message attributes with
-      binary sent as bytes rather than pre-encoded base64, and queue attributes with a
-      visibility hand-back. About nine seconds including the install, from a committed
-      lockfile so a run is reproducible. Its own CI job.
-
-- [x] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end. The root
-      README was twenty lines of feature tables with no way in — the setup already
-      existed, but only in the AWS facade's README, which is not where anyone lands.
-
-      Split so the two cannot drift into disagreeing: the root has the shortest path that
-      works — `make server`, four exports, create/send/receive with the real output — plus
-      configuration, what works today, and the development commands. The facade README
-      keeps the fuller version, and now says so at the top: the alternatives to those
-      exports, `aws configure`, `~/.aws/config`, running behind a proxy, and the error
-      table. Every command in the quick start was run as written, and every link checked.
-
-## ✅ M8 - SSL
-
-- [x] Add SSL support to servers — `[aws_api.tls]` with `certificate`, `private_key`, and
-      an optional `client_ca` for mutual TLS, plus `[client_tls]` for the other direction.
-
-      TLS is a different listener and nothing else, via `tls-listener`, which performs
-      handshakes **off the accept path**. The obvious alternative — implementing axum's
-      `Listener` and handshaking inside `accept()` — would have let one client open a
-      connection, say nothing, and stop the server accepting anyone else. Graceful
-      shutdown and the long-poll draining are untouched as a result.
-
-      `ring` rather than the default `aws-lc-rs` provider, since it needs only a C
-      compiler where aws-lc-rs also wants cmake. The provider is named explicitly rather
-      than inferred, because inference works only while exactly one is compiled in and a
-      future dependency enabling a second would turn that into a panic on first
-      connection.
-
-      Certificates load at **startup**: a wrong path, an empty file, two keys in one file,
-      or a key that does not match its certificate stops the server coming up rather than
-      surfacing as a client reporting "handshake failed". The loader lives in
-      `nexq-core::tls` so REST gets the same one, and its error messages name the file and
-      the setting.
-
-      `[client_tls]` is config with **no consumer yet**, and deliberately so — it is for
-      `nexq-client`, the CLI, and later TLS to SQL and search backends. Loaded and
-      validated at startup regardless, and its loader is tested, so the plumbing is known
-      good before anything leans on it.
-
-      Two things worth having found:
-
-      - `openssl req -x509` produces a certificate marked `CA:TRUE`, and rustls refuses to
-        use a CA certificate as an end entity. The first test failed with
-        `CaUsedAsEndEntity`; the fix was a proper authority-plus-leaf chain, which is the
-        realistic shape anyway and exercises chain handling.
-      - Breaking the mTLS gate on purpose made its test **hang** rather than fail — a
-        served keep-alive connection left the read waiting for a close that never came. It
-        now sends `Connection: close` under a timeout, and the same mutation fails in
-        under a second.
-
-      Covered by 8 loader tests, 6 server tests including a real handshake, a real mTLS
-      refusal-and-admission, and a plain-HTTP client getting nothing from a TLS port —
-      plus a TLS check in the CLI acceptance suite where the CLI is told to *trust the
-      authority* rather than skip verification, so the chain has to genuinely check out.
+---
 
 # Future
 
@@ -453,18 +291,6 @@ belongs — see Future for why that is not a timer.
 - `SenderId` on receive, which needs the sending principal recorded on the message.
   Named explicitly it is refused rather than answered with a placeholder, and `All`
   stays silent about it.
-- Message expiry, and the `MessageRetentionPeriod` attribute that reports it. NexQ keeps
-  a message until someone deletes it, so there is no retention period to report and
-  `GetQueueAttributes` refuses the attribute with that as the stated reason. Answering
-  with SQS's four-day default instead would promise an expiry that never comes, and a
-  client relying on it would find its queue growing without limit.
-
-  A real implementation is a sweep rather than a per-message timer, for the same reason
-  the visibility item above is not a timer: the cost should scale with queues, not with
-  messages. It also raises a question NexQ has not had to answer yet — whether an expired
-  message is dropped or sent to a dead-letter queue — so it is worth doing alongside DLQ
-  rather than before it.
-
 - Per-principal authorization — the registry authenticates _who_ a caller is, but
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason
@@ -483,15 +309,18 @@ belongs — see Future for why that is not a timer.
   lapsed claim means a consumer already crashed or hung, next to which 20 seconds is
   noise.
 
-  Also deliberately **not a timer**, which is what this item used to say. A timer would
-  have to fire at every `claim_expires_at`, and in the happy path the consumer acks long
-  before that — so almost every one of those timers would wake a consumer that finds
-  nothing. Its cost would scale with _messages_ while its benefit scales with _waiting
-  consumers on idle queues_, which is backwards. The cheap version is one
-  `Store::next_visible_at` query per long poll that finds the queue empty, sleeping
-  `min(deadline, next visible)`: nothing on the hot path, O(1) per waiting consumer
-  rather than per message, and it needs one new `Store` method — `MIN(visible_at)`,
-  indexable in SQL — plus a conformance case.
+  Also deliberately **not a timer**. A timer would have to fire at every
+  `claim_expires_at`, and in the happy path the consumer acks long before that — so
+  almost every one of those timers would wake a consumer that finds nothing. Its cost
+  would scale with _messages_ while its benefit scales with _waiting consumers on idle
+  queues_, which is backwards. The cheap version is one `Store::next_visible_at` query
+  per long poll that finds the queue empty, sleeping `min(deadline, next visible)`:
+  nothing on the hot path, O(1) per waiting consumer rather than per message, and it
+  needs one new `Store` method — `MIN(visible_at)`, indexable in SQL — plus a
+  conformance case.
+
+  M9 adds a second facade calling the same waiter primitive, which does not change the
+  analysis but does double the number of callers that would benefit.
 
 - `DelaySeconds` precision on a low-volume queue. The feature works, but a delayed
   message is picked up when a waiting consumer next looks rather than when its delay
@@ -501,20 +330,23 @@ belongs — see Future for why that is not a timer.
 
 ---
 
-## After this milestone
+## After these milestones
 
-Rough order, not yet committed — revisit once M1–M7 are done and the facade boundary
-has been exercised for real:
+Rough order, not committed:
 
-1. REST facade with the extended feature set, plus the OpenAPI spec and generated
-   clients
-2. Priority, position-in-queue, and DLQ + redrive in the core engine
-3. Durable backends: SQLite, then Postgres, against the conformance suite
-4. The `nexq` CLI over the generated client
-5. Prometheus metrics; Dockerfile and single-node Helm chart
-6. Multi-node HA: lease election, transparent proxying, rehydration on failover
-7. OpenSearch/Elasticsearch backends
-8. Web UI, then the KEDA external scaler
+1. **M15 — durable backends: SQLite, then Postgres**, against the conformance suite.
+   Below M14 only because the requested order puts the search backends first; see the
+   sequencing note at the top for why pulling it ahead is worth considering.
+2. **SNS facade** — facade-only fan-out per Q11, a publish becoming N enqueues into
+   per-subscriber queues. The core engine never learns pub/sub.
+3. **Multi-node HA** — lease election, transparent proxying, rehydration on failover.
+   Needs a network-accessible backend, so it needs M14 or M15 first.
+4. **Docker image and Helm chart** — both deployment modes as first-class (Q22), and
+   nothing pulled at runtime (Q21).
+5. **The SQS ingest bridge** (Q24) — the forwarding loop is small; the runtime
+   management surface across REST, CLI, and web UI is the bulk of it, which is why it
+   lands after all three exist.
+6. **KEDA external-scaler gRPC service**, once metrics and the engine are stable.
 
 ## Decisions made
 
@@ -528,6 +360,13 @@ has been exercised for real:
   consumer's key can be revoked without touching everyone else's, and the principal
   name already logged on every request identifies who actually made it. NexQ does not
   yet act on _who_ a principal is — see the authorization item under Future.
+- **REST auth: bearer `<key_id>.<secret>`, not SigV4** (Q10b), against the same
+  credential registry. SigV4 exists to satisfy unmodified AWS SDKs and nothing on the
+  REST side is one.
+- **REST framework: Axum + `aide`** (Q18a), so route registration is the spec source.
+  `utoipa` is more adopted but wants a hand-written `#[utoipa::path(...)]` per handler,
+  which is the thing being avoided; `poem-openapi` is more automatic still but means
+  adopting `poem` for the whole project.
 - **Web UI: Angular with [Optimus UI](https://optimus.openng.org/installation)**
   (`ng add @openng/optimus-ui`), which needs Angular v21+ (v22 for Optimus v2) and
   RxJS 7.8.1+. Its component set — forms, tables, panels, charts — covers what the
@@ -537,5 +376,19 @@ has been exercised for real:
 
 ## Decisions still open
 
-- Nothing blocking. Next real fork is per-principal authorization (below), and it is
-  not needed for any milestone through M7.
+Three now, all in M12/M13 and none blocking M9:
+
+- **How the browser authenticates to REST.** The bearer token is a long-lived
+  `<key_id>.<secret>` pair; keeping it in `localStorage` means any XSS is a permanent
+  credential theft rather than a session. A short-lived token exchanged at login, or an
+  `HttpOnly` session cookie for the UI's own origin, are the obvious alternatives, and
+  both add a concept the API does not have yet. Blocks M12, not M9.
+- **Whether `cargo build` may require a Node toolchain.** Q21's air-gapped requirement
+  says no, which leaves an off-by-default `ui` cargo feature or a committed built bundle.
+  The first keeps the repo clean and makes the default build UI-less; the second makes
+  every UI change a binary diff.
+- **Where `/metrics` listens.** A separate port is the convention and here it is also a
+  disclosure question, since the endpoint publishes queue names and depths.
+
+Not blocking: per-principal authorization, still the next real architectural fork, and
+still not needed by anything above.
