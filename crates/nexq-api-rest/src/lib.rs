@@ -13,6 +13,7 @@
 pub mod auth;
 pub mod docs;
 pub mod error;
+pub mod json;
 pub mod messages;
 pub mod server;
 

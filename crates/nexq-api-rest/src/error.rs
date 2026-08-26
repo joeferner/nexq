@@ -84,6 +84,15 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, code, message)
     }
 
+    /// A body was sent, but not in a media type this endpoint reads.
+    pub fn unsupported_media_type(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            message,
+        )
+    }
+
     pub fn not_found(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, code, message)
     }

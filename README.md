@@ -97,7 +97,9 @@ what each one is for.
 
 ## Protocols
 
-- :scroll: [REST](crates/nexq-api-rest/README.md)
+- :ballot_box_with_check: [REST](crates/nexq-api-rest/README.md) — NexQ's own API, and
+  the one the extensions will live behind. The contract, authentication, and documentation
+  are in place; the operation surface is one `receive` so far
 - :ballot_box_with_check: [AWS (SQS/SNS)](crates/nexq-api-aws/README.md)
 
 ## Storage
@@ -113,6 +115,13 @@ consume loop with long polling, visibility timeouts and redelivery, message and 
 attributes, batching, and purge. The remaining 9 are access policies, tagging, and the
 dead-letter queue API — all recognised, so a client calling one is told the operation is
 not built rather than that it does not exist.
+
+NexQ's own REST API runs alongside it on `:8081`, over the same engine — a message sent
+through SQS is receivable through REST, and either facade wakes a consumer long-polling on
+the other. What is there is the machinery rather than the surface: a bearer-token
+listener, HTTPS, one error envelope, long polling, and an OpenAPI document that is
+generated from the routes, committed, and browsable at `/api/v1/docs`. Only `receive` is
+built, so the SQS facade is still the one that can drive a queue end to end.
 
 Storage is in memory, so nothing survives a restart, and a single node. Durable backends
 and clustering are next.

@@ -264,6 +264,9 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       Both directions verified against mutations: a hand edit to the committed file, and a
       code change nobody regenerated after.
 
+      It earned its keep the same day: adding a `415` response to the spec (below) made it
+      fail, which is the reviewable line it exists to produce.
+
       In `make pre-commit` as its own `openapi-check` step, before `test`, so a contract
       change arrives as a named failure rather than as one test among hundreds — and in CI
       the same way. The comparison therefore runs twice, which is deliberate: `cargo test`
@@ -299,6 +302,19 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       Codes are `snake_case` and part of the contract, since a client may branch on one;
       `message` is for a human and may change freely. The fallback answers in the same
       envelope, so a client parsing errors need not special-case a wrong URL.
+
+      **A hole found later, while writing this crate's README.** `Option<Json<T>>` answers a
+      body with the wrong content type or a syntax error *itself*, in plain text —
+      ``Expected request with `Content-Type: application/json` `` — with no status to branch
+      on and no `code`, which is exactly the special case the envelope exists to remove. Found
+      by typing `curl -d '{}'`, which sends `application/x-www-form-urlencoded`.
+
+      Fixed with a `json::OptionalJson` extractor: no `Content-Type` at all is an absent body
+      and the handler's defaults apply, a non-JSON one is `415` naming what to send, and JSON
+      that does not fit is `400` carrying serde's own message — which names the field and the
+      column, so a typo like `visibility_timeout` for `visibility_timeout_seconds` says so.
+      Six tests, and the item was already marked done when this turned up, which is worth
+      remembering about "the envelope is complete".
 
       One variant is treated unlike the rest: a `Backend` failure is the only one that is
       *this server's* fault, so its detail is logged and withheld. A backend error can

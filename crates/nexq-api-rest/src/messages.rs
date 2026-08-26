@@ -26,6 +26,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ErrorBody};
+use crate::json::OptionalJson;
 use crate::server::FacadeState;
 
 /// The queue a request is about.
@@ -168,7 +169,7 @@ impl ReceiveBody {
 pub async fn receive(
     State(facade): State<FacadeState>,
     Path(QueuePath { queue }): Path<QueuePath>,
-    body: Option<Json<ReceiveBody>>,
+    body: OptionalJson<ReceiveBody>,
 ) -> Result<Json<ReceiveResponse>, ApiError> {
     let queue = QueueName::new(queue)?;
     let request = body.unwrap_or_default().to_request()?;
@@ -223,6 +224,9 @@ pub fn receive_docs(mut operation: TransformOperation) -> TransformOperation {
         })
         .response_with::<404, Json<ErrorBody>, _>(|response| {
             response.description("No queue by that name.")
+        })
+        .response_with::<415, Json<ErrorBody>, _>(|response| {
+            response.description("A body was sent as something other than `application/json`.")
         })
 }
 

@@ -84,6 +84,16 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
