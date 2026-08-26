@@ -40,12 +40,17 @@ empty server is the smallest request that exercises all of it.
 - [x] Request routing off `X-Amz-Target`, with JSON body decode — operations are a
       typed enum, so "not built yet" and "no such operation" are distinct answers
 - [ ] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
-      against the client's signature
+      against the client's signature. **Currently signatures are accepted without
+      being checked** — an unsigned request, or one signed with the wrong secret, is
+      served. The server logs a warning at startup saying so; both must stop being
+      true here, and `an_unsigned_request_is_served_for_now` flips to a rejection.
 - [ ] Reject with SQS's own error shapes: `InvalidClientTokenId`,
       `SignatureDoesNotMatch`, and the JSON protocol's `__type` envelope
-- [ ] `ListQueues` returning an empty list
+- [x] `ListQueues` returning an empty list — an empty object, since real SQS omits
+      `QueueUrls` when there are none and `aws sqs list-queues` then prints nothing
 - [ ] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
-      with a bad secret**
+      with a bad secret** — first half done (exit 0, no output, against the real
+      `aws-cli`); the bad-secret half waits on SigV4 verification above
 
 What `aws-cli` 2.36.30 sends for `sqs list-queues`, captured against the facade:
 

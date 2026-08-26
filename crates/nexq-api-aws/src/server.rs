@@ -14,7 +14,7 @@ use axum::routing::any;
 use nexq_core::AwsApiConfig;
 use serde_json::Value;
 use tokio::net::TcpListener;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::error::ApiError;
 use crate::operations;
@@ -60,6 +60,13 @@ impl Server {
         S: Future<Output = ()> + Send + 'static,
     {
         info!(facade = "aws", address = %self.local_addr, "listening");
+        // Loud on purpose, and removed once verification lands: right now anyone who
+        // can reach the port is served, signature or not.
+        warn!(
+            facade = "aws",
+            "requests are NOT authenticated: SigV4 signatures are accepted without \
+             being verified"
+        );
 
         axum::serve(self.listener, self.router)
             .with_graceful_shutdown(shutdown)
@@ -73,6 +80,10 @@ impl Server {
 /// `X-Amz-Target`, so there is one route rather than one per operation. Any method is
 /// accepted so that a misdirected request is answered by the protocol layer, with an
 /// error a client can read, rather than by a bare 405.
+///
+/// There is no authentication layer here yet: clients sign with SigV4 and the
+/// signature is accepted without being checked, so the credential registry is not
+/// consulted and an unsigned request is served just the same.
 pub fn router() -> Router {
     Router::new().route("/", any(handle))
 }
@@ -161,8 +172,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_known_operation_routes_to_its_handler() {
-        let (status, body) = send(Some("AmazonSQS.ListQueues"), "{}").await;
+    async fn a_known_operation_without_a_handler_routes_but_is_not_implemented() {
+        let (status, body) = send(Some("AmazonSQS.SendMessage"), "{}").await;
 
         // Recognised, but not built yet — which is not the same as unknown.
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
@@ -171,9 +182,50 @@ mod tests {
             body["message"]
                 .as_str()
                 .expect("message")
-                .contains("ListQueues"),
+                .contains("SendMessage"),
             "{body}"
         );
+    }
+
+    #[tokio::test]
+    async fn list_queues_succeeds_and_reports_no_queues() {
+        let (status, body) = send(Some("AmazonSQS.ListQueues"), "{}").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn a_successful_response_is_aws_json() {
+        let response = router()
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/")
+                    .header(TARGET_HEADER, "AmazonSQS.ListQueues")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .expect("content type"),
+            JSON_CONTENT_TYPE
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unsigned_request_is_served_for_now() {
+        // No Authorization header at all. This asserts current behavior, not intent —
+        // it must flip to a rejection when SigV4 verification lands.
+        let (status, _) = send(Some("AmazonSQS.ListQueues"), "{}").await;
+
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
@@ -208,7 +260,7 @@ mod tests {
         // Parameterless operations may send nothing rather than `{}`.
         let (status, _) = send(Some("AmazonSQS.ListQueues"), "").await;
 
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
@@ -218,13 +270,14 @@ mod tests {
                 HttpRequest::builder()
                     .method("POST")
                     .uri("/")
-                    .header(TARGET_HEADER, "AmazonSQS.ListQueues")
+                    .header(TARGET_HEADER, "AmazonSQS.Nope")
                     .body(Body::empty())
                     .expect("request"),
             )
             .await
             .expect("response");
 
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             response
                 .headers()
@@ -268,7 +321,7 @@ mod tests {
             .read_to_string(&mut response)
             .await
             .expect("read response");
-        assert!(response.starts_with("HTTP/1.1 501"), "{response}");
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
 
         shutdown_tx.send(()).expect("signal shutdown");
         tokio::time::timeout(Duration::from_secs(5), serving)
