@@ -11,6 +11,7 @@ pub mod error;
 pub mod message_attributes;
 pub mod operations;
 pub mod protocol;
+pub mod queue_attributes;
 pub mod queue_url;
 pub mod server;
 pub mod sigv4;

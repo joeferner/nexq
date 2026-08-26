@@ -55,6 +55,11 @@ macro_rules! conformance_tests {
         // Queue lifecycle.
         $crate::conformance_case!($new_store, a_created_queue_can_be_read_back);
         $crate::conformance_case!($new_store, queue_attributes_survive_a_round_trip);
+        $crate::conformance_case!($new_store, setting_attributes_records_when_it_happened);
+        $crate::conformance_case!($new_store, setting_attributes_replaces_rather_than_merges);
+        $crate::conformance_case!($new_store, message_counts_split_by_visibility);
+        $crate::conformance_case!($new_store, a_lapsed_claim_counts_as_visible_again);
+        $crate::conformance_case!($new_store, an_acked_message_is_counted_nowhere);
         $crate::conformance_case!($new_store, an_empty_store_lists_no_queues);
         $crate::conformance_case!($new_store, every_queue_is_listed);
         $crate::conformance_case!(

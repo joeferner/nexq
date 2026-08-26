@@ -18,12 +18,14 @@
 //! arrive with the operations that need them.
 
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::model::{ClaimedMessage, Message, Queue, QueueName, ReceiptHandle};
+use crate::model::{
+    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+};
 
 /// The result of a storage operation.
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -85,6 +87,25 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
 
     /// Look up a queue, attributes included.
     async fn get_queue(&self, name: &QueueName) -> Result<Queue>;
+
+    /// Replace a queue's attributes, leaving its messages alone.
+    ///
+    /// `modified_at` is passed in rather than read from a clock here so the engine stays
+    /// the one authority on server-set times. It matters once a backend is a database on
+    /// another machine, whose clock need not agree with this one's.
+    async fn set_queue_attributes(
+        &self,
+        name: &QueueName,
+        attributes: QueueAttributes,
+        modified_at: SystemTime,
+    ) -> Result<()>;
+
+    /// How many messages the queue holds, split by visibility.
+    ///
+    /// Separate from [`Store::list_queues`] and [`Store::get_queue`] because it is the
+    /// expensive question: a backend may need to aggregate, where reading a queue's
+    /// record does not. Callers should ask for it only when someone wants the numbers.
+    async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts>;
 
     /// Delete a queue and everything in it.
     async fn delete_queue(&self, name: &QueueName) -> Result<()>;

@@ -11,7 +11,9 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 
-use crate::model::{ClaimedMessage, Message, Queue, QueueName, ReceiptHandle};
+use crate::model::{
+    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+};
 use crate::store::{Result, Store, StoreError};
 
 /// A store that works, backed by a map.
@@ -71,6 +73,44 @@ impl Store for FakeStore {
             .get(name)
             .cloned()
             .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
+    }
+
+    async fn set_queue_attributes(
+        &self,
+        name: &QueueName,
+        attributes: QueueAttributes,
+        modified_at: SystemTime,
+    ) -> Result<()> {
+        let mut queues = self.queues.lock().expect("lock");
+        let held = queues
+            .get_mut(name)
+            .ok_or_else(|| StoreError::QueueNotFound(name.clone()))?;
+
+        held.attributes = attributes;
+        held.last_modified_at = modified_at;
+        Ok(())
+    }
+
+    async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts> {
+        if !self.queues.lock().expect("lock").contains_key(name) {
+            return Err(StoreError::QueueNotFound(name.clone()));
+        }
+
+        let now = SystemTime::now();
+        let messages = self.messages.lock().expect("lock");
+
+        let mut counts = MessageCounts::default();
+        for held in messages.iter().filter(|held| &held.queue == name) {
+            if held.visible_at <= now {
+                counts.visible += 1;
+            } else if held.claim.is_some() {
+                counts.not_visible += 1;
+            } else {
+                counts.delayed += 1;
+            }
+        }
+
+        Ok(counts)
     }
 
     async fn delete_queue(&self, name: &QueueName) -> Result<()> {
@@ -221,6 +261,19 @@ impl Store for BrokenStore {
     }
 
     async fn get_queue(&self, _name: &QueueName) -> Result<Queue> {
+        Err(Self::failure())
+    }
+
+    async fn set_queue_attributes(
+        &self,
+        _name: &QueueName,
+        _attributes: QueueAttributes,
+        _modified_at: SystemTime,
+    ) -> Result<()> {
+        Err(Self::failure())
+    }
+
+    async fn message_counts(&self, _name: &QueueName) -> Result<MessageCounts> {
         Err(Self::failure())
     }
 

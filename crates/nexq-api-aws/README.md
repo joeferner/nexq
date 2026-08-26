@@ -50,7 +50,15 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   deleted between pages cannot make a caller skip or repeat one. A `NextToken` comes
   back whenever more queues remain, even if `MaxResults` was not given — real SQS only
   returns one when it was, but silently truncating at the 1000 cap seemed worse
-- :scroll: `GetQueueAttributes` / `SetQueueAttributes`
+- :ballot_box_with_check: `GetQueueAttributes` — `VisibilityTimeout`, `DelaySeconds`,
+  `ReceiveMessageWaitTimeSeconds`, the three `ApproximateNumberOfMessages*` counts,
+  `CreatedTimestamp`, `LastModifiedTimestamp`, `MaximumMessageSize`, and `QueueArn`.
+  Attributes that describe features NexQ does not have — `MessageRetentionPeriod`,
+  `RedrivePolicy`, the FIFO and encryption sets — are refused with a reason when named,
+  and omitted from `All`
+- :white_check_mark: `SetQueueAttributes` — a partial update, so naming one attribute
+  leaves the rest as they were, and all-or-nothing, so a request that mixes a supported
+  attribute with an unsupported one changes neither
 - :scroll: `PurgeQueue`
 - :scroll: `TagQueue` / `UntagQueue` / `ListQueueTags`
 
@@ -311,6 +319,49 @@ that really is one; and no empty values. Names, types, and values all count towa
 `list-queues` printing nothing means there are no queues — the same as real SQS, which
 omits the field rather than returning an empty list.
 
+## Inspecting and reconfiguring a queue
+
+```sh
+aws sqs get-queue-attributes --queue-url "$QUEUE" --attribute-names All
+# {
+#   "VisibilityTimeout": "120",
+#   "DelaySeconds": "5",
+#   "ReceiveMessageWaitTimeSeconds": "0",
+#   "ApproximateNumberOfMessages": "2",
+#   "ApproximateNumberOfMessagesNotVisible": "1",
+#   "ApproximateNumberOfMessagesDelayed": "1",
+#   "CreatedTimestamp": "1787760116",
+#   "LastModifiedTimestamp": "1787760122",
+#   "MaximumMessageSize": "262144",
+#   "QueueArn": "arn:aws:sqs:us-east-1:000000000000:jobs"
+# }
+
+aws sqs get-queue-attributes --queue-url "$QUEUE" \
+  --attribute-names ApproximateNumberOfMessages
+
+aws sqs set-queue-attributes --queue-url "$QUEUE" --attributes VisibilityTimeout=600
+```
+
+The three counts are disjoint and together cover every message the queue holds:
+**visible** is claimable now, **not visible** is in flight with a live claim, and
+**delayed** is waiting out a `DelaySeconds`. NexQ's numbers are exact rather than
+approximate, but they are reported under SQS's names, and a client should not depend on
+that.
+
+`CreatedTimestamp` and `LastModifiedTimestamp` are epoch **seconds** — note that message
+timestamps such as `SentTimestamp` are milliseconds, which is SQS's inconsistency rather
+than NexQ's. A queue that has never been reconfigured reports the same value for both.
+
+`SetQueueAttributes` changes only the attributes it names, leaving the others alone, and
+is all-or-nothing: a request mixing a supported attribute with an unsupported one is
+refused whole rather than half-applied. Read-only attributes such as `QueueArn` and the
+counts are refused rather than quietly ignored.
+
+Only `VisibilityTimeout`, `DelaySeconds`, and `ReceiveMessageWaitTimeSeconds` can be set,
+because they are the only ones NexQ has behaviour behind. Asking to read something like
+`MessageRetentionPeriod` gets an error saying why — NexQ does not expire messages, so
+reporting SQS's four-day default would promise an expiry that never comes.
+
 ## Queue URLs
 
 Queue URLs are `<public_base_url>/<account_id>/<queue-name>`, and clients send the URL
@@ -327,6 +378,16 @@ public_base_url = "http://nexq.internal:8080"
 The host and scheme of an incoming URL are not checked, so a client reaching NexQ by a
 different route still works. The account id **is** checked, since a URL carrying a
 different one belongs to another deployment.
+
+A queue's ARN, which `GetQueueAttributes` reports, is
+`arn:aws:sqs:<region>:<account_id>:<queue-name>`. `aws_api.region` fills that slot and is
+used for nothing else — in particular it is not compared against the region a client
+signs with, so any region still works:
+
+```toml
+[aws_api]
+region = "eu-west-2"
+```
 
 ## When something is refused
 

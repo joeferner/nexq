@@ -15,7 +15,9 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use nexq_core::model::{ClaimedMessage, Message, Queue, QueueName, ReceiptHandle};
+use nexq_core::model::{
+    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+};
 use nexq_core::store::{Result, Store, StoreError};
 
 /// This backend's name in config.
@@ -141,6 +143,47 @@ impl Store for MemoryStore {
             .get(name)
             .map(|held| held.queue.clone())
             .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
+    }
+
+    async fn set_queue_attributes(
+        &self,
+        name: &QueueName,
+        attributes: QueueAttributes,
+        modified_at: SystemTime,
+    ) -> Result<()> {
+        let mut queues = self.write()?;
+        let held = queues
+            .get_mut(name)
+            .ok_or_else(|| StoreError::QueueNotFound(name.clone()))?;
+
+        held.queue.attributes = attributes;
+        held.queue.last_modified_at = modified_at;
+
+        Ok(())
+    }
+
+    async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts> {
+        let now = SystemTime::now();
+        let queues = self.read()?;
+        let held = queues
+            .get(name)
+            .ok_or_else(|| StoreError::QueueNotFound(name.clone()))?;
+
+        let mut counts = MessageCounts::default();
+        for stored in &held.messages {
+            // The three cases are what `visible_at` and `claim` mean together, and they
+            // are disjoint by construction: either it is claimable now, or it is not —
+            // and if it is not, either someone holds it or it is waiting out a delay.
+            if stored.visible_at <= now {
+                counts.visible += 1;
+            } else if stored.claim.is_some() {
+                counts.not_visible += 1;
+            } else {
+                counts.delayed += 1;
+            }
+        }
+
+        Ok(counts)
     }
 
     async fn delete_queue(&self, name: &QueueName) -> Result<()> {

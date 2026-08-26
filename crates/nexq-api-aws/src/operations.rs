@@ -9,12 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
-use nexq_core::model::{Priority, QueueName, ReceiptHandle};
+use nexq_core::model::{MessageCounts, Priority, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 
 use crate::error::ApiError;
 use crate::message_attributes::Selection;
 use crate::protocol::Operation;
+use crate::queue_attributes::Requested as QueueAttributesRequested;
 use crate::queue_url::QueueUrls;
 use crate::system_attributes::Requested;
 use crate::{attributes, checksum, message_attributes};
@@ -46,6 +47,8 @@ impl Operations {
             Operation::ReceiveMessage => self.receive_message(&input).await,
             Operation::DeleteMessage => self.delete_message(&input).await,
             Operation::ChangeMessageVisibility => self.change_message_visibility(&input).await,
+            Operation::GetQueueAttributes => self.get_queue_attributes(&input).await,
+            Operation::SetQueueAttributes => self.set_queue_attributes(&input).await,
             not_built_yet => Err(ApiError::not_implemented(not_built_yet)),
         }
     }
@@ -119,6 +122,61 @@ impl Operations {
         }
 
         Ok(output)
+    }
+
+    /// `GetQueueAttributes` — a queue's configuration and the facts about it.
+    ///
+    /// Only what `AttributeNames` asks for, since SQS returns an empty result when the
+    /// parameter is absent rather than defaulting to everything.
+    async fn get_queue_attributes(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let name = self.queue_from_url(input)?;
+        let requested = QueueAttributesRequested::from_input(input)?;
+
+        // Still a lookup when nothing was asked for: a client naming a queue that does
+        // not exist should hear about that rather than get a cheerful empty answer.
+        let queue = self.engine.get_queue(&name).await?;
+
+        if requested.is_empty() {
+            return Ok(json!({}));
+        }
+
+        // Counting means aggregating over the queue's messages, so it is only done when
+        // one of the approximate-count attributes was actually asked for.
+        let counts = if requested.needs_counts() {
+            self.engine.message_counts(&name).await?
+        } else {
+            MessageCounts::default()
+        };
+
+        Ok(json!({
+            "Attributes": requested.render(&queue, &counts, &self.queue_urls),
+        }))
+    }
+
+    /// `SetQueueAttributes` — change some of a queue's attributes, leaving the rest.
+    ///
+    /// A partial update, which is why the engine takes a function rather than a finished
+    /// set: naming `VisibilityTimeout` alone must not reset `DelaySeconds` to its
+    /// default. Read-only attributes are refused rather than ignored, so a client that
+    /// tries to set `QueueArn` hears that it cannot instead of believing it did.
+    async fn set_queue_attributes(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let name = self.queue_from_url(input)?;
+
+        // Required here, unlike on `CreateQueue`: a request to change attributes that
+        // names none has not said anything.
+        let Some(requested) = input.get("Attributes").filter(|value| !value.is_null()) else {
+            return Err(ApiError::missing_parameter("Attributes"));
+        };
+
+        // The closure's error is this facade's own, so a rejected attribute comes back
+        // as an `ApiError` and nothing is written.
+        self.engine
+            .set_queue_attributes(&name, |existing| {
+                attributes::apply(existing, Some(requested))
+            })
+            .await?;
+
+        Ok(json!({}))
     }
 
     /// `SendMessage`.
@@ -876,6 +934,317 @@ mod tests {
 
             assert_eq!(error.code(), "InvalidParameterValue", "{value}");
         }
+    }
+
+    /// `GetQueueAttributes` for a queue URL, asking for the given names.
+    async fn attributes_of(operations: &Operations, url: &Value, names: Value) -> Value {
+        call(
+            operations,
+            Operation::GetQueueAttributes,
+            json!({ "QueueUrl": url, "AttributeNames": names }),
+        )
+        .await
+        .expect("get queue attributes")
+    }
+
+    #[tokio::test]
+    async fn get_queue_attributes_reports_what_create_queue_set() {
+        let operations = operations();
+        let url = call(
+            &operations,
+            Operation::CreateQueue,
+            json!({
+                "QueueName": "jobs",
+                "Attributes": { "VisibilityTimeout": "120", "DelaySeconds": "5" },
+            }),
+        )
+        .await
+        .expect("create")["QueueUrl"]
+            .clone();
+
+        let output = attributes_of(&operations, &url, json!(["All"])).await;
+
+        let attributes = output["Attributes"].as_object().expect("attributes");
+        assert_eq!(attributes["VisibilityTimeout"], "120");
+        assert_eq!(attributes["DelaySeconds"], "5");
+        assert_eq!(attributes["ReceiveMessageWaitTimeSeconds"], "0");
+        assert_eq!(
+            attributes["QueueArn"], "arn:aws:sqs:us-east-1:000000000000:jobs",
+            "built from the configured region and account id"
+        );
+        assert_eq!(attributes["MaximumMessageSize"], "262144");
+    }
+
+    #[tokio::test]
+    async fn get_queue_attributes_returns_nothing_when_nothing_was_asked_for() {
+        // SQS: "if you don't specify values for this parameter, the request returns
+        // empty results".
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let output = call(
+            &operations,
+            Operation::GetQueueAttributes,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("get queue attributes");
+
+        assert_eq!(output, json!({}));
+    }
+
+    #[tokio::test]
+    async fn get_queue_attributes_still_checks_the_queue_exists() {
+        // Even with nothing asked for: a client naming a queue that is not there should
+        // hear about it rather than get a cheerful empty answer.
+        let error = call(
+            &operations(),
+            Operation::GetQueueAttributes,
+            json!({ "QueueUrl": "http://localhost:8080/000000000000/nope" }),
+        )
+        .await
+        .expect_err("no such queue");
+
+        assert_eq!(error.code(), "QueueDoesNotExist");
+    }
+
+    #[tokio::test]
+    async fn the_message_counts_track_what_the_queue_holds() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        for body in ["one", "two"] {
+            call(
+                &operations,
+                Operation::SendMessage,
+                json!({ "QueueUrl": url, "MessageBody": body }),
+            )
+            .await
+            .expect("send");
+        }
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "later", "DelaySeconds": 900 }),
+        )
+        .await
+        .expect("send delayed");
+        call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("receive");
+
+        let output = attributes_of(
+            &operations,
+            &url,
+            json!([
+                "ApproximateNumberOfMessages",
+                "ApproximateNumberOfMessagesNotVisible",
+                "ApproximateNumberOfMessagesDelayed",
+            ]),
+        )
+        .await;
+
+        let attributes = &output["Attributes"];
+        assert_eq!(attributes["ApproximateNumberOfMessages"], "1");
+        assert_eq!(attributes["ApproximateNumberOfMessagesNotVisible"], "1");
+        assert_eq!(attributes["ApproximateNumberOfMessagesDelayed"], "1");
+    }
+
+    #[tokio::test]
+    async fn set_queue_attributes_changes_only_what_it_names() {
+        // The whole point of a partial update: naming one attribute must not reset the
+        // others to their defaults.
+        let operations = operations();
+        let url = call(
+            &operations,
+            Operation::CreateQueue,
+            json!({
+                "QueueName": "jobs",
+                "Attributes": { "VisibilityTimeout": "120", "DelaySeconds": "5" },
+            }),
+        )
+        .await
+        .expect("create")["QueueUrl"]
+            .clone();
+
+        let output = call(
+            &operations,
+            Operation::SetQueueAttributes,
+            json!({ "QueueUrl": url, "Attributes": { "VisibilityTimeout": "600" } }),
+        )
+        .await
+        .expect("set queue attributes");
+        assert_eq!(output, json!({}), "SQS answers with an empty body");
+
+        let attributes = attributes_of(&operations, &url, json!(["All"])).await["Attributes"]
+            .as_object()
+            .expect("attributes")
+            .clone();
+        assert_eq!(attributes["VisibilityTimeout"], "600", "changed");
+        assert_eq!(attributes["DelaySeconds"], "5", "left alone");
+    }
+
+    #[tokio::test]
+    async fn set_queue_attributes_takes_effect_on_the_next_receive() {
+        // Not just recorded: the queue has to behave differently afterwards.
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SetQueueAttributes,
+            json!({ "QueueUrl": url, "Attributes": { "DelaySeconds": "900" } }),
+        )
+        .await
+        .expect("set queue attributes");
+
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(
+            received,
+            json!({}),
+            "the new queue-wide delay should be holding it back"
+        );
+    }
+
+    #[tokio::test]
+    async fn setting_attributes_moves_the_modified_timestamp_but_not_the_created_one() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        let before = attributes_of(
+            &operations,
+            &url,
+            json!(["CreatedTimestamp", "LastModifiedTimestamp"]),
+        )
+        .await;
+        assert_eq!(
+            before["Attributes"]["CreatedTimestamp"], before["Attributes"]["LastModifiedTimestamp"],
+            "a queue that has never been changed reports the same time for both"
+        );
+
+        call(
+            &operations,
+            Operation::SetQueueAttributes,
+            json!({ "QueueUrl": url, "Attributes": { "VisibilityTimeout": "600" } }),
+        )
+        .await
+        .expect("set queue attributes");
+
+        let after = attributes_of(
+            &operations,
+            &url,
+            json!(["CreatedTimestamp", "LastModifiedTimestamp"]),
+        )
+        .await;
+        assert_eq!(
+            after["Attributes"]["CreatedTimestamp"], before["Attributes"]["CreatedTimestamp"],
+            "changing attributes is not recreating the queue"
+        );
+        // Both are whole seconds, so a fast test may not advance the clock past one —
+        // what must hold is that it never goes backwards.
+        let created: u64 = after["Attributes"]["CreatedTimestamp"]
+            .as_str()
+            .expect("string")
+            .parse()
+            .expect("epoch seconds");
+        let modified: u64 = after["Attributes"]["LastModifiedTimestamp"]
+            .as_str()
+            .expect("string")
+            .parse()
+            .expect("epoch seconds");
+        assert!(modified >= created, "{modified} < {created}");
+    }
+
+    #[tokio::test]
+    async fn set_queue_attributes_refuses_what_it_cannot_change() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        for (input, expected) in [
+            // Nothing named at all: a change request that says nothing.
+            (json!({ "QueueUrl": url }), "MissingParameter"),
+            // Read-only, so accepting it would let a client believe it had renamed a
+            // queue or moved its ARN.
+            (
+                json!({ "QueueUrl": url, "Attributes": { "QueueArn": "arn:aws:sqs:x:y:z" } }),
+                "InvalidAttributeName",
+            ),
+            (
+                json!({ "QueueUrl": url,
+                        "Attributes": { "ApproximateNumberOfMessages": "0" } }),
+                "InvalidAttributeName",
+            ),
+            (
+                json!({ "QueueUrl": url, "Attributes": { "CreatedTimestamp": "0" } }),
+                "InvalidAttributeName",
+            ),
+            // Not supported, and silently dropping it would promise FIFO ordering.
+            (
+                json!({ "QueueUrl": url, "Attributes": { "FifoQueue": "true" } }),
+                "InvalidAttributeName",
+            ),
+            (
+                json!({ "QueueUrl": url, "Attributes": { "VisibilityTimeout": "43201" } }),
+                "InvalidAttributeValue",
+            ),
+        ] {
+            let error = call(&operations, Operation::SetQueueAttributes, input.clone())
+                .await
+                .expect_err(&input.to_string());
+
+            assert_eq!(error.code(), expected, "{input}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_change_leaves_the_queue_alone() {
+        let operations = operations();
+        let url = call(
+            &operations,
+            Operation::CreateQueue,
+            json!({ "QueueName": "jobs", "Attributes": { "VisibilityTimeout": "120" } }),
+        )
+        .await
+        .expect("create")["QueueUrl"]
+            .clone();
+
+        // One good attribute and one bad one in the same request.
+        call(
+            &operations,
+            Operation::SetQueueAttributes,
+            json!({
+                "QueueUrl": url,
+                "Attributes": { "DelaySeconds": "30", "FifoQueue": "true" },
+            }),
+        )
+        .await
+        .expect_err("FifoQueue is not supported");
+
+        let attributes = attributes_of(&operations, &url, json!(["All"])).await["Attributes"]
+            .as_object()
+            .expect("attributes")
+            .clone();
+        assert_eq!(
+            attributes["DelaySeconds"], "0",
+            "a refused request must be all-or-nothing, not partly applied"
+        );
+        assert_eq!(attributes["VisibilityTimeout"], "120");
     }
 
     #[tokio::test]

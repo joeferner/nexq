@@ -60,7 +60,41 @@ pub enum InvalidQueueName {
 pub struct Queue {
     pub name: QueueName,
     pub created_at: SystemTime,
+
+    /// When the queue's attributes were last changed, or when it was created if they
+    /// never have been. Separate from [`Queue::created_at`] because clients ask which
+    /// of the two they are looking at, and answering with the creation time for both
+    /// would be a plausible-looking lie.
+    pub last_modified_at: SystemTime,
+
     pub attributes: QueueAttributes,
+}
+
+/// How many messages a queue holds, split by whether anyone can have them.
+///
+/// The three counts are disjoint and together cover everything stored, so a queue's
+/// total is their sum. SQS calls each of them *approximate* because its own numbers lag
+/// behind reality by up to a minute; a NexQ backend may be exact, and reporting an exact
+/// answer where an approximate one was asked for is always allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MessageCounts {
+    /// Claimable right now.
+    pub visible: u64,
+
+    /// In flight: handed to a consumer whose claim has not expired, and not yet deleted.
+    pub not_visible: u64,
+
+    /// Waiting out a delay, and never yet delivered.
+    pub delayed: u64,
+}
+
+impl MessageCounts {
+    /// Every message the queue holds, whoever can see it.
+    pub fn total(&self) -> u64 {
+        self.visible
+            .saturating_add(self.not_visible)
+            .saturating_add(self.delayed)
+    }
 }
 
 /// The knobs that change how a queue behaves.
@@ -219,11 +253,14 @@ impl FromStr for QueueName {
 }
 
 impl Queue {
-    /// A queue with default attributes, created now.
+    /// A queue with default attributes, created now and never since modified.
     pub fn new(name: QueueName) -> Self {
+        let now = SystemTime::now();
+
         Self {
             name,
-            created_at: SystemTime::now(),
+            created_at: now,
+            last_modified_at: now,
             attributes: QueueAttributes::default(),
         }
     }

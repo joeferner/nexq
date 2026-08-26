@@ -27,6 +27,7 @@ secret = "change-me"
 # bind_addr = "0.0.0.0:8080"
 # public_base_url = "http://localhost:8080"   # what queue URLs are built from
 # account_id = "000000000000"
+# region = "us-east-1"                        # only used to build queue ARNs
 # max_clock_skew_secs = 900
 #
 # max_clock_skew_secs is how far a request's signed timestamp may be from this
@@ -41,3 +42,8 @@ secret = "change-me"
 # fills that slot. It must be exactly 12 digits; any value works, and the all-zero
 # default is the one LocalStack uses. Set it before clients start caching queue URLs —
 # changing it later makes the URLs they already hold invalid.
+#
+# region fills the same kind of slot in a queue ARN, which GetQueueAttributes reports
+# as "arn:aws:sqs:<region>:<account_id>:<queue-name>". It is not checked against the
+# region a client signs with — SigV4 only needs signer and verifier to agree, so any
+# region has always worked and still does.

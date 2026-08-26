@@ -29,8 +29,8 @@ use thiserror::Error;
 use tokio::time::{Instant, timeout};
 
 use crate::model::{
-    ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, Priority, Queue, QueueAttributes,
-    QueueName, ReceiptHandle,
+    ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, MessageCounts, Priority, Queue,
+    QueueAttributes, QueueName, ReceiptHandle,
 };
 use crate::store::{Store, StoreError};
 use crate::waiters::Waiters;
@@ -205,9 +205,12 @@ impl Engine {
         attributes: QueueAttributes,
     ) -> Result<Queue> {
         for _ in 0..CREATE_ATTEMPTS {
+            let created_at = SystemTime::now();
             let queue = Queue {
                 name: name.clone(),
-                created_at: SystemTime::now(),
+                created_at,
+                // Never modified, so the two agree until something changes it.
+                last_modified_at: created_at,
                 attributes: attributes.clone(),
             };
 
@@ -241,6 +244,57 @@ impl Engine {
     /// Look up a queue.
     pub async fn get_queue(&self, name: &QueueName) -> Result<Queue> {
         Ok(self.store.get_queue(name).await?)
+    }
+
+    /// Change a queue's attributes, returning it as stored.
+    ///
+    /// `change` is handed the queue's current attributes and returns what they should
+    /// become, which is how a caller applies a *partial* update — SQS's
+    /// `SetQueueAttributes` names only the attributes it wants changed, and the rest
+    /// have to be left as they are rather than reset to defaults.
+    ///
+    /// `last_modified_at` is stamped here, not taken from the caller, for the same
+    /// reason a queue's creation time is: it records when the server accepted the
+    /// change.
+    ///
+    /// Read-modify-write, so two changes racing on one queue end with one of them
+    /// winning whole rather than the two being merged. Reconfiguring a queue is a rare,
+    /// deliberate act, and the machinery to do better — a compare-and-swap through every
+    /// backend — would cost more than the problem is worth.
+    ///
+    /// `change` may fail with an error of its own — a facade rejecting an attribute it
+    /// does not support, say — so the error type is the caller's as long as engine
+    /// failures can convert into it. That is what stops a facade having to smuggle its
+    /// own error out through a storage-shaped one.
+    pub async fn set_queue_attributes<F, E>(
+        &self,
+        name: &QueueName,
+        change: F,
+    ) -> std::result::Result<Queue, E>
+    where
+        F: FnOnce(QueueAttributes) -> std::result::Result<QueueAttributes, E>,
+        E: From<EngineError>,
+    {
+        let existing = self.get_queue(name).await.map_err(E::from)?;
+        let attributes = change(existing.attributes)?;
+        let modified_at = SystemTime::now();
+
+        self.store
+            .set_queue_attributes(name, attributes.clone(), modified_at)
+            .await
+            .map_err(EngineError::from)
+            .map_err(E::from)?;
+
+        Ok(Queue {
+            attributes,
+            last_modified_at: modified_at,
+            ..existing
+        })
+    }
+
+    /// How many messages a queue holds, split by visibility.
+    pub async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts> {
+        Ok(self.store.message_counts(name).await?)
     }
 
     /// Delete a queue and everything in it.
@@ -1874,6 +1928,21 @@ mod tests {
 
         async fn get_queue(&self, name: &QueueName) -> StoreResult<Queue> {
             self.inner.get_queue(name).await
+        }
+
+        async fn set_queue_attributes(
+            &self,
+            name: &QueueName,
+            attributes: QueueAttributes,
+            modified_at: SystemTime,
+        ) -> StoreResult<()> {
+            self.inner
+                .set_queue_attributes(name, attributes, modified_at)
+                .await
+        }
+
+        async fn message_counts(&self, name: &QueueName) -> StoreResult<MessageCounts> {
+            self.inner.message_counts(name).await
         }
 
         async fn delete_queue(&self, name: &QueueName) -> StoreResult<()> {

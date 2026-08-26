@@ -95,6 +95,155 @@ pub async fn queue_attributes_survive_a_round_trip(store: Arc<dyn Store>) {
     assert_eq!(found.attributes, expected.attributes);
 }
 
+/// Setting attributes replaces them and stamps the modification, leaving the rest of
+/// the queue — its creation time above all — alone.
+pub async fn setting_attributes_records_when_it_happened(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let before = store.get_queue(&queue_name).await.expect("get");
+
+    let modified_at = before.created_at + Duration::from_secs(60);
+    let changed = QueueAttributes {
+        visibility_timeout: Duration::from_secs(600),
+        delay: Duration::from_secs(9),
+        ..QueueAttributes::default()
+    };
+    store
+        .set_queue_attributes(&queue_name, changed.clone(), modified_at)
+        .await
+        .expect("set attributes");
+
+    let after = store.get_queue(&queue_name).await.expect("get");
+
+    assert_eq!(after.attributes, changed);
+    assert_eq!(
+        after.last_modified_at, modified_at,
+        "the timestamp the caller gave, not one the backend invented"
+    );
+    assert_eq!(
+        after.created_at, before.created_at,
+        "changing attributes must not look like recreating the queue"
+    );
+}
+
+/// Attributes are replaced wholesale, so a value left out of the new set goes back to
+/// whatever the caller put there — merging is the engine's job, not a backend's.
+pub async fn setting_attributes_replaces_rather_than_merges(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .set_queue_attributes(
+            &queue_name,
+            QueueAttributes {
+                visibility_timeout: Duration::from_secs(600),
+                delay: Duration::from_secs(9),
+                ..QueueAttributes::default()
+            },
+            SystemTime::now(),
+        )
+        .await
+        .expect("set attributes");
+
+    store
+        .set_queue_attributes(&queue_name, QueueAttributes::default(), SystemTime::now())
+        .await
+        .expect("set attributes again");
+
+    assert_eq!(
+        store.get_queue(&queue_name).await.expect("get").attributes,
+        QueueAttributes::default()
+    );
+}
+
+/// Messages sort into exactly one of visible, in flight, and delayed.
+///
+/// The three feed `GetQueueAttributes`, and being wrong about which bucket a message is
+/// in makes a queue look either idle or backed up when it is neither.
+pub async fn message_counts_split_by_visibility(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+
+    assert_eq!(
+        store.message_counts(&queue_name).await.expect("counts"),
+        nexq_core::model::MessageCounts::default(),
+        "an empty queue counts zero of everything"
+    );
+
+    // Two claimable, one delayed well past the end of the test, one claimed and held.
+    for body in ["visible-one", "visible-two", "to-be-claimed"] {
+        store
+            .enqueue(&queue_name, message(body, 0), None)
+            .await
+            .expect("enqueue");
+    }
+    store
+        .enqueue(
+            &queue_name,
+            message("delayed", 0),
+            Some(Duration::from_secs(3600)),
+        )
+        .await
+        .expect("enqueue delayed");
+    store
+        .claim_next(&queue_name, Some(Duration::from_secs(3600)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    let counts = store.message_counts(&queue_name).await.expect("counts");
+
+    assert_eq!(counts.visible, 2, "{counts:?}");
+    assert_eq!(counts.not_visible, 1, "the claim is still live: {counts:?}");
+    assert_eq!(counts.delayed, 1, "{counts:?}");
+    assert_eq!(counts.total(), 4, "and the three cover everything stored");
+}
+
+/// A claim lapsing moves a message from in flight back to visible, with no other call.
+pub async fn a_lapsed_claim_counts_as_visible_again(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    store
+        .claim_next(&queue_name, Some(SHORT_CLAIM))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    let held = store.message_counts(&queue_name).await.expect("counts");
+    assert_eq!(held.not_visible, 1, "{held:?}");
+    assert_eq!(held.visible, 0, "{held:?}");
+
+    tokio::time::sleep(AFTER_SHORT_CLAIM).await;
+    let lapsed = store.message_counts(&queue_name).await.expect("counts");
+
+    assert_eq!(lapsed.visible, 1, "the claim lapsed: {lapsed:?}");
+    assert_eq!(lapsed.not_visible, 0, "{lapsed:?}");
+}
+
+/// Deleting a message takes it out of the counts entirely.
+pub async fn an_acked_message_is_counted_nowhere(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    store.ack(&queue_name, &claimed.receipt).await.expect("ack");
+
+    assert_eq!(
+        store
+            .message_counts(&queue_name)
+            .await
+            .expect("counts")
+            .total(),
+        0
+    );
+}
+
 pub async fn an_empty_store_lists_no_queues(store: Arc<dyn Store>) {
     assert!(store.list_queues().await.expect("list").is_empty());
 }
@@ -233,6 +382,14 @@ pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
                 .await
                 .err(),
         ),
+        (
+            "set_queue_attributes",
+            store
+                .set_queue_attributes(&missing, QueueAttributes::default(), SystemTime::now())
+                .await
+                .err(),
+        ),
+        ("message_counts", store.message_counts(&missing).await.err()),
     ];
 
     for (operation, error) in errors {

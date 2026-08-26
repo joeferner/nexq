@@ -227,8 +227,31 @@ belongs — see Future for why that is not a timer.
 
 ## M6 — The rest of what the CLI commonly exercises
 
-- [ ] `GetQueueAttributes` / `SetQueueAttributes`, including the approximate-count
-      attributes
+- [x] `GetQueueAttributes` / `SetQueueAttributes`, including the approximate-count
+      attributes. Ten reported under `All`: the three settable ones, the three counts,
+      `CreatedTimestamp`, `LastModifiedTimestamp`, `MaximumMessageSize`, and `QueueArn`.
+
+      `SetQueueAttributes` is a genuine partial update — naming `VisibilityTimeout` does
+      not reset `DelaySeconds` — and is all-or-nothing, so a request mixing a good
+      attribute with a bad one changes neither. Read-only attributes are refused rather
+      than ignored.
+
+      Timestamps are epoch **seconds** here, where a message's are milliseconds; the same
+      codebase now does both, so there is a test naming the distinction. `Queue` gained
+      `last_modified_at`, since reporting the creation time for both would have been a
+      plausible-looking lie.
+
+      Attributes NexQ knows but cannot answer — `MessageRetentionPeriod`, `RedrivePolicy`,
+      the FIFO four, the SSE three, `Policy` — are refused with `InvalidAttributeValue`
+      and a reason, rather than `InvalidAttributeName`, since the client has not made a
+      spelling mistake. `All` omits them silently, as with message system attributes.
+
+      New config: `aws_api.region`, default `us-east-1`, used *only* for the region slot
+      in a queue ARN. It is not checked against what a client signs with — any region
+      still works. Verified against the real `aws-cli`.
+- [ ] `MessageRetentionPeriod` — needs message expiry, which NexQ does not do at all.
+      Currently refused with that as the stated reason rather than answered with SQS's
+      four-day default, which would promise expiry that never happens
 - [ ] `PurgeQueue`
 - [ ] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`
 - [ ] Message attributes, with their own MD5

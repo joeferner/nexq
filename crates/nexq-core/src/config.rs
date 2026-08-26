@@ -147,6 +147,20 @@ pub struct AwsApiConfig {
     )]
     pub account_id: String,
 
+    /// Region name used to build queue ARNs, defaulting to [`DEFAULT_REGION`].
+    ///
+    /// Used for **nothing else**. In particular it is not checked against the region a
+    /// client signs with: SigV4 only needs signer and verifier to agree on a string, so
+    /// any region works and always has. This exists because an ARN has a region-shaped
+    /// slot in it — `arn:aws:sqs:<region>:<account-id>:<queue-name>` — and
+    /// `GetQueueAttributes` has to put something there.
+    ///
+    /// Deriving it from each request's signature instead would mean two clients using
+    /// different regions saw different ARNs for one queue, which is worse than a value
+    /// an operator sets once.
+    #[serde(default = "AwsApiConfig::default_region")]
+    pub region: String,
+
     /// How far a request's signing timestamp may be from this server's clock before it
     /// is refused, in seconds. Defaults to [`DEFAULT_MAX_CLOCK_SKEW_SECS`].
     ///
@@ -185,6 +199,12 @@ pub const DEFAULT_MAX_CLOCK_SKEW_SECS: u64 = 15 * 60;
 /// NexQ has no accounts and never interprets this — but see
 /// [`AwsApiConfig::account_id`] before changing it on a running deployment.
 pub const DEFAULT_ACCOUNT_ID: &str = "000000000000";
+
+/// Region used in queue ARNs when config does not say. See [`AwsApiConfig::region`].
+///
+/// AWS's own default region in most tooling, so it is the least surprising thing to find
+/// in an ARN from a server that has no opinion about regions.
+pub const DEFAULT_REGION: &str = "us-east-1";
 
 /// Deserialize an account id that may arrive already parsed as a number.
 ///
@@ -272,6 +292,16 @@ impl Config {
             .into());
         }
 
+        // An empty region would produce `arn:aws:sqs::000000000000:jobs`, which parses
+        // as an ARN with no region and would quietly mislead anything reading it.
+        if self.aws_api.region.trim().is_empty() {
+            return Err(
+                "aws_api.region must not be empty: it names the region slot in \
+                        queue ARNs"
+                    .into(),
+            );
+        }
+
         if self.auth.credentials.is_empty() {
             return Err("auth.credentials must contain at least one entry"
                 .to_owned()
@@ -342,6 +372,10 @@ impl AwsApiConfig {
         DEFAULT_ACCOUNT_ID.to_owned()
     }
 
+    fn default_region() -> String {
+        DEFAULT_REGION.to_owned()
+    }
+
     fn default_max_clock_skew_secs() -> u64 {
         DEFAULT_MAX_CLOCK_SKEW_SECS
     }
@@ -368,6 +402,7 @@ impl Default for AwsApiConfig {
             bind_addr: Self::default_bind_addr(),
             public_base_url: Self::default_public_base_url(),
             account_id: Self::default_account_id(),
+            region: Self::default_region(),
             max_clock_skew_secs: Self::default_max_clock_skew_secs(),
         }
     }

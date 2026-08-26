@@ -37,13 +37,23 @@ pub const DELAY_SECONDS_MAX: u64 = 15 * 60;
 /// Longest long-poll wait SQS accepts: 20 seconds.
 pub const RECEIVE_WAIT_TIME_MAX: u64 = 20;
 
-/// Read a `CreateQueue`-style attribute map.
+/// Read a `CreateQueue`-style attribute map, starting from the defaults.
 ///
 /// A missing map means "all defaults", which is what `aws sqs create-queue` with no
 /// `--attributes` sends.
 pub fn from_input(input: Option<&Value>) -> Result<QueueAttributes, ApiError> {
-    let mut attributes = QueueAttributes::default();
+    apply(QueueAttributes::default(), input)
+}
 
+/// Apply an attribute map onto attributes a queue already has.
+///
+/// What `SetQueueAttributes` needs: it names only the attributes it wants changed, and
+/// the rest have to keep their current values rather than being reset to defaults. That
+/// makes `from_input` the special case where "already has" means "the defaults".
+pub fn apply(
+    mut attributes: QueueAttributes,
+    input: Option<&Value>,
+) -> Result<QueueAttributes, ApiError> {
     let Some(value) = input else {
         return Ok(attributes);
     };
@@ -72,7 +82,15 @@ pub fn from_input(input: Option<&Value>) -> Result<QueueAttributes, ApiError> {
     Ok(attributes)
 }
 
-/// Render attributes back out in SQS's string-to-string form.
+/// Whether this is an attribute a client may set, and which this module handles.
+///
+/// The read side needs to ask, so it can tell a settable attribute from one it derives
+/// itself — see [`crate::queue_attributes`].
+pub fn is_settable(name: &str) -> bool {
+    matches!(name, VISIBILITY_TIMEOUT | DELAY_SECONDS | RECEIVE_WAIT_TIME)
+}
+
+/// Render the settable attributes in SQS's string-to-string form.
 pub fn to_output(attributes: &QueueAttributes) -> Map<String, Value> {
     let mut map = Map::new();
 

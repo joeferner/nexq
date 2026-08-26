@@ -25,6 +25,7 @@ pub struct QueueUrls {
     /// prefix, if NexQ is served under one.
     base_url: String,
     account_id: String,
+    region: String,
 }
 
 impl QueueUrls {
@@ -32,12 +33,26 @@ impl QueueUrls {
         Self {
             base_url: config.base_url().to_owned(),
             account_id: config.account_id.clone(),
+            region: config.region.clone(),
         }
     }
 
     /// The URL to report for a queue, and the one clients will send back.
     pub fn for_queue(&self, name: &QueueName) -> String {
         format!("{}/{}/{}", self.base_url, self.account_id, name)
+    }
+
+    /// The queue's ARN, as `GetQueueAttributes` reports it.
+    ///
+    /// Built rather than stored: an ARN is a rendering of the queue's name plus this
+    /// deployment's identity, so keeping one on the queue record would let it go stale
+    /// the moment config changed.
+    ///
+    /// The partition stays `aws` even though nothing here is AWS, because clients parse
+    /// these by position and an unfamiliar partition is more likely to break them than
+    /// an inaccurate one is to inform them.
+    pub fn arn_for_queue(&self, name: &QueueName) -> String {
+        format!("arn:aws:sqs:{}:{}:{}", self.region, self.account_id, name)
     }
 
     /// Read the queue name out of a URL a client sent.
