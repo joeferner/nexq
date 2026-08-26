@@ -53,11 +53,21 @@ async fn run() -> Result<(), BoxError> {
     let (shutdown_tx, _) = watch::channel(false);
     let mut facades = JoinSet::new();
 
+    // Each facade gets the *same* `auth` and `engine`, which is the whole point: a
+    // message sent through one is receivable through the other, because there is one
+    // queue underneath and not one per protocol.
     if config.aws_api.enabled {
         // Bind before spawning, so a port conflict fails startup rather than
         // surfacing later from inside a task.
         let server =
             nexq_api_aws::Server::bind(&config.aws_api, Arc::clone(&auth), Arc::clone(&engine))
+                .await?;
+        facades.spawn(server.serve(shutdown_on(shutdown_tx.subscribe())));
+    }
+
+    if config.rest_api.enabled {
+        let server =
+            nexq_api_rest::Server::bind(&config.rest_api, Arc::clone(&auth), Arc::clone(&engine))
                 .await?;
         facades.spawn(server.serve(shutdown_on(shutdown_tx.subscribe())));
     }

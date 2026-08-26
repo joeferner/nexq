@@ -8,7 +8,25 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axum = { workspace = true }
 nexq-core = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tls-listener = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+# Test-only, both of them. Lets facade tests run against a real engine and backend, and
+# lets `tests/cross_facade.rs` send a message through the *other* facade — only that crate
+# can produce a SigV4 signature its own verifier accepts. No cycle: all three depend on
+# nexq-core, and none depends on this one.
+nexq-api-aws = { workspace = true }
+nexq-store-memory = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tower = { workspace = true }
 
 [lints]
 workspace = true

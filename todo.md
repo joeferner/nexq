@@ -97,14 +97,57 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       7 tests. The three that carry the weight were each checked to go red against a
       deliberate mutation: the clash check removed, the default port moved onto 8080, and
       the REST certificate error made to name `aws_api`.
-- [ ] Both facades in one process, over one `Engine` — a message sent over SQS must be
-      receivable over REST, with a test saying so. `nexq-server`'s `JoinSet` supervisor
-      already runs one listener; two is the case it was written for
-- [ ] Bearer auth: `<key_id>.<secret>` against the same credential registry the SQS
-      facade signs against, per Q10b and the promise already made in
-      [nexq.example.toml](nexq.example.toml). Constant-time comparison of the secret, and
-      a `401` carrying `WWW-Authenticate: Bearer`. Deliberately not SigV4 — that
-      constraint exists only to satisfy unmodified AWS SDKs, and nothing here is one
+- [x] Both facades in one process, over one `Engine`. `nexq-server` binds both when both
+      are enabled, handing each the *same* `auth` and `engine`, and
+      `nexq-api-rest/tests/cross_facade.rs` proves what that buys over real sockets:
+      created and sent through the SQS facade with a genuine SigV4 signature, then received
+      through REST — asserting the **message id**, not just the body, so it is the same
+      message rather than a lookalike.
+
+      Three more claims, because shared state is weaker than it sounds. **A message claimed
+      over REST is invisible to SQS** — two facades could read one store and still both
+      hand out the same message. **An SQS send wakes a REST long poll**, which is the
+      strongest available proof the waiter registry is shared rather than duplicated.
+      **Neither facade serves the other's routes**, and the refusal is routing rather than
+      authentication, so a 404 there is not evidence a token was accepted.
+
+      Deliberately not `oneshot` against the routers: two bound listeners is the claim, and
+      a test that skipped the sockets would pass even if `nexq-server` never bound the
+      second one. Verified by giving REST its own engine, which fails four of the five.
+
+      What no test covers is `main.rs` itself, since it is a binary with no test target.
+      Checked by hand — both `listening` lines appear, REST answers `401` without a token
+      and `queue_not_found` with the real one from `nexq.toml` — and automating it belongs
+      to the acceptance-suite item below.
+
+- [x] Bearer auth: `<key_id>.<secret>` against the same credential registry the SQS facade
+      signs against, per Q10b and the promise already made in
+      [nexq.example.toml](nexq.example.toml). Constant-time comparison of the secret, and a
+      `401` carrying `WWW-Authenticate: Bearer`. Not SigV4 — that constraint exists only to
+      satisfy unmodified AWS SDKs, and nothing here is one.
+
+      **Brought forward from below its place in this list**, because the item above could
+      not ship safely without it: a receive endpoint is a queue-draining endpoint, and
+      `rest_api.enabled` defaults to true. A supervisor that bound an unauthenticated one
+      would have put "anyone on the network can drain your queues" into the default config
+      for as long as it took to reach this line.
+
+      A `layer` rather than a per-handler extractor, so adding a route cannot accidentally
+      add an unauthenticated one. **One `401` for both an unknown key id and a wrong
+      secret**, unlike the SQS facade's `InvalidClientTokenId` versus
+      `SignatureDoesNotMatch`: that facade must distinguish them because AWS clients report
+      on the distinction, this one has no such obligation, and not distinguishing them
+      means a caller cannot enumerate which key ids exist. A test asserts the two responses
+      are identical.
+
+      The comparison's limits are written down rather than implied: length is still
+      compared first, and an optimizer could in principle undo the loop. That is the trade
+      for not adding a `subtle` dependency, and the length of a secret is not the secret.
+
+      Also documented where it matters: the token is presented in full on every request, so
+      unlike SigV4 — where a signature covers one request and the secret never crosses the
+      wire — anyone who can read the traffic can replay it. That is why `[rest_api.tls]`
+      exists.
 - [ ] Axum + `aide`: `ApiRouter`, and `#[derive(JsonSchema)]` beside the existing
       `Serialize`/`Deserialize`, so route registration *is* the documentation source. The
       alternative considered and rejected in Q18a was `utoipa`, whose per-handler
@@ -116,16 +159,54 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       rather than a queue URL in a parameter — the URL-as-identifier is an AWS artifact
       that exists because SQS has accounts and regions to encode. Paging keeps the M2
       cursor tokens, since keyset paging is the store's guarantee and not a wire detail
-- [ ] One error envelope: HTTP status, a stable machine-readable code, and a message.
-      Distinct from the SQS facade's `__type` shape and mapped from the same
-      `EngineError` values, so the two facades cannot disagree about what went wrong
+
+      Settled already, since the one existing route had to choose: every route lives under
+      **`/api/v1`**, held in `server::API_PREFIX` and applied by `Router::nest` so it is
+      written once and a route cannot be added outside it by accident. Versioned because a
+      generated client's base path should not have to change the first time the API does;
+      under `/api` as well because the SPA will be served from the same origin and will want
+      `/` and its own asset paths, and a queue named `assets` must not be able to collide
+      with them. Tests spell the literal path rather than building it from the constant, so
+      changing the prefix is a failing test rather than a silent break — six of them fail on
+      a mutation back to bare `/v1`.
+
+      Still open here: the rest of the surface, and paging, which has no route to page yet.
+- [x] One error envelope: HTTP status, a stable machine-readable code, and a message,
+      nested under `error` so a successful response and a failed one can never be told
+      apart only by which fields happen to be present. Distinct from the SQS facade's
+      `__type` shape, and mapped from the same `EngineError` values — every variant, so the
+      two facades cannot disagree about what went wrong.
+
+      ```json
+      { "error": { "code": "queue_not_found", "message": "no queue named jobs" } }
+      ```
+
+      Codes are `snake_case` and part of the contract, since a client may branch on one;
+      `message` is for a human and may change freely. The fallback answers in the same
+      envelope, so a client parsing errors need not special-case a wrong URL.
+
+      One variant is treated unlike the rest: a `Backend` failure is the only one that is
+      *this server's* fault, so its detail is logged and withheld. A backend error can
+      carry hosts, paths, or credentials, none of which belong in a response — there is a
+      test that a `postgres://user:hunter2@db` connection string does not reach the client.
 - [ ] Parity surface: create/get/list/delete queue, get and set attributes, purge,
       send/receive/delete/change-visibility, and the three batch operations. Idempotent
       creation is inherited from the engine rather than re-decided
-- [ ] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
-      mechanism with two protocol faces, per Q3a, not a second implementation. Includes
-      the shutdown path: `begin_draining` has to release REST's waiters too, or graceful
-      shutdown regains the 19.7 seconds M4 removed
+- [x] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
+      mechanism with two protocol faces, per Q3a, not a second implementation. REST's
+      `wait_time_seconds` goes to `Engine::receive` and nothing else, so there is nothing
+      here to keep in step. `0` stays meaningful and distinct from omitting the field,
+      which means the queue's own configured wait; a test pins the difference.
+
+      The shutdown path too: `serve` calls `begin_draining`, and a poll parked for twenty
+      seconds returns its ordinary empty answer rather than being waited out or dropped.
+
+      **The first version of that test passed for the wrong reason.** Breaking REST's drain
+      on purpose left it green — because both facades share the engine and both get the
+      signal, so the *SQS* facade's `begin_draining` was releasing REST's waiters and the
+      test could not tell which one had. It now binds REST alone, where nothing else can be
+      the cause, and the same mutation fails. A green test that cannot go red is decoration,
+      and this one nearly was.
 - [ ] `nexq-client` generated from the spec, and used by something in-tree, so "the
       generated client works" is a fact rather than an assumption
 - [ ] **Gate: `cargo xtask acceptance-rest` — a `curl`-level suite that exercises the

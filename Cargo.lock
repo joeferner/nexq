@@ -566,7 +566,18 @@ dependencies = [
 name = "nexq-api-rest"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "http-body-util",
+ "nexq-api-aws",
  "nexq-core",
+ "nexq-store-memory",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tls-listener",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
