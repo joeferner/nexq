@@ -123,8 +123,20 @@ pub struct AwsApiConfig {
     #[serde(default = "AwsApiConfig::default_public_base_url")]
     pub public_base_url: String,
 
-    /// Account id embedded in queue URLs. NexQ has no accounts; real SQS URLs carry
-    /// one, so clients that parse a queue URL still find what they expect there.
+    /// Account id embedded in queue URLs, defaulting to [`DEFAULT_ACCOUNT_ID`].
+    ///
+    /// NexQ has no accounts and attaches no meaning to this. It exists because real
+    /// SQS queue URLs are `<host>/<account-id>/<queue-name>`, and clients, SDKs, and
+    /// scripts that pick a URL apart expect to find something in that position.
+    ///
+    /// Must be exactly 12 digits, as AWS account ids are, so that a URL NexQ hands out
+    /// is shaped like one a client has seen before. Validation rejects anything else at
+    /// startup rather than letting it surface as an odd-looking URL later.
+    ///
+    /// **Changing this on a running deployment invalidates queue URLs clients already
+    /// hold**: the account id is the one part of a URL that is checked when a request
+    /// comes back, so a client reusing an old URL gets `InvalidAddress` until it looks
+    /// the queue up again. Pick a value before anything depends on it.
     ///
     /// Accepted as a number as well as a string, since an all-digits value arrives
     /// from an environment variable or unquoted TOML already parsed as an integer.
@@ -146,6 +158,14 @@ fn default_true() -> bool {
 
 /// Number of digits in an account id, matching AWS.
 const ACCOUNT_ID_DIGITS: usize = 12;
+
+/// Account id used when config does not name one.
+///
+/// All zeroes, which is what LocalStack uses, so tooling and runbooks written against
+/// an SQS-compatible endpoint already expect to see it. Any 12-digit value works —
+/// NexQ has no accounts and never interprets this — but see
+/// [`AwsApiConfig::account_id`] before changing it on a running deployment.
+pub const DEFAULT_ACCOUNT_ID: &str = "000000000000";
 
 /// Deserialize an account id that may arrive already parsed as a number.
 ///
@@ -300,7 +320,7 @@ impl AwsApiConfig {
     }
 
     fn default_account_id() -> String {
-        "000000000000".to_owned()
+        DEFAULT_ACCOUNT_ID.to_owned()
     }
 
     /// The configured base URL with any trailing slashes removed, so callers can
@@ -379,7 +399,12 @@ mod tests {
             assert!(config.aws_api.enabled);
             assert_eq!(config.aws_api.bind_addr.to_string(), "0.0.0.0:8080");
             assert_eq!(config.aws_api.base_url(), "http://localhost:8080");
-            assert_eq!(config.aws_api.account_id, "000000000000");
+            assert_eq!(config.aws_api.account_id, DEFAULT_ACCOUNT_ID);
+            assert_eq!(
+                DEFAULT_ACCOUNT_ID.len(),
+                ACCOUNT_ID_DIGITS,
+                "the default must satisfy the rule it is validated against"
+            );
 
             let credential = config.auth.credential("AKIANEXQEXAMPLE").expect("lookup");
             assert_eq!(credential.name, "dev");

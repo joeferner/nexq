@@ -101,7 +101,9 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       CLI sends every subsequent request to whatever URL `CreateQueue`/`GetQueueUrl`
       returns, so both directions have to agree; `QueueUrls` owns the format and a
       round-trip test pins it
-- [ ] Pick and document the fake account id used in queue URLs
+- [x] The account id in queue URLs is config (`aws_api.account_id`), not a constant,
+      defaulting to `000000000000` and validated as exactly 12 digits. Changing it
+      invalidates queue URLs clients already hold, which the docs now say.
 - [ ] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`
 - [ ] `QueueAlreadyExists` / `QueueDoesNotExist` error parity
 - [ ] **Gate: create, list, get-url, and delete a queue via `aws sqs`**

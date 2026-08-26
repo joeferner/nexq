@@ -26,4 +26,10 @@ secret = "change-me"
 # enabled = true
 # bind_addr = "0.0.0.0:8080"
 # public_base_url = "http://localhost:8080"   # what queue URLs are built from
-# account_id = "000000000000"                 # 12 digits, as in a real SQS URL
+# account_id = "000000000000"
+#
+# Queue URLs are "<public_base_url>/<account_id>/<queue-name>". NexQ has no accounts,
+# but real SQS URLs carry an id there and clients expect to find one, so account_id
+# fills that slot. It must be exactly 12 digits; any value works, and the all-zero
+# default is the one LocalStack uses. Set it before clients start caching queue URLs —
+# changing it later makes the URLs they already hold invalid.
