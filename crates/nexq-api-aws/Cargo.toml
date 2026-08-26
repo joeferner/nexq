@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 axum = { workspace = true }
 nexq-core = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt"] }
 tracing = { workspace = true }
 

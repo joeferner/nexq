@@ -7,16 +7,18 @@ use std::io;
 use std::net::SocketAddr;
 
 use axum::Router;
-use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::body::Bytes;
+use axum::http::{HeaderMap, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use nexq_core::AwsApiConfig;
+use serde_json::Value;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{debug, info};
 
-/// Header naming the operation to invoke, as sent by AWS JSON 1.0 clients:
-/// `X-Amz-Target: AmazonSQS.ListQueues`.
-pub const TARGET_HEADER: &str = "x-amz-target";
+use crate::error::ApiError;
+use crate::operations;
+use crate::protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER, decode_input};
 
 /// A bound, not-yet-serving facade listener.
 ///
@@ -68,24 +70,50 @@ impl Server {
 /// The facade's routes.
 ///
 /// AWS JSON clients send every operation as a `POST /` and name the operation in
-/// [`TARGET_HEADER`], so there is one route rather than one per operation. Dispatch on
-/// that header, SigV4 verification, and the operations themselves come next.
+/// `X-Amz-Target`, so there is one route rather than one per operation. Any method is
+/// accepted so that a misdirected request is answered by the protocol layer, with an
+/// error a client can read, rather than by a bare 405.
 pub fn router() -> Router {
-    Router::new().route("/", any(dispatch))
+    Router::new().route("/", any(handle))
 }
 
-async fn dispatch(request: Request) -> (StatusCode, String) {
-    let target = request
-        .headers()
-        .get(TARGET_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("<none>")
-        .to_owned();
+async fn handle(headers: HeaderMap, body: Bytes) -> Response {
+    match route(&headers, &body).await {
+        Ok(output) => json_response(&output),
+        Err(error) => {
+            // Not `message`: tracing renders a field by that name as the event body,
+            // which swallows the key and reads as two messages run together.
+            debug!(
+                code = error.code(),
+                detail = error.message(),
+                "request rejected"
+            );
+            error.into_response()
+        }
+    }
+}
 
+/// Decode a request far enough to know what it is asking for, then run it.
+async fn route(headers: &HeaderMap, body: &[u8]) -> Result<Value, ApiError> {
+    let target = headers
+        .get(TARGET_HEADER)
+        .ok_or_else(ApiError::missing_target)?
+        .to_str()
+        .map_err(|_| ApiError::unknown_operation("<non-ascii target>"))?;
+
+    let operation = Operation::from_target(target)?;
+    let input = decode_input(body)?;
+
+    debug!(%operation, "dispatching");
+    operations::dispatch(operation, input).await
+}
+
+fn json_response(output: &Value) -> Response {
     (
-        StatusCode::NOT_IMPLEMENTED,
-        format!("aws facade reachable; operation {target} is not implemented yet\n"),
+        [(header::CONTENT_TYPE, JSON_CONTENT_TYPE)],
+        output.to_string(),
     )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -93,7 +121,7 @@ mod tests {
     use std::time::Duration;
 
     use axum::body::Body;
-    use axum::http::Request as HttpRequest;
+    use axum::http::{Request as HttpRequest, StatusCode};
     use http_body_util::BodyExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -109,8 +137,82 @@ mod tests {
         }
     }
 
+    /// Send a request through the router, returning the status and decoded body.
+    async fn send(target: Option<&str>, body: &'static str) -> (StatusCode, Value) {
+        let mut request = HttpRequest::builder().method("POST").uri("/");
+        if let Some(target) = target {
+            request = request.header(TARGET_HEADER, target);
+        }
+
+        let response = router()
+            .oneshot(request.body(Body::from(body)).expect("request"))
+            .await
+            .expect("response");
+
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+
+        (status, serde_json::from_slice(&bytes).expect("json body"))
+    }
+
     #[tokio::test]
-    async fn every_operation_routes_to_one_handler() {
+    async fn a_known_operation_routes_to_its_handler() {
+        let (status, body) = send(Some("AmazonSQS.ListQueues"), "{}").await;
+
+        // Recognised, but not built yet — which is not the same as unknown.
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#NotImplemented");
+        assert!(
+            body["message"]
+                .as_str()
+                .expect("message")
+                .contains("ListQueues"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_operation_is_a_client_error() {
+        let (status, body) = send(Some("AmazonSQS.Nope"), "{}").await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["__type"],
+            "com.amazonaws.sqs#UnknownOperationException"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_target_reports_the_query_protocol_gap() {
+        let (status, body) = send(None, "Action=ListQueues&Version=2012-11-05").await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#MissingAction");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_body_is_rejected_before_the_operation_runs() {
+        let (status, body) = send(Some("AmazonSQS.CreateQueue"), "{not json}").await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#SerializationException");
+    }
+
+    #[tokio::test]
+    async fn an_empty_body_still_routes() {
+        // Parameterless operations may send nothing rather than `{}`.
+        let (status, _) = send(Some("AmazonSQS.ListQueues"), "").await;
+
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn errors_are_returned_as_aws_json() {
         let response = router()
             .oneshot(
                 HttpRequest::builder()
@@ -123,16 +225,13 @@ mod tests {
             .await
             .expect("response");
 
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .expect("body")
-            .to_bytes();
-        let body = String::from_utf8_lossy(&body);
-        assert!(body.contains("AmazonSQS.ListQueues"), "{body}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .expect("content type"),
+            JSON_CONTENT_TYPE
+        );
     }
 
     #[tokio::test]

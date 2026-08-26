@@ -5,6 +5,11 @@
 //! The facade owns its own listener — see [`Server`] — so `nexq-server` only decides
 //! whether to run it.
 
+pub mod error;
+pub mod operations;
+pub mod protocol;
 pub mod server;
 
-pub use server::{Server, TARGET_HEADER};
+pub use error::ApiError;
+pub use protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER};
+pub use server::Server;

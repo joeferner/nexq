@@ -379,6 +379,7 @@ dependencies = [
  "axum",
  "http-body-util",
  "nexq-core",
+ "serde_json",
  "tokio",
  "tower",
  "tracing",

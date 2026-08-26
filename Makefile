@@ -14,8 +14,11 @@ export RUSTDOCFLAGS
 # Optional backends that can be compiled out of nexq-server.
 BACKENDS := postgres sqlite opensearch elasticsearch
 
+# Local config for `make server`. Gitignored, since it holds a real secret.
+CONFIG ?= $(CURDIR)/nexq.toml
+
 .DEFAULT_GOAL := help
-.PHONY: help build test fmt fmt-check clippy doc slim-builds pre-commit clean
+.PHONY: help build server test fmt fmt-check clippy doc slim-builds pre-commit clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -23,6 +26,13 @@ help: ## List available targets
 
 build: ## Build every crate, including tests and binaries
 	$(CARGO) build --workspace --all-targets --locked
+
+server: ## Run the server against ./nexq.toml, seeding it from the example if absent
+	@test -f "$(CONFIG)" || { \
+		cp nexq.example.toml "$(CONFIG)"; \
+		echo "created $(CONFIG) from nexq.example.toml — change the secret before exposing it"; \
+	}
+	NEXQ_CONFIG="$(CONFIG)" $(CARGO) run -p nexq-server --locked
 
 test: ## Run the test suite
 	$(CARGO) test --workspace --all-features --locked

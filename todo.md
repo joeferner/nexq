@@ -37,7 +37,8 @@ empty server is the smallest request that exercises all of it.
       `nexq-server` binds and runs it only when `aws_api.enabled`
 - [x] Identify the wire protocol the installed `aws-cli` v2 actually sends — captured
       from `aws --debug sqs list-queues` against the running facade, see below
-- [ ] Request routing off `X-Amz-Target`, with JSON body decode
+- [x] Request routing off `X-Amz-Target`, with JSON body decode — operations are a
+      typed enum, so "not built yet" and "no such operation" are distinct answers
 - [ ] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
       against the client's signature
 - [ ] Reject with SQS's own error shapes: `InvalidClientTokenId`,
