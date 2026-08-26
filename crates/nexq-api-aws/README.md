@@ -29,6 +29,11 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   `MissingAuthenticationToken`, worded as SQS words them, revealing nothing about
   which half of a credential was wrong
 - :white_check_mark: Any region string, since signer and verifier only need to agree
+- :white_check_mark: HTTPS, via `[aws_api.tls]`. Handshakes happen off the accept path, so
+  a client that connects and then says nothing cannot stop the server accepting others
+- :white_check_mark: Mutual TLS, via `client_ca` — a transport-level gate on top of
+  SigV4, not a replacement for it. A certificate says a connection is allowed; it never
+  says who the caller is
 - :white_check_mark: Stale signatures rejected with `RequestTimeTooSkewed`, within a
   configurable window (`aws_api.max_clock_skew_secs`, 15 minutes by default, matching
   AWS). Checked before the signature is recomputed, and in both directions, so a
@@ -470,6 +475,55 @@ Only `VisibilityTimeout`, `DelaySeconds`, and `ReceiveMessageWaitTimeSeconds` ca
 because they are the only ones NexQ has behaviour behind. Asking to read something like
 `MessageRetentionPeriod` gets an error saying why — NexQ does not expire messages, so
 reporting SQS's four-day default would promise an expiry that never comes.
+
+## Serving HTTPS
+
+```toml
+[aws_api]
+public_base_url = "https://nexq.internal:8080"   # note the scheme
+
+[aws_api.tls]
+certificate = "/etc/nexq/fullchain.pem"
+private_key = "/etc/nexq/key.pem"
+```
+
+The table's presence is the switch — there is no `enabled` flag, because that would allow
+"on, with no certificate", which can only be a mistake. Both paths are read at **startup**,
+so a wrong path, an empty file, a file holding two keys, or a key that does not match its
+certificate stops the server coming up rather than surfacing later as a client reporting
+nothing more useful than "handshake failed".
+
+`certificate` wants the full chain, leaf first. A missing intermediate is the classic
+failure that works for some clients and not others.
+
+**Set `public_base_url` to `https://`** as well. Queue URLs are built from it and clients
+send every later request to whatever they were handed, so an `http` URL over a TLS
+listener points them somewhere nothing is listening. The server warns at startup when the
+two disagree rather than refusing, since behind a proxy that terminates or adds TLS they
+legitimately can.
+
+A client trusting a privately signed certificate does so its own way — for the CLI:
+
+```sh
+aws --ca-bundle /etc/nexq/ca.pem sqs list-queues
+```
+
+### Mutual TLS
+
+```toml
+[aws_api.tls]
+certificate = "/etc/nexq/fullchain.pem"
+private_key = "/etc/nexq/key.pem"
+client_ca   = "/etc/nexq/client-ca.pem"
+```
+
+A connection is then refused during the handshake unless it presents a certificate that
+authority signed. **A gate, not an identity**: SigV4 still authenticates every request,
+because the SQS protocol requires it and every AWS client signs — so nothing about *who*
+a caller is comes from their certificate. It adds a layer rather than replacing one.
+
+Note that the `aws` CLI cannot present a client certificate, so turning this on shuts the
+CLI out; it is for SDKs and proxies that can.
 
 ## Queue URLs
 

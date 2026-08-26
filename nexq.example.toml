@@ -30,6 +30,21 @@ secret = "change-me"
 # region = "us-east-1"                        # only used to build queue ARNs
 # max_clock_skew_secs = 900
 #
+# Serve HTTPS instead of HTTP. The table's presence is the switch — there is no
+# "enabled" flag, since that would allow "on, with no certificate".
+#
+# [aws_api.tls]
+# certificate = "/etc/nexq/fullchain.pem"     # server cert first, then intermediates
+# private_key = "/etc/nexq/key.pem"
+# client_ca   = "/etc/nexq/client-ca.pem"     # optional: require client certs (mTLS)
+#
+# Trust anchors for connections NexQ *makes* rather than serves. Nothing uses this
+# yet — it is here for the nexq client and CLI, and later for TLS to SQL and search
+# backends. Only these anchors are used; the platform's own store is not consulted.
+#
+# [client_tls]
+# ca_bundle = "/etc/nexq/trusted-ca.pem"
+#
 # max_clock_skew_secs is how far a request's signed timestamp may be from this
 # server's clock, in either direction. It is what stops a captured request from being
 # replayed forever. Widen it if clients and server cannot agree on the time — an
@@ -47,3 +62,8 @@ secret = "change-me"
 # as "arn:aws:sqs:<region>:<account_id>:<queue-name>". It is not checked against the
 # region a client signs with — SigV4 only needs signer and verifier to agree, so any
 # region has always worked and still does.
+#
+# With [aws_api.tls] set, remember to make public_base_url say https: it is what queue
+# URLs are built from, so an http URL over a TLS listener sends clients somewhere that
+# is not listening. The server warns at startup when the two disagree, since behind a
+# proxy that terminates TLS they legitimately can.

@@ -16,7 +16,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use nexq_core::engine::Engine;
 use nexq_core::{AuthConfig, AwsApiConfig};
+use rustls::ServerConfig;
 use serde_json::Value;
+use tls_listener::TlsListener;
+use tls_listener::rustls::TlsAcceptor;
 use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
 
@@ -51,6 +54,11 @@ pub struct Server {
     local_addr: SocketAddr,
     router: Router,
 
+    /// Built at bind time when the facade is configured for TLS, so a bad certificate
+    /// stops the server coming up rather than being found by the first client to
+    /// connect. `None` serves plain HTTP.
+    tls: Option<Arc<ServerConfig>>,
+
     /// Held so [`Server::serve`] can release long polls when shutdown starts, rather
     /// than waiting for each of them to reach its own deadline.
     engine: Arc<Engine>,
@@ -73,6 +81,31 @@ impl Server {
         let listener = TcpListener::bind(config.bind_addr).await?;
         let local_addr = listener.local_addr()?;
 
+        let tls = match &config.tls {
+            Some(tls) => Some(
+                nexq_core::tls::server_config(tls)
+                    .map_err(|error| io::Error::other(error.to_string()))?,
+            ),
+            None => None,
+        };
+
+        // A client is handed queue URLs built from `public_base_url` and sends every
+        // later request to them, so a scheme that disagrees with what is actually served
+        // hands out URLs that cannot be used. Both mismatches are legitimate behind a
+        // proxy that terminates or adds TLS, which is why this warns rather than
+        // refusing.
+        let base_url_is_https = config.base_url().starts_with("https://");
+        if tls.is_some() != base_url_is_https {
+            warn!(
+                facade = "aws",
+                serving = if tls.is_some() { "https" } else { "http" },
+                public_base_url = config.base_url(),
+                "the public base URL's scheme does not match what this facade serves, so \
+                 queue URLs will name the other one. Correct unless a proxy in front is \
+                 terminating or adding TLS."
+            );
+        }
+
         if config.max_clock_skew().is_none() {
             // Deliberate, but it means a captured request stays replayable forever, so
             // it should not be a silent setting.
@@ -91,8 +124,14 @@ impl Server {
                 operations: Operations::new(Arc::clone(&engine), QueueUrls::new(config)),
                 max_clock_skew: config.max_clock_skew(),
             })),
+            tls,
             engine,
         })
+    }
+
+    /// Whether this server will serve HTTPS.
+    pub fn is_tls(&self) -> bool {
+        self.tls.is_some()
     }
 
     /// The address actually bound, which differs from the configured one when the
@@ -108,11 +147,21 @@ impl Server {
     /// engine is told to stop waiting the moment shutdown starts, which turns those
     /// requests into ordinary empty responses instead of a delay or a dropped
     /// connection.
+    ///
+    /// TLS, when configured, is a different listener and nothing else: handshakes happen
+    /// off the accept path, so one client that opens a connection and then says nothing
+    /// cannot stop the server accepting others, and graceful shutdown is unchanged from
+    /// the plain-TCP case.
     pub async fn serve<S>(self, shutdown: S) -> io::Result<()>
     where
         S: Future<Output = ()> + Send + 'static,
     {
-        info!(facade = "aws", address = %self.local_addr, "listening");
+        info!(
+            facade = "aws",
+            address = %self.local_addr,
+            scheme = if self.tls.is_some() { "https" } else { "http" },
+            "listening"
+        );
 
         let engine = self.engine;
         let shutdown = async move {
@@ -121,9 +170,20 @@ impl Server {
             engine.begin_draining();
         };
 
-        axum::serve(self.listener, self.router)
-            .with_graceful_shutdown(shutdown)
-            .await
+        match self.tls {
+            Some(tls) => {
+                let listener = TlsListener::new(TlsAcceptor::from(tls), self.listener);
+
+                axum::serve(listener, self.router)
+                    .with_graceful_shutdown(shutdown)
+                    .await
+            }
+            None => {
+                axum::serve(self.listener, self.router)
+                    .with_graceful_shutdown(shutdown)
+                    .await
+            }
+        }
     }
 }
 
@@ -354,6 +414,174 @@ mod tests {
         (status, serde_json::from_slice(&bytes).expect("json body"))
     }
 
+    /// Generate a test certificate authority and a `nexq.test` certificate it signed.
+    ///
+    /// A chain rather than one self-signed certificate, because rustls refuses to use a
+    /// certificate marked as a CA as an end entity — which is what `openssl req -x509`
+    /// produces, and what a first attempt at this used. It is also the realistic shape:
+    /// a client trusts the authority, and the server presents a leaf it signed.
+    ///
+    /// Generated per run rather than committed, so nothing starts failing on the day a
+    /// checked-in certificate would have expired.
+    ///
+    /// The files a TLS test needs, all signed by the one authority.
+    struct TestChain {
+        authority: std::path::PathBuf,
+        certificate: std::path::PathBuf,
+        private_key: std::path::PathBuf,
+        client_certificate: std::path::PathBuf,
+        client_key: std::path::PathBuf,
+    }
+
+    fn test_chain(name: &str) -> TestChain {
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        let directory = std::env::temp_dir().join(format!("nexq-server-tls-{name}"));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("create temp dir");
+
+        let openssl = |arguments: Vec<&str>| {
+            let output = Command::new("openssl")
+                .args(&arguments)
+                .output()
+                .expect("openssl should be installed");
+            assert!(
+                output.status.success(),
+                "openssl {}: {}",
+                arguments.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+
+        let path = |file: &str| -> PathBuf { directory.join(file) };
+        let text = |file: &str| -> String { path(file).display().to_string() };
+
+        // The authority a client will trust.
+        openssl(vec![
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=NexQ Test CA",
+            "-keyout",
+            &text("ca.key"),
+            "-out",
+            &text("ca.pem"),
+        ]);
+
+        // A leaf for `nexq.test`, with the name in a SAN because that is where a modern
+        // client looks rather than at the common name.
+        openssl(vec![
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=nexq.test",
+            "-keyout",
+            &text("server.key"),
+            "-out",
+            &text("server.csr"),
+        ]);
+
+        std::fs::write(
+            path("server.ext"),
+            "subjectAltName=DNS:nexq.test\nbasicConstraints=critical,CA:FALSE\n",
+        )
+        .expect("write extensions");
+
+        openssl(vec![
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            &text("server.csr"),
+            "-CA",
+            &text("ca.pem"),
+            "-CAkey",
+            &text("ca.key"),
+            "-extfile",
+            &text("server.ext"),
+            "-out",
+            &text("server.pem"),
+        ]);
+
+        // A client certificate from the same authority, for the mutual-TLS test. The
+        // `aws` CLI cannot present one, so proving that gate works needs a Rust client.
+        openssl(vec![
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=a-client",
+            "-keyout",
+            &text("client.key"),
+            "-out",
+            &text("client.csr"),
+        ]);
+        std::fs::write(path("client.ext"), "basicConstraints=critical,CA:FALSE\n")
+            .expect("write extensions");
+        openssl(vec![
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            &text("client.csr"),
+            "-CA",
+            &text("ca.pem"),
+            "-CAkey",
+            &text("ca.key"),
+            "-extfile",
+            &text("client.ext"),
+            "-out",
+            &text("client.pem"),
+        ]);
+
+        TestChain {
+            authority: path("ca.pem"),
+            certificate: path("server.pem"),
+            private_key: path("server.key"),
+            client_certificate: path("client.pem"),
+            client_key: path("client.key"),
+        }
+    }
+
+    /// Read a PEM file's certificates.
+    fn pem_certificates(path: &std::path::Path) -> Vec<rustls::pki_types::CertificateDer<'static>> {
+        rustls_pemfile::certs(&mut std::io::BufReader::new(
+            std::fs::File::open(path).expect("open"),
+        ))
+        .map(|certificate| certificate.expect("certificate"))
+        .collect()
+    }
+
+    /// Read a PEM file's single private key.
+    fn private_key_of(path: &std::path::Path) -> rustls::pki_types::PrivateKeyDer<'static> {
+        rustls_pemfile::private_key(&mut std::io::BufReader::new(
+            std::fs::File::open(path).expect("open"),
+        ))
+        .expect("read")
+        .expect("a private key")
+    }
+
+    /// A root store trusting one authority.
+    fn roots_trusting(authority: &std::path::Path) -> rustls::RootCertStore {
+        let mut roots = rustls::RootCertStore::empty();
+        for certificate in pem_certificates(authority) {
+            roots.add(certificate).expect("add");
+        }
+
+        roots
+    }
+
     /// A correctly signed request.
     async fn send_signed(target: Option<&str>, body: &str) -> (StatusCode, Value) {
         let headers = sign(unsigned_headers(target), body.as_bytes(), SECRET);
@@ -570,6 +798,301 @@ mod tests {
             .expect("bind");
 
         assert_ne!(server.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn without_a_certificate_the_facade_serves_plain_http() {
+        let server = Server::bind(&test_config(), test_auth(), test_engine())
+            .await
+            .expect("bind");
+
+        assert!(!server.is_tls(), "no [aws_api.tls] means plain HTTP");
+    }
+
+    #[tokio::test]
+    async fn a_certificate_makes_the_facade_serve_https() {
+        let chain = test_chain("bind");
+        let config = AwsApiConfig {
+            tls: Some(nexq_core::ServerTlsConfig {
+                certificate: chain.certificate,
+                private_key: chain.private_key,
+                client_ca: None,
+            }),
+            ..test_config()
+        };
+
+        let server = Server::bind(&config, test_auth(), test_engine())
+            .await
+            .expect("bind");
+
+        assert!(server.is_tls());
+    }
+
+    #[tokio::test]
+    async fn a_bad_certificate_stops_the_server_binding() {
+        // Rather than being discovered by whoever connects first, when the only symptom
+        // a client sees is a handshake that failed.
+        let config = AwsApiConfig {
+            tls: Some(nexq_core::ServerTlsConfig {
+                certificate: std::path::PathBuf::from("/nonexistent/cert.pem"),
+                private_key: std::path::PathBuf::from("/nonexistent/key.pem"),
+                client_ca: None,
+            }),
+            ..test_config()
+        };
+
+        let error = Server::bind(&config, test_auth(), test_engine())
+            .await
+            .expect_err("there is no such certificate");
+
+        assert!(
+            error.to_string().contains("cert.pem"),
+            "the failure should name the file: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tls_facade_serves_a_real_handshake_over_tcp() {
+        // The end-to-end shape: a genuine TLS client, a genuine handshake, and a request
+        // answered inside it. Unit tests through the router cannot show any of that,
+        // since they never reach a socket.
+        let chain = test_chain("serve");
+        let config = AwsApiConfig {
+            tls: Some(nexq_core::ServerTlsConfig {
+                certificate: chain.certificate,
+                private_key: chain.private_key,
+                client_ca: None,
+            }),
+            ..test_config()
+        };
+
+        let server = Server::bind(&config, test_auth(), test_engine())
+            .await
+            .expect("bind");
+        let address = server.local_addr();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let serving = tokio::spawn(server.serve(async move {
+            let _ = shutdown_rx.await;
+        }));
+
+        // A client that trusts only this authority, so a successful handshake proves
+        // the server presented a certificate that authority signed.
+        let client = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(roots_trusting(&chain.authority))
+        .with_no_client_auth();
+
+        let stream = TcpStream::connect(address).await.expect("connect");
+        let mut tls = tokio_rustls::TlsConnector::from(Arc::new(client))
+            .connect(
+                rustls::pki_types::ServerName::try_from("nexq.test").expect("server name"),
+                stream,
+            )
+            .await
+            .expect("the handshake should succeed");
+
+        // Unsigned on purpose: what matters here is that a request crossed the TLS
+        // connection and came back answered, not which answer it got.
+        tls.write_all(
+            b"POST / HTTP/1.1\r\n\
+              Host: nexq.test\r\n\
+              X-Amz-Target: AmazonSQS.ListQueues\r\n\
+              Content-Length: 0\r\n\
+              Connection: close\r\n\r\n",
+        )
+        .await
+        .expect("write request");
+
+        let mut response = String::new();
+        tls.read_to_string(&mut response)
+            .await
+            .expect("read response");
+        assert!(
+            response.starts_with("HTTP/1.1 403"),
+            "an unsigned request should be refused, over TLS like anywhere else: {response}"
+        );
+
+        shutdown_tx.send(()).expect("signal shutdown");
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .expect("serve should stop")
+            .expect("serve task")
+            .expect("serve");
+    }
+
+    #[tokio::test]
+    async fn mutual_tls_refuses_a_client_with_no_certificate_and_admits_one_with() {
+        // The whole point of `client_ca`, and the only place it can be shown: the `aws`
+        // CLI cannot present a client certificate, so the acceptance suite cannot cover
+        // this and a Rust client has to.
+        let chain = test_chain("mtls");
+        let config = AwsApiConfig {
+            tls: Some(nexq_core::ServerTlsConfig {
+                certificate: chain.certificate,
+                private_key: chain.private_key,
+                client_ca: Some(chain.authority.clone()),
+            }),
+            ..test_config()
+        };
+
+        let server = Server::bind(&config, test_auth(), test_engine())
+            .await
+            .expect("bind");
+        let address = server.local_addr();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let serving = tokio::spawn(server.serve(async move {
+            let _ = shutdown_rx.await;
+        }));
+
+        let name = rustls::pki_types::ServerName::try_from("nexq.test").expect("server name");
+
+        // No client certificate: the server should refuse during the handshake, before
+        // any request is read.
+        let anonymous = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(roots_trusting(&chain.authority))
+        .with_no_client_auth();
+
+        let stream = TcpStream::connect(address).await.expect("connect");
+        let refused = tokio_rustls::TlsConnector::from(Arc::new(anonymous))
+            .connect(name.clone(), stream)
+            .await;
+
+        // The refusal can surface on the handshake or on the first read, depending on
+        // how far TLS 1.3 has got before the server objects — so a write and a read
+        // follow, and what matters is that no response comes back.
+        // Under a timeout, and asking the server to close, because both are needed for
+        // this to *fail* rather than hang if the gate ever stops being enforced: a served
+        // keep-alive connection would leave the read waiting for a close that never
+        // comes. Found by breaking the gate on purpose and watching the test hang.
+        let served = match refused {
+            Err(_) => false,
+            Ok(mut tls) => {
+                let exchange = async {
+                    tls.write_all(
+                        b"POST / HTTP/1.1\r\n\
+                          Host: nexq.test\r\n\
+                          Content-Length: 0\r\n\
+                          Connection: close\r\n\r\n",
+                    )
+                    .await
+                    .ok()?;
+
+                    let mut response = String::new();
+                    tls.read_to_string(&mut response).await.ok()?;
+
+                    Some(response)
+                };
+
+                tokio::time::timeout(Duration::from_secs(5), exchange)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|response| response.starts_with("HTTP/"))
+            }
+        };
+        assert!(
+            !served,
+            "a client with no certificate must not be served when client_ca is set"
+        );
+
+        // With a certificate that authority signed, the same connection works.
+        let certified = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(roots_trusting(&chain.authority))
+        .with_client_auth_cert(
+            pem_certificates(&chain.client_certificate),
+            private_key_of(&chain.client_key),
+        )
+        .expect("a client certificate and key");
+
+        let stream = TcpStream::connect(address).await.expect("connect");
+        let mut tls = tokio_rustls::TlsConnector::from(Arc::new(certified))
+            .connect(name, stream)
+            .await
+            .expect("a certified client should be admitted");
+
+        tls.write_all(
+            b"POST / HTTP/1.1\r\n\
+              Host: nexq.test\r\n\
+              X-Amz-Target: AmazonSQS.ListQueues\r\n\
+              Content-Length: 0\r\n\
+              Connection: close\r\n\r\n",
+        )
+        .await
+        .expect("write request");
+
+        let mut response = String::new();
+        tls.read_to_string(&mut response)
+            .await
+            .expect("read response");
+        assert!(
+            response.starts_with("HTTP/1.1 403"),
+            "the request is unsigned, so SigV4 still refuses it — the certificate is a \
+             gate, not an identity: {response}"
+        );
+
+        shutdown_tx.send(()).expect("signal shutdown");
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .expect("serve should stop")
+            .expect("serve task")
+            .expect("serve");
+    }
+
+    #[tokio::test]
+    async fn a_plain_http_client_against_a_tls_facade_is_refused_not_served() {
+        // The mistake everyone makes once. It must fail as a failed connection rather
+        // than by the server accidentally answering HTTP on a TLS port.
+        let chain = test_chain("plain-to-tls");
+        let config = AwsApiConfig {
+            tls: Some(nexq_core::ServerTlsConfig {
+                certificate: chain.certificate,
+                private_key: chain.private_key,
+                client_ca: None,
+            }),
+            ..test_config()
+        };
+
+        let server = Server::bind(&config, test_auth(), test_engine())
+            .await
+            .expect("bind");
+        let address = server.local_addr();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let serving = tokio::spawn(server.serve(async move {
+            let _ = shutdown_rx.await;
+        }));
+
+        let mut stream = TcpStream::connect(address).await.expect("connect");
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: nexq.test\r\n\r\n")
+            .await
+            .expect("write");
+
+        let mut response = String::new();
+        // Either nothing comes back or the connection is reset; what must not happen is
+        // an HTTP response.
+        let _ = stream.read_to_string(&mut response).await;
+        assert!(
+            !response.starts_with("HTTP/"),
+            "a TLS listener must not answer plain HTTP: {response:?}"
+        );
+
+        shutdown_tx.send(()).expect("signal shutdown");
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .expect("serve should stop")
+            .expect("serve task")
+            .expect("serve");
     }
 
     #[tokio::test]

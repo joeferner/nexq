@@ -59,6 +59,17 @@ pub fn run() -> Result<(), String> {
         }
     }
 
+    // TLS needs its own server, so it runs outside the loop above rather than being
+    // given a way to swap the server out from under the other checks.
+    match over_tls() {
+        Ok(()) => println!("  ok    TLS"),
+        Err(reason) => {
+            println!("  FAIL  TLS");
+            println!("          {reason}");
+            failures.push("TLS");
+        }
+    }
+
     println!();
     if failures.is_empty() {
         println!("all checks passed");
@@ -655,6 +666,83 @@ fn unimplemented_operations(aws: &Aws) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// The whole produce and consume loop over HTTPS, against a real certificate.
+///
+/// Its own server, since TLS is a property of the listener rather than of a request. The
+/// CLI is told to *trust the authority* rather than to skip verification — a check that
+/// passed with verification off would say nothing about whether the chain is right, which
+/// is the part that goes wrong in practice.
+fn over_tls() -> Result<(), String> {
+    let (server, authority) = Server::start_tls()?;
+    let aws = server.aws_trusting(&authority);
+
+    if !server.endpoint.starts_with("https://") {
+        return Err(format!(
+            "expected an https endpoint, got {}",
+            server.endpoint
+        ));
+    }
+
+    // A full round trip, so this covers the handshake, SigV4 over TLS, and the queue
+    // URLs the server hands out — which must name https, or a client's next request goes
+    // somewhere that is not listening.
+    let created = aws.sqs(&["create-queue", "--queue-name", "tls-jobs"])?;
+    let url = string(&created, "QueueUrl")?;
+    if !url.starts_with("https://") {
+        return Err(format!("queue URLs should be https over TLS, got {url}"));
+    }
+
+    aws.sqs(&[
+        "send-message",
+        "--queue-url",
+        &url,
+        "--message-body",
+        "over tls",
+    ])?;
+
+    let received = aws.sqs(&["receive-message", "--queue-url", &url])?;
+    let message = &array(&received, "Messages")?[0];
+    expect(&as_str(&message["Body"])?, "over tls")?;
+
+    aws.sqs(&[
+        "delete-message",
+        "--queue-url",
+        &url,
+        "--receipt-handle",
+        &as_str(&message["ReceiptHandle"])?,
+    ])?;
+
+    // Authentication still applies over TLS: the transport is not the thing that decides
+    // who a caller is.
+    let code = aws
+        .with_secret("not-the-secret")
+        .sqs_err(&["list-queues"])?;
+    expect(&code, "SignatureDoesNotMatch")?;
+
+    // And a client that does *not* trust the authority must be refused rather than
+    // served, which is what proves verification is happening at all.
+    let untrusting = server.aws();
+    match untrusting.sqs(&["list-queues"]) {
+        Ok(output) => Err(format!(
+            "a client that trusts nothing should not have been served: {output}"
+        )),
+        Err(message) => {
+            let complained_about_the_certificate = message.contains("SSL")
+                || message.contains("certificate")
+                || message.contains("CERTIFICATE");
+
+            if complained_about_the_certificate {
+                Ok(())
+            } else {
+                Err(format!(
+                    "expected a certificate complaint from an untrusting client, got: \
+                     {message}"
+                ))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

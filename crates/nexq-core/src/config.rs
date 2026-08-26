@@ -36,7 +36,7 @@
 
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use figment::providers::{Env, Format, Toml};
@@ -65,6 +65,11 @@ pub struct Config {
     /// The SQS/SNS-compatible facade.
     #[serde(default)]
     pub aws_api: AwsApiConfig,
+
+    /// Trust anchors for connections NexQ makes, rather than serves. See
+    /// [`ClientTlsConfig`] — nothing consumes it yet.
+    #[serde(default)]
+    pub client_tls: Option<ClientTlsConfig>,
     // Later: `rest`, `metrics`, `keda`, `cluster`, `queues`.
 }
 
@@ -174,6 +179,79 @@ pub struct AwsApiConfig {
     /// should be a deliberate choice, so the server says so at startup when it happens.
     #[serde(default = "AwsApiConfig::default_max_clock_skew_secs")]
     pub max_clock_skew_secs: u64,
+
+    /// Serve HTTPS rather than HTTP. Absent means plain HTTP — see [`ServerTlsConfig`].
+    #[serde(default)]
+    pub tls: Option<ServerTlsConfig>,
+}
+
+/// Check that a configured file exists and can be opened.
+///
+/// Reports the config key rather than only the path, since "no such file" about a bare
+/// path leaves an operator hunting for which setting it came from.
+fn readable(key: &str, path: &Path) -> Result<(), figment::Error> {
+    std::fs::File::open(path).map(|_| ()).map_err(|error| {
+        figment::Error::from(format!("{key}: cannot read {}: {error}", path.display()))
+    })
+}
+
+/// TLS for a facade's own listener — NexQ as the server.
+///
+/// Presence is what switches TLS on: a facade with no `[<facade>.tls]` table serves plain
+/// HTTP, one with the table serves HTTPS. There is no `enabled` flag on purpose, since it
+/// would allow "enabled with no certificate", a state that can only be a mistake.
+///
+/// Paths are checked at startup rather than on the first connection: a typo in a
+/// certificate path should stop the server coming up, not surface as a handshake failure
+/// to whoever connects first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerTlsConfig {
+    /// PEM certificate chain: the server's own certificate first, then any
+    /// intermediates.
+    ///
+    /// The full chain rather than one certificate. A missing intermediate is the usual
+    /// reason a client that trusts the root still refuses the connection, and it fails
+    /// for some clients and not others, which makes it miserable to diagnose.
+    pub certificate: PathBuf,
+
+    /// PEM private key for that certificate. PKCS#8, SEC1, or PKCS#1.
+    pub private_key: PathBuf,
+
+    /// PEM certificate authority whose clients may connect — mutual TLS.
+    ///
+    /// Set this and a connection is refused unless it presents a certificate signed by
+    /// this authority. **A gate, not an identity**: NexQ still authenticates every
+    /// request through its credential registry, because the SQS protocol requires
+    /// SigV4 and every AWS client signs. So this adds a layer rather than replacing one,
+    /// and nothing about *who* a caller is comes from their certificate.
+    ///
+    /// Left unset, connections are ordinary one-way TLS: the client checks the server's
+    /// certificate and not the reverse.
+    #[serde(default)]
+    pub client_ca: Option<PathBuf>,
+}
+
+/// TLS for connections NexQ *makes* — NexQ as the client.
+///
+/// Separate from [`ServerTlsConfig`] because it is the other direction, and confusing
+/// the two is easy: this one has nothing to do with what a facade serves.
+///
+/// **Nothing consumes this yet.** It is here for the pieces that will: `nexq-client` and
+/// the `nexq` CLI talking to a NexQ whose certificate is privately signed, and later the
+/// SQL and search backends connecting over TLS. It is loaded and validated at startup
+/// even so, so the paths are known to be good before anything depends on them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientTlsConfig {
+    /// PEM bundle of certificate authorities to trust when NexQ is the client.
+    ///
+    /// These are the *only* anchors used — the platform's own trust store is not
+    /// consulted as well. That is the stricter reading, and the right one for the case
+    /// this exists for: reaching a NexQ whose certificate a private authority signed. To
+    /// trust public authorities too, point this at the platform bundle, which on Debian
+    /// and Ubuntu is `/etc/ssl/certs/ca-certificates.crt`.
+    pub ca_bundle: PathBuf,
 }
 
 /// A string that does not leak through `Debug`, `Display`, or serialization.
@@ -279,6 +357,11 @@ impl Config {
             .split(ENV_NESTED_SEPARATOR)
     }
 
+    /// Whether this facade serves HTTPS.
+    pub fn is_tls(&self) -> bool {
+        self.aws_api.tls.is_some()
+    }
+
     /// Checks that can't be expressed as types.
     fn validate(&self) -> Result<(), figment::Error> {
         let account_id = &self.aws_api.account_id;
@@ -300,6 +383,21 @@ impl Config {
                         queue ARNs"
                     .into(),
             );
+        }
+
+        // Checked here so a mistyped path stops the server coming up, rather than
+        // surfacing as a handshake failure to whoever connects first.
+        if let Some(tls) = &self.aws_api.tls {
+            readable("aws_api.tls.certificate", &tls.certificate)?;
+            readable("aws_api.tls.private_key", &tls.private_key)?;
+
+            if let Some(client_ca) = &tls.client_ca {
+                readable("aws_api.tls.client_ca", client_ca)?;
+            }
+        }
+
+        if let Some(client_tls) = &self.client_tls {
+            readable("client_tls.ca_bundle", &client_tls.ca_bundle)?;
         }
 
         if self.auth.credentials.is_empty() {
@@ -404,6 +502,8 @@ impl Default for AwsApiConfig {
             account_id: Self::default_account_id(),
             region: Self::default_region(),
             max_clock_skew_secs: Self::default_max_clock_skew_secs(),
+            // Plain HTTP unless a certificate says otherwise.
+            tls: None,
         }
     }
 }

@@ -396,9 +396,49 @@ belongs — see Future for why that is not a timer.
       exports, `aws configure`, `~/.aws/config`, running behind a proxy, and the error
       table. Every command in the quick start was run as written, and every link checked.
 
-# M8 - SSL
+## ✅ M8 - SSL
 
-- [ ] Add SSL support to servers
+- [x] Add SSL support to servers — `[aws_api.tls]` with `certificate`, `private_key`, and
+      an optional `client_ca` for mutual TLS, plus `[client_tls]` for the other direction.
+
+      TLS is a different listener and nothing else, via `tls-listener`, which performs
+      handshakes **off the accept path**. The obvious alternative — implementing axum's
+      `Listener` and handshaking inside `accept()` — would have let one client open a
+      connection, say nothing, and stop the server accepting anyone else. Graceful
+      shutdown and the long-poll draining are untouched as a result.
+
+      `ring` rather than the default `aws-lc-rs` provider, since it needs only a C
+      compiler where aws-lc-rs also wants cmake. The provider is named explicitly rather
+      than inferred, because inference works only while exactly one is compiled in and a
+      future dependency enabling a second would turn that into a panic on first
+      connection.
+
+      Certificates load at **startup**: a wrong path, an empty file, two keys in one file,
+      or a key that does not match its certificate stops the server coming up rather than
+      surfacing as a client reporting "handshake failed". The loader lives in
+      `nexq-core::tls` so REST gets the same one, and its error messages name the file and
+      the setting.
+
+      `[client_tls]` is config with **no consumer yet**, and deliberately so — it is for
+      `nexq-client`, the CLI, and later TLS to SQL and search backends. Loaded and
+      validated at startup regardless, and its loader is tested, so the plumbing is known
+      good before anything leans on it.
+
+      Two things worth having found:
+
+      - `openssl req -x509` produces a certificate marked `CA:TRUE`, and rustls refuses to
+        use a CA certificate as an end entity. The first test failed with
+        `CaUsedAsEndEntity`; the fix was a proper authority-plus-leaf chain, which is the
+        realistic shape anyway and exercises chain handling.
+      - Breaking the mTLS gate on purpose made its test **hang** rather than fail — a
+        served keep-alive connection left the read waiting for a close that never came. It
+        now sends `Connection: close` under a timeout, and the same mutation fails in
+        under a second.
+
+      Covered by 8 loader tests, 6 server tests including a real handshake, a real mTLS
+      refusal-and-admission, and a plain-HTTP client getting nothing from a TLS port —
+      plus a TLS check in the CLI acceptance suite where the CLI is told to *trust the
+      authority* rather than skip verification, so the chain has to genuinely check out.
 
 # Future
 

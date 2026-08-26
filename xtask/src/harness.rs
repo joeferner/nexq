@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -38,20 +38,48 @@ pub struct Server {
 impl Server {
     /// Build and start `nexq-server` on a free port, waiting until it answers.
     pub fn start() -> Result<Self, String> {
+        Self::start_with(None)
+    }
+
+    /// The same, serving HTTPS with a generated certificate.
+    ///
+    /// `authority` comes back so a client can be told to trust it — the point of testing
+    /// TLS with a real certificate rather than by skipping verification is that the chain
+    /// has to actually check out.
+    pub fn start_tls() -> Result<(Self, PathBuf), String> {
+        let chain = TestChain::generate()?;
+        let authority = chain.authority.clone();
+
+        Ok((Self::start_with(Some(chain))?, authority))
+    }
+
+    fn start_with(tls: Option<TestChain>) -> Result<Self, String> {
         let binary = build_server()?;
         let port = free_port()?;
         let address = format!("127.0.0.1:{port}");
-        let endpoint = format!("http://{address}");
+        let scheme = if tls.is_some() { "https" } else { "http" };
+        let endpoint = format!("{scheme}://localhost:{port}");
 
         // The example config is used as-is, so this also checks that the file we tell
         // people to copy actually works.
-        let child = Command::new(&binary)
+        let mut command = Command::new(&binary);
+        command
             .env("NEXQ_CONFIG", workspace_root()?.join("nexq.example.toml"))
             .env("NEXQ_AWS_API__BIND_ADDR", &address)
             .env("NEXQ_AWS_API__PUBLIC_BASE_URL", &endpoint)
             .env("RUST_LOG", "nexq=info")
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(chain) = &tls {
+            // Set through the environment rather than a config file, which also exercises
+            // the `NEXQ_*__*` override path for a nested table.
+            command
+                .env("NEXQ_AWS_API__TLS__CERTIFICATE", &chain.certificate)
+                .env("NEXQ_AWS_API__TLS__PRIVATE_KEY", &chain.private_key);
+        }
+
+        let child = command
             .spawn()
             .map_err(|error| format!("could not start {}: {error}", binary.display()))?;
 
@@ -84,6 +112,15 @@ impl Server {
             endpoint: self.endpoint.clone(),
             key_id: KEY_ID.to_owned(),
             secret: SECRET.to_owned(),
+            ca_bundle: None,
+        }
+    }
+
+    /// The same, told to trust a certificate authority.
+    pub fn aws_trusting(&self, authority: &Path) -> Aws {
+        Aws {
+            ca_bundle: Some(authority.to_path_buf()),
+            ..self.aws()
         }
     }
 }
@@ -113,6 +150,108 @@ impl Drop for Server {
     }
 }
 
+/// A certificate authority and a `localhost` certificate it signed.
+///
+/// Two certificates rather than one self-signed, because a certificate marked as a CA
+/// cannot also be an end entity — a client refuses it — and because a chain is the
+/// realistic shape: the client trusts the authority, the server presents the leaf.
+struct TestChain {
+    authority: PathBuf,
+    certificate: PathBuf,
+    private_key: PathBuf,
+}
+
+impl TestChain {
+    /// Generated per run with `openssl` rather than committed, so nothing starts failing
+    /// on the day a checked-in certificate would have expired.
+    fn generate() -> Result<Self, String> {
+        let directory = std::env::temp_dir().join("nexq-acceptance-tls");
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory)
+            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+
+        let path = |file: &str| directory.join(file);
+        let text = |file: &str| path(file).display().to_string();
+
+        openssl(&[
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=NexQ Acceptance CA",
+            "-keyout",
+            &text("ca.key"),
+            "-out",
+            &text("ca.pem"),
+        ])?;
+
+        openssl(&[
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=localhost",
+            "-keyout",
+            &text("server.key"),
+            "-out",
+            &text("server.csr"),
+        ])?;
+
+        // `localhost` in a SAN, since that is the host the CLI will be told to reach and
+        // where a modern client looks for the name.
+        std::fs::write(
+            path("server.ext"),
+            "subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\n",
+        )
+        .map_err(|error| format!("could not write extensions: {error}"))?;
+
+        openssl(&[
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            &text("server.csr"),
+            "-CA",
+            &text("ca.pem"),
+            "-CAkey",
+            &text("ca.key"),
+            "-extfile",
+            &text("server.ext"),
+            "-out",
+            &text("server.pem"),
+        ])?;
+
+        Ok(Self {
+            authority: path("ca.pem"),
+            certificate: path("server.pem"),
+            private_key: path("server.key"),
+        })
+    }
+}
+
+fn openssl(arguments: &[&str]) -> Result<(), String> {
+    let output = Command::new("openssl")
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("could not run openssl: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "openssl {} failed: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
 /// The `aws` CLI, pointed at a NexQ server.
 ///
 /// Cloneable so a check can hand one to a thread — long polling needs a second client
@@ -122,6 +261,9 @@ pub struct Aws {
     endpoint: String,
     key_id: String,
     secret: String,
+
+    /// A certificate authority for the CLI to trust, when the server is serving HTTPS.
+    ca_bundle: Option<PathBuf>,
 }
 
 impl Aws {
@@ -176,9 +318,16 @@ impl Aws {
     }
 
     fn run(&self, args: &[&str]) -> Result<String, String> {
-        let output = Command::new("aws")
-            .arg("--endpoint-url")
-            .arg(&self.endpoint)
+        let mut command = Command::new("aws");
+        command.arg("--endpoint-url").arg(&self.endpoint);
+
+        // The CLI is told to trust the generated authority rather than to skip
+        // verification, so the chain has to actually check out for a check to pass.
+        if let Some(ca_bundle) = &self.ca_bundle {
+            command.arg("--ca-bundle").arg(ca_bundle);
+        }
+
+        let output = command
             .arg("sqs")
             .args(args)
             .env("AWS_ACCESS_KEY_ID", &self.key_id)

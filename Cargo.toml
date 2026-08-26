@@ -51,10 +51,32 @@ figment = { version = "0.10.19", features = ["toml", "env"] }
 hex = "0.4.3"
 hmac = "0.13.0"
 md-5 = "0.11.0"
+# `ring` rather than the default `aws-lc-rs` provider: it needs only a C compiler,
+# where aws-lc-rs also wants cmake. One less thing an air-gapped build has to have.
+rustls = { version = "0.23.43", default-features = false, features = [
+  "logging",
+  "ring",
+  "std",
+  "tls12",
+] }
+rustls-pemfile = "2.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
 thiserror = "2.0.20"
+# Performs TLS handshakes off the accept path, so one stalled client cannot stop the
+# server accepting others — and implements axum's `Listener`, so graceful shutdown is
+# unchanged from the plain-TCP case.
+tokio-rustls = { version = "0.26.4", default-features = false, features = [
+  "logging",
+  "ring",
+  "tls12",
+] }
+tls-listener = { version = "0.11.2", default-features = false, features = [
+  "axum",
+  "rustls-ring",
+  "tokio-net",
+] }
 tokio = "1.53.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

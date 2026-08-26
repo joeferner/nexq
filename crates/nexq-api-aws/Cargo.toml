@@ -14,17 +14,22 @@ hex = { workspace = true }
 hmac = { workspace = true }
 md-5 = { workspace = true }
 nexq-core = { workspace = true }
+rustls = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tls-listener = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
+# A real TLS client for the handshake tests, plus PEM parsing to trust the test cert.
+rustls-pemfile = { workspace = true }
 # Test-only: lets facade tests run against a real engine and backend. No cycle —
 # both crates depend on nexq-core, and neither depends on the other outside tests.
 nexq-store-memory = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tokio-rustls = { workspace = true }
 tower = { workspace = true }
 
 [lints]

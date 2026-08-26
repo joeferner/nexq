@@ -23,6 +23,10 @@
   dequeue instead of client-side polling)
 - **Prometheus** metrics endpoint
 - **KEDA** integration for autoscaling consumers
+- **SQS ingest task** — a server-side background task that consumes from a real
+  (or NexQ) SQS queue and re-enqueues each message into a NexQ queue, so
+  cloud-produced events (notably **S3 event notifications**) can be worked by
+  on-prem consumers that only speak NexQ
 - Simple **web UI** (queue/cluster inspection, DLQ management)
 - **CLI** with command surface similar to `aws sqs` / `aws sns`
 - **Docker image + Helm chart** so standing up a single-node or multi-node HA
@@ -449,6 +453,85 @@ Roughly in the order they block downstream design:
     project's env-var convention — as a standalone project, NexQ has no external
     deployment tooling to stay compatible with, so the natural default for a
     Rust service applies.
+
+### Ingest / bridging
+24. **[ANSWERED] A server-side task that reads from an SQS queue and pumps those messages
+    into a NexQ queue.** A long-running background task, configured per
+    source→destination pair, that receives from an external SQS-compatible endpoint
+    (real AWS SQS, or another NexQ instance's SQS facade), enqueues each message into
+    a named NexQ queue, and only then deletes it from the source. Motivating case:
+    **S3 event notifications** — S3 can deliver object-created/removed events to an
+    SQS queue but not to NexQ, so this task is what lets an on-prem consumer that
+    only speaks NexQ (REST/CLI, with priority, position, DLQ) work an S3 event
+    stream. Same shape covers any producer that can only write to SQS, and it
+    complements rather than duplicates the SQS *facade*: the facade makes NexQ look
+    like SQS to clients, this makes NexQ a *client* of someone else's SQS.
+
+    Design points, all now decided:
+    - **[ANSWERED] Where it runs: on the primary only.** It is a producer, and every
+      enqueue is proxied to the primary anyway (Q3b/Q4) — running a copy on each node
+      would mean N competing consumers of the same source queue for no benefit. It
+      starts when a node takes leadership (alongside Q4's rehydration read) and stops
+      when leadership is lost, so exactly one instance is polling each source. In
+      single-node mode it simply always runs.
+    - **[ANSWERED] Delivery semantics: at-least-once, deliberately.** Enqueue into
+      NexQ, then delete from the source. A crash between the two redelivers, so
+      consumers must tolerate duplicates — the same contract the rest of the system
+      already has. Reversing the order (delete first) would trade duplicates for lost
+      messages, which is worse. **The duplication risk is documented rather than
+      engineered away**: user-facing docs must state plainly that bridged messages are
+      at-least-once and that consumers need to be idempotent (for the S3 case, keyed
+      on object key + version id). No dedup layer on the NexQ side.
+    - **[ANSWERED] Polling the source: SQS long-polling**, which SQS already supports
+      natively (`WaitTimeSeconds`) — no bespoke mechanism, and an idle source costs
+      approximately nothing. The Q4/§4 objection to polling was about it scaling with
+      *worker count*; this is one long-poller per source queue on one node.
+    - **[ANSWERED] Credentials: a separate outbound credential store, documented as
+      such.** Unlike everything in Q10/Q10a, these are *outbound* credentials — an AWS
+      key/secret (or IAM role, if the deployment has one) for the source account, not
+      a NexQ-issued principal. Deliberately not conflated with NexQ's own trust root:
+      NexQ verifies inbound SigV4 against its own registry and separately *presents*
+      these credentials to someone else's SQS. Air-gapped deployments won't use this
+      feature at all; deployments that do use it are by definition not air-gapped.
+    - **[ANSWERED] Message shape: full pass-through — a bridged message must look
+      like any other SQS message to the consumer.** Body and message attributes are
+      carried across verbatim; no envelope, no wrapper, no injected source-metadata
+      attributes (which would themselves make it *not* look like an ordinary
+      message). A consumer receiving an S3 event notification through NexQ sees the
+      same payload it would have seen reading the source queue directly, so existing
+      S3-event consumer code works unchanged. Consequence: provenance (which bridge,
+      which source queue, original message id) lives in NexQ's logs and metrics, not
+      in the message — the right place for it, since it's an operator concern, not a
+      consumer one. SQS system attributes that are inherently per-delivery
+      (`SentTimestamp`, `ApproximateReceiveCount`) are naturally NexQ's own values on
+      the destination side, not the source's.
+    - **[ANSWERED] Priority: fixed per source→destination pair, with an optional
+      message-attribute override.** Each bridge config names the priority its messages
+      get; if a configured attribute is present on an individual message, its value
+      wins. Covers both the common case (all S3 events are equal) and per-message
+      urgency without requiring the producer to know anything about NexQ.
+    - **[ANSWERED] Repeated failures are handled on the SQS side.** If a message can't
+      be enqueued into NexQ, the bridge simply doesn't delete it; the source queue's
+      own visibility timeout redelivers it, and the source's `maxReceiveCount`/redrive
+      policy sends it to the source's DLQ if it keeps failing. NexQ does not need a
+      bridge-specific DLQ or retry ledger — SQS already has that machinery, and a
+      message that never made it into NexQ isn't NexQ's to hold.
+    - **[ANSWERED] Configured and managed at runtime: create/list/delete/pause via
+      REST, CLI, and web UI**, not static config-file entries only. Bridges are
+      therefore a first-class managed resource, which pulls in three consequences
+      worth naming: (1) bridge definitions need durable storage of their own so they
+      survive restart and are visible to every node — same backend question every
+      other piece of cluster state has; (2) they add a resource type to the REST
+      surface, and so to the generated OpenAPI spec and every client generated from
+      it (Q12/Q18a) — CLI and web UI included, per Q13/Q18; (3) `pause` is an explicit
+      state, not just delete-and-recreate, so the model is at minimum
+      `enabled/paused` per bridge, with observable status (last receive, last error,
+      messages forwarded) for the UI to show.
+    - **Sequencing**: the runtime-management decision above means this is *not* a
+      cheap early add — it depends on REST, the CLI, and the web UI, so it lands after
+      those exist, not alongside the core engine. The forwarding loop itself is small;
+      the management surface is the bulk of the work. Squarely outside the current
+      `aws sqs` milestone in [todo.md](todo.md).
 
 ---
 
