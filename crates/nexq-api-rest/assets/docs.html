@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NexQ API</title>
+    <!--
+      {{PREFIX}} is substituted once when the router is built, so these paths cannot drift
+      from the Rust constant that decides where the routes actually live.
+    -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="app"></div>
+    <!--
+      Both scripts are served by this server from its own binary. Nothing here reaches a
+      CDN, which is the whole reason the bundle is vendored rather than linked.
+    -->
+    <script src="{{PREFIX}}/docs/scalar.js"></script>
+    <script src="{{PREFIX}}/docs/bootstrap.js"></script>
+  </body>
+</html>

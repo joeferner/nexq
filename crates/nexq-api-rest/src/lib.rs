@@ -11,9 +11,10 @@
 //! whether to run it.
 
 pub mod auth;
+pub mod docs;
 pub mod error;
 pub mod messages;
 pub mod server;
 
 pub use error::{ApiError, ErrorBody};
-pub use server::{API_PREFIX, OPENAPI_PATH, Server, openapi, openapi_json};
+pub use server::{API_PREFIX, DOCS_PATH, OPENAPI_PATH, Server, openapi, openapi_json};

@@ -136,3 +136,11 @@ make acceptance-node   # the AWS SDK for JavaScript, which also validates checks
 
 [`todo.md`](todo.md) is the working plan, and records why particular decisions went the
 way they did.
+
+# License
+
+MIT — see [`LICENSE`](LICENSE). Use it, ship it, sell it; keep the copyright notice.
+
+The API documentation page bundles [Scalar](https://github.com/scalar/scalar), which is
+also MIT and carries its own notice in
+[`crates/nexq-api-rest/assets/scalar/`](crates/nexq-api-rest/assets/scalar/).

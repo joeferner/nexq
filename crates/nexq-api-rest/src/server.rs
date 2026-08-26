@@ -30,6 +30,7 @@ use tokio::net::TcpListener;
 use tracing::{debug, info};
 
 use crate::auth;
+use crate::docs::Docs;
 use crate::error::ApiError;
 use crate::messages;
 
@@ -167,6 +168,9 @@ impl Server {
 /// to collide with them.
 pub const API_PREFIX: &str = "/api/v1";
 
+/// Where the browsable documentation page is served. See [`crate::docs`].
+pub const DOCS_PATH: &str = "/api/v1/docs";
+
 /// Where the generated OpenAPI document is served.
 ///
 /// Spelled out rather than built from [`API_PREFIX`] so it stays a `&'static str`; a test
@@ -280,11 +284,13 @@ pub fn router(facade: FacadeState) -> Router {
             require_token,
         ))
         .with_state(facade)
-        // Added after the auth layer, so the spec is readable without a token. It
-        // describes the shape of the API and carries nothing deployment-specific — no
-        // queue names, no data — and a client generator has to be able to fetch it.
+        // Added after the auth layer, so the spec and the page that renders it are
+        // readable without a token. They describe the shape of the API and carry nothing
+        // deployment-specific — no queue names, no data — and a client generator has to be
+        // able to fetch the document.
         .route(OPENAPI_PATH, get(serve_openapi))
         .layer(Extension(spec))
+        .nest(API_PREFIX, Docs::new(API_PREFIX).router())
         // Answers in this facade's own envelope rather than axum's empty body, so a
         // client parsing errors does not have to special-case a wrong URL.
         .fallback(async || ApiError::no_such_route())
@@ -600,6 +606,117 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&openapi_json()).expect("json"),
             "the served document must be the generated one"
         );
+    }
+
+    /// The docs page and its assets, all readable without a token like the spec.
+    #[tokio::test]
+    async fn the_docs_page_and_its_assets_are_served_from_this_binary() {
+        for (path, expected_type) in [
+            (DOCS_PATH, "text/html; charset=utf-8"),
+            (
+                "/api/v1/docs/bootstrap.js",
+                "text/javascript; charset=utf-8",
+            ),
+            ("/api/v1/docs/scalar.js", "text/javascript; charset=utf-8"),
+        ] {
+            let request = HttpRequest::builder()
+                .method("GET")
+                .uri(path)
+                .body(Body::empty())
+                .expect("request");
+
+            let response = router(Arc::new(Facade {
+                auth: test_auth(),
+                engine: test_engine(),
+            }))
+            .oneshot(request)
+            .await
+            .expect("response");
+
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+                Some(expected_type),
+                "{path}"
+            );
+
+            // The header that stops a pasted token reaching anywhere but this origin.
+            let policy = response
+                .headers()
+                .get("content-security-policy")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            assert!(policy.contains("connect-src 'self'"), "{path}: {policy}");
+        }
+    }
+
+    /// A 3.8 MB script should not come down again on every reload.
+    #[tokio::test]
+    async fn a_client_that_already_has_an_asset_gets_a_304() {
+        let path = "/api/v1/docs/scalar.js";
+
+        let first = router(Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        }))
+        .oneshot(
+            HttpRequest::builder()
+                .method("GET")
+                .uri(path)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+        let etag = first
+            .headers()
+            .get(header::ETAG)
+            .expect("an asset must be cacheable")
+            .clone();
+
+        let again = router(Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        }))
+        .oneshot(
+            HttpRequest::builder()
+                .method("GET")
+                .uri(path)
+                .header(header::IF_NONE_MATCH, &etag)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+        assert!(
+            again
+                .into_body()
+                .collect()
+                .await
+                .expect("body")
+                .to_bytes()
+                .is_empty(),
+            "a 304 carries no body"
+        );
+    }
+
+    /// The page is documentation, not an operation — a generated client should have no
+    /// `getDocsPage` method.
+    #[tokio::test]
+    async fn the_docs_routes_are_not_in_the_spec() {
+        let paths =
+            serde_json::from_str::<serde_json::Value>(&openapi_json()).expect("json")["paths"]
+                .clone();
+
+        for path in paths.as_object().expect("an object").keys() {
+            assert!(!path.contains("/docs"), "{path} should not be documented");
+        }
     }
 
     #[tokio::test]

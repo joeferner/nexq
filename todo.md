@@ -162,9 +162,40 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       the shape of the API and carries nothing deployment-specific — no queue names, no
       data — and a client generator has to be able to fetch it.
 
-      Not the `scalar`/`redoc`/`swagger` features, which serve a documentation UI. Each
-      renders a page that pulls its JavaScript from a CDN, which is exactly what an
-      air-gapped deployment (Q21) cannot do. The spec itself is served instead.
+      A browsable [Scalar](https://github.com/scalar/scalar) page alongside it at
+      `/api/v1/docs`, served **entirely from the binary**. Not aide's own `scalar` feature,
+      nor the `redoc` or `swagger` ones: each renders a page that pulls its JavaScript from
+      a CDN, which is exactly what an air-gapped deployment (Q21) cannot reach, and a docs
+      page that is blank in the environments NexQ is built for is worse than none. The
+      bundle is vendored instead, with its version, licence, and refresh procedure in
+      `assets/scalar/PROVENANCE.md`.
+
+      **The bundle defaults to routing "try it" requests through `https://proxy.scalar.com`.**
+      A developer pasting a bearer token into the page would be handing it to a third party.
+      Switched off with `proxyUrl: ''` — and the page's `connect-src 'self'` refuses the
+      request anyway, so a future version renaming that option cannot silently re-enable it.
+      Its webfonts come from `fonts.scalar.com` by default too, off via
+      `withDefaultFonts: false` and blocked by `font-src`.
+
+      The policy omits `unsafe-eval`, which is checked rather than hoped: the vendored
+      bundle contains no `eval`, `new Function`, or `Worker`, and a test says so, so a
+      future version needing one fails instead of rendering blank. `script-src 'self'` with
+      no `unsafe-inline` is why the bootstrap is its own file. `style-src` does allow
+      inline, because the bundle injects its stylesheets by creating `<style>` elements.
+
+      The 3.8 MB bundle is the real cost, and it sits in read-only data — paged in only when
+      somebody opens the page. Conditional requests make a reload a 304 rather than 3.8 MB
+      again. Serving it gzipped would save 2.7 MB of image size and is the obvious follow-up
+      if that matters.
+
+      The docs routes are plain `axum` rather than `aide` ones, so "fetch the docs page"
+      does not become a method in every generated client; a test asserts no `/docs` path
+      appears in the document.
+
+      Not verified in a browser — there is none in this environment, so the page's actual
+      rendering is unconfirmed. What is checked is everything around it: status, content
+      types, the policy header, the substituted paths, the 304, and the bundle's own
+      properties. **Worth one look in a browser.**
 
       **Doc comments now have two audiences**, which is the part worth remembering. They
       are the published contract, so they are written for an API consumer and rationale for

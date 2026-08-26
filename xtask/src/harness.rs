@@ -55,7 +55,12 @@ impl Server {
 
     fn start_with(tls: Option<TestChain>) -> Result<Self, String> {
         let binary = build_server()?;
-        let port = free_port()?;
+
+        // Every facade the example config enables gets a port of its own, not just the
+        // one being driven: a facade left on its default port makes a second server
+        // impossible to start while the first is running, which is exactly what the TLS
+        // check does.
+        let [port, rest_port] = free_ports()?;
         let address = format!("127.0.0.1:{port}");
         let scheme = if tls.is_some() { "https" } else { "http" };
         let endpoint = format!("{scheme}://localhost:{port}");
@@ -67,8 +72,13 @@ impl Server {
             .env("NEXQ_CONFIG", workspace_root()?.join("nexq.example.toml"))
             .env("NEXQ_AWS_API__BIND_ADDR", &address)
             .env("NEXQ_AWS_API__PUBLIC_BASE_URL", &endpoint)
+            .env("NEXQ_REST_API__BIND_ADDR", format!("127.0.0.1:{rest_port}"))
             .env("RUST_LOG", "nexq=info")
-            .stdout(Stdio::null())
+            // Both, because they carry different things: the log goes to stdout, and a
+            // panic goes to stderr. Read only when something has gone wrong, which is
+            // safe because nothing here logs per request — a server that chattered on
+            // every request could fill a pipe nobody is draining and block.
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         if let Some(chain) = &tls {
@@ -83,14 +93,14 @@ impl Server {
             .spawn()
             .map_err(|error| format!("could not start {}: {error}", binary.display()))?;
 
-        let server = Self { child, endpoint };
+        let mut server = Self { child, endpoint };
         server.wait_until_listening(port)?;
 
         Ok(server)
     }
 
     /// Poll the port until something answers, or give up.
-    fn wait_until_listening(&self, port: u16) -> Result<(), String> {
+    fn wait_until_listening(&mut self, port: u16) -> Result<(), String> {
         let address: SocketAddr = ([127, 0, 0, 1], port).into();
         let deadline = Instant::now() + STARTUP_TIMEOUT;
 
@@ -98,12 +108,35 @@ impl Server {
             if TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_ok() {
                 return Ok(());
             }
+
+            // A server that has already exited will never answer, and it said why on the
+            // way out. Waiting out the timeout would report the symptom and hide the
+            // cause — a bad certificate or a taken port looks the same from the socket.
+            if let Ok(Some(status)) = self.child.try_wait() {
+                return Err(format!(
+                    "the server exited before it was listening on {port} ({status}):{}",
+                    indented(&self.output_lines())
+                ));
+            }
+
             std::thread::sleep(Duration::from_millis(50));
         }
 
         Err(format!(
             "the server was not listening on {port} within {STARTUP_TIMEOUT:?}"
         ))
+    }
+
+    /// Everything the server printed, its log and any panic together.
+    ///
+    /// The pipes are taken rather than borrowed, so reading cannot block on a process
+    /// that is still running and still writing: this is only called once the server has
+    /// stopped, and whichever of startup and drop asks first gets the output.
+    fn output_lines(&mut self) -> Vec<String> {
+        let stdout = self.child.stdout.take().map(read_lines).unwrap_or_default();
+        let stderr = self.child.stderr.take().map(read_lines).unwrap_or_default();
+
+        [stdout, stderr].concat()
     }
 
     /// An `aws` CLI bound to this server.
@@ -133,21 +166,40 @@ impl Drop for Server {
         let _ = self.child.wait();
 
         // Whatever the server complained about is worth seeing when a check failed.
-        if let Some(stderr) = self.child.stderr.take() {
-            let lines: Vec<String> = BufReader::new(stderr)
-                .lines()
-                .map_while(Result::ok)
-                .filter(|line| line.contains("WARN") || line.contains("ERROR"))
-                .collect();
+        let lines: Vec<String> = self
+            .output_lines()
+            .into_iter()
+            .filter(|line| line.contains("WARN") || line.contains("ERROR"))
+            .collect();
 
-            if !lines.is_empty() {
-                eprintln!("\nserver warnings:");
-                for line in lines {
-                    eprintln!("  {line}");
-                }
+        if !lines.is_empty() {
+            eprintln!("\nserver warnings:");
+            for line in lines {
+                eprintln!("  {line}");
             }
         }
     }
+}
+
+fn read_lines(stream: impl std::io::Read) -> Vec<String> {
+    BufReader::new(stream)
+        .lines()
+        .map_while(Result::ok)
+        .collect()
+}
+
+/// Server output, laid out under the message that is reporting it.
+///
+/// Only the tail, since the startup logs above a failure are noise, and indented to the
+/// width a failing check's reason is printed at.
+fn indented(lines: &[String]) -> String {
+    const CONTEXT: usize = 10;
+
+    lines
+        .iter()
+        .skip(lines.len().saturating_sub(CONTEXT))
+        .map(|line| format!("\n          {line}"))
+        .collect()
 }
 
 /// A certificate authority and a `localhost` certificate it signed.
@@ -403,19 +455,31 @@ fn build_server() -> Result<PathBuf, String> {
         .ok_or_else(|| "cargo build reported no server executable".to_owned())
 }
 
-/// A port nothing is listening on.
+/// `N` distinct ports nothing is listening on.
 ///
 /// Found by binding and releasing, which leaves a moment in which something else could
-/// take it. Nothing else is starting servers in a CI job, and a lost race shows up as a
+/// take one. Nothing else is starting servers in a CI job, and a lost race shows up as a
 /// clear startup failure rather than as a confusing test result.
-fn free_port() -> Result<u16, String> {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|error| format!("could not find a free port: {error}"))?;
+///
+/// All of them are held at once before any is released, since binding and releasing one
+/// at a time can hand back the same port twice.
+fn free_ports<const N: usize>() -> Result<[u16; N], String> {
+    let mut listeners = Vec::with_capacity(N);
+    let mut ports = [0; N];
 
-    listener
-        .local_addr()
-        .map(|address| address.port())
-        .map_err(|error| format!("could not read the bound port: {error}"))
+    for port in &mut ports {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|error| format!("could not find a free port: {error}"))?;
+
+        *port = listener
+            .local_addr()
+            .map_err(|error| format!("could not read the bound port: {error}"))?
+            .port();
+
+        listeners.push(listener);
+    }
+
+    Ok(ports)
 }
 
 /// The workspace root, from this crate's location rather than the current directory.
