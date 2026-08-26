@@ -348,6 +348,132 @@ pub async fn deleting_a_queue_discards_its_messages(store: Arc<dyn Store>) {
     );
 }
 
+/// Purging empties a queue without removing it, and takes in-flight messages too.
+///
+/// The in-flight part is the one worth pinning: a backend that only deleted what was
+/// visible would leave claimed messages behind, and they would reappear when their claims
+/// lapsed — a purge that quietly did not purge.
+pub async fn purging_removes_every_message_including_claimed_ones(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    for body in ["visible", "to-be-claimed"] {
+        store
+            .enqueue(&queue_name, message(body, 0), None)
+            .await
+            .expect("enqueue");
+    }
+    store
+        .enqueue(
+            &queue_name,
+            message("delayed", 0),
+            Some(Duration::from_secs(3600)),
+        )
+        .await
+        .expect("enqueue delayed");
+    store
+        .claim_next(&queue_name, Some(Duration::from_secs(3600)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    let purged = store.purge_queue(&queue_name).await.expect("purge");
+
+    assert_eq!(purged, 3, "visible, claimed, and delayed alike");
+    assert_eq!(
+        store
+            .message_counts(&queue_name)
+            .await
+            .expect("counts")
+            .total(),
+        0
+    );
+    assert!(
+        claim_body(&store, &queue_name).await.is_none(),
+        "and nothing comes back later"
+    );
+}
+
+/// The queue survives a purge, attributes and all — it is emptied, not recreated.
+pub async fn purging_keeps_the_queue_and_its_attributes(store: Arc<dyn Store>) {
+    let mut configured = queue("jobs");
+    configured.attributes.visibility_timeout = Duration::from_secs(600);
+    store.create_queue(configured).await.expect("create");
+    let queue_name = name("jobs");
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+
+    store.purge_queue(&queue_name).await.expect("purge");
+
+    let after = store
+        .get_queue(&queue_name)
+        .await
+        .expect("the queue is still there");
+    assert_eq!(
+        after.attributes.visibility_timeout,
+        Duration::from_secs(600)
+    );
+}
+
+/// A receipt handle outlives its message by exactly nothing: purging invalidates it.
+pub async fn a_handle_from_before_a_purge_is_spent(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, Some(Duration::from_secs(3600)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    store.purge_queue(&queue_name).await.expect("purge");
+
+    let error = store
+        .ack(&queue_name, &claimed.receipt)
+        .await
+        .expect_err("the message it named is gone");
+    assert!(
+        matches!(error, StoreError::InvalidReceipt),
+        "expected InvalidReceipt, got {error:?}"
+    );
+}
+
+/// Purging an empty queue is a no-op rather than an error, so a caller need not check
+/// first — and it says it removed nothing.
+pub async fn purging_an_empty_queue_removes_nothing(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+
+    assert_eq!(store.purge_queue(&queue_name).await.expect("purge"), 0);
+
+    // And twice running, since nothing here is rate limited.
+    assert_eq!(store.purge_queue(&queue_name).await.expect("purge"), 0);
+}
+
+/// A purge is confined to the queue it names.
+pub async fn purging_one_queue_leaves_the_others_alone(store: Arc<dyn Store>) {
+    let jobs_name = jobs(&store).await;
+    store.create_queue(queue("emails")).await.expect("create");
+    let emails = name("emails");
+
+    for queue_name in [&jobs_name, &emails] {
+        store
+            .enqueue(queue_name, message("hello", 0), None)
+            .await
+            .expect("enqueue");
+    }
+
+    assert_eq!(store.purge_queue(&jobs_name).await.expect("purge"), 1);
+
+    assert!(claim_body(&store, &jobs_name).await.is_none());
+    assert_eq!(
+        claim_body(&store, &emails).await.as_deref(),
+        Some("hello"),
+        "the other queue must be untouched"
+    );
+}
+
 /// Every operation naming a queue that does not exist reports the same way, so a
 /// caller does not have to guess which failure means "no such queue".
 pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
@@ -390,6 +516,7 @@ pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
                 .err(),
         ),
         ("message_counts", store.message_counts(&missing).await.err()),
+        ("purge_queue", store.purge_queue(&missing).await.err()),
     ];
 
     for (operation, error) in errors {

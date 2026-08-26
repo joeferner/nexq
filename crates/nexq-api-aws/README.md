@@ -59,7 +59,10 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 - :white_check_mark: `SetQueueAttributes` — a partial update, so naming one attribute
   leaves the rest as they were, and all-or-nothing, so a request that mixes a supported
   attribute with an unsupported one changes neither
-- :scroll: `PurgeQueue`
+- :white_check_mark: `PurgeQueue` — empties a queue, keeps the queue. Takes in-flight
+  messages too, so a handle held across a purge stops working. No sixty-second rate
+  limit: SQS needs one because its purge is asynchronous, and this one is done when it
+  answers
 - :scroll: `TagQueue` / `UntagQueue` / `ListQueueTags`
 
 ## Message operations
@@ -340,6 +343,28 @@ aws sqs get-queue-attributes --queue-url "$QUEUE" \
   --attribute-names ApproximateNumberOfMessages
 
 aws sqs set-queue-attributes --queue-url "$QUEUE" --attributes VisibilityTimeout=600
+```
+
+To throw away everything in a queue without deleting the queue:
+
+```sh
+aws sqs purge-queue --queue-url "$QUEUE"
+```
+
+**Irreversible, and it takes in-flight messages with it** — a consumer working on a
+message right now will find its receipt handle invalid, because the message is gone. The
+queue itself survives with its attributes, which is what separates this from
+`delete-queue`.
+
+Unlike SQS there is no sixty-second cooldown: SQS's purge runs asynchronously and it
+refuses a second one with `PurgeQueueInProgress` while the first is still going, whereas
+this one has finished by the time it answers. Purge twice in a row if you like.
+
+This is the one operation logged at `info` rather than `debug`, with a count of what it
+removed, since it is the one that destroys data a client cannot get back:
+
+```
+INFO nexq_api_aws::operations: purged queue queue=jobs purged=3
 ```
 
 The three counts are disjoint and together cover every message the queue holds:

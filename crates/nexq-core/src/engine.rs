@@ -313,6 +313,20 @@ impl Engine {
         Ok(())
     }
 
+    /// Delete every message in a queue, keeping the queue.
+    ///
+    /// Returns how many were removed. **Irreversible, and it takes in-flight messages
+    /// with it** — a consumer that is working on a message right now will find its
+    /// receipt handle invalid, because the message is gone.
+    ///
+    /// No rate limit, unlike SQS, which refuses a second purge within sixty seconds with
+    /// `PurgeQueueInProgress`. That limit exists because SQS's purge is asynchronous and
+    /// takes up to a minute to finish; this one has finished when it returns, so there is
+    /// no window to protect and refusing would be a limitation invented for its own sake.
+    pub async fn purge_queue(&self, name: &QueueName) -> Result<u64> {
+        Ok(self.store.purge_queue(name).await?)
+    }
+
     /// One page of queues, in name order.
     ///
     /// Filtering and paging live here rather than in a facade so every protocol gets
@@ -1947,6 +1961,10 @@ mod tests {
 
         async fn delete_queue(&self, name: &QueueName) -> StoreResult<()> {
             self.inner.delete_queue(name).await
+        }
+
+        async fn purge_queue(&self, name: &QueueName) -> StoreResult<u64> {
+            self.inner.purge_queue(name).await
         }
 
         async fn list_queues(&self) -> StoreResult<Vec<Queue>> {

@@ -249,10 +249,19 @@ belongs — see Future for why that is not a timer.
       New config: `aws_api.region`, default `us-east-1`, used *only* for the region slot
       in a queue ARN. It is not checked against what a client signs with — any region
       still works. Verified against the real `aws-cli`.
-- [ ] `MessageRetentionPeriod` — needs message expiry, which NexQ does not do at all.
-      Currently refused with that as the stated reason rather than answered with SQS's
-      four-day default, which would promise expiry that never happens
-- [ ] `PurgeQueue`
+- [x] `PurgeQueue` — empties a queue and keeps it, taking **in-flight messages with
+      it**, so a consumer holding a receipt handle across a purge finds it invalid. A
+      backend that only deleted what was visible would leave claimed messages to reappear
+      when their claims lapsed, which is a purge that quietly did not purge; the
+      conformance case for it fails against exactly that mutation.
+
+      No rate limit, unlike SQS, which refuses a second purge within sixty seconds with
+      `PurgeQueueInProgress`. That error covers SQS's purge being asynchronous; this one
+      has finished when it answers, so refusing would be a limitation invented for its own
+      sake. Verified: three purges in a row all succeed.
+
+      The only operation logged at `info` rather than `debug`, since it is the one that
+      destroys data irrecoverably — the line carries how many messages went.
 - [ ] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`
 - [ ] Message attributes, with their own MD5
 - [ ] `DelaySeconds` on send and as a queue attribute
@@ -279,6 +288,17 @@ belongs — see Future for why that is not a timer.
 - `SenderId` on receive, which needs the sending principal recorded on the message.
   Named explicitly it is refused rather than answered with a placeholder, and `All`
   stays silent about it.
+- Message expiry, and the `MessageRetentionPeriod` attribute that reports it. NexQ keeps
+  a message until someone deletes it, so there is no retention period to report and
+  `GetQueueAttributes` refuses the attribute with that as the stated reason. Answering
+  with SQS's four-day default instead would promise an expiry that never comes, and a
+  client relying on it would find its queue growing without limit.
+
+  A real implementation is a sweep rather than a per-message timer, for the same reason
+  the visibility item above is not a timer: the cost should scale with queues, not with
+  messages. It also raises a question NexQ has not had to answer yet — whether an expired
+  message is dropped or sent to a dead-letter queue — so it is worth doing alongside DLQ
+  rather than before it.
 - Per-principal authorization — the registry authenticates _who_ a caller is, but
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason

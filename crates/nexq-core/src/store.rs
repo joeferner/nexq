@@ -110,6 +110,15 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     /// Delete a queue and everything in it.
     async fn delete_queue(&self, name: &QueueName) -> Result<()>;
 
+    /// Delete every message in a queue, keeping the queue itself.
+    ///
+    /// Returns how many were removed, which a caller can log — this throws away data
+    /// irrecoverably, so how much it threw away is worth recording.
+    ///
+    /// Claimed messages go too. A consumer holding a receipt handle across a purge finds
+    /// it invalid afterwards, which is correct: the message it named is gone.
+    async fn purge_queue(&self, name: &QueueName) -> Result<u64>;
+
     /// Every queue, in no particular order.
     ///
     /// Unpaged and unfiltered on purpose while the surface stays small; prefix

@@ -69,6 +69,14 @@ macro_rules! conformance_tests {
         $crate::conformance_case!($new_store, only_one_concurrent_create_wins);
         $crate::conformance_case!($new_store, a_deleted_queue_is_gone_and_its_name_is_reusable);
         $crate::conformance_case!($new_store, deleting_a_queue_discards_its_messages);
+        $crate::conformance_case!(
+            $new_store,
+            purging_removes_every_message_including_claimed_ones
+        );
+        $crate::conformance_case!($new_store, purging_keeps_the_queue_and_its_attributes);
+        $crate::conformance_case!($new_store, a_handle_from_before_a_purge_is_spent);
+        $crate::conformance_case!($new_store, purging_an_empty_queue_removes_nothing);
+        $crate::conformance_case!($new_store, purging_one_queue_leaves_the_others_alone);
         $crate::conformance_case!($new_store, operations_on_a_missing_queue_report_it);
 
         // Sending and claiming.

@@ -122,6 +122,18 @@ impl Store for FakeStore {
             .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
     }
 
+    async fn purge_queue(&self, name: &QueueName) -> Result<u64> {
+        if !self.queues.lock().expect("lock").contains_key(name) {
+            return Err(StoreError::QueueNotFound(name.clone()));
+        }
+
+        let mut messages = self.messages.lock().expect("lock");
+        let before = messages.len();
+        messages.retain(|held| &held.queue != name);
+
+        Ok((before - messages.len()) as u64)
+    }
+
     async fn list_queues(&self) -> Result<Vec<Queue>> {
         Ok(self
             .queues
@@ -278,6 +290,10 @@ impl Store for BrokenStore {
     }
 
     async fn delete_queue(&self, _name: &QueueName) -> Result<()> {
+        Err(Self::failure())
+    }
+
+    async fn purge_queue(&self, _name: &QueueName) -> Result<u64> {
         Err(Self::failure())
     }
 

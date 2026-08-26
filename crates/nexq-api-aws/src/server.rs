@@ -491,7 +491,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_known_operation_without_a_handler_routes_but_is_not_implemented() {
-        let (status, body) = send_signed(Some("AmazonSQS.PurgeQueue"), "{}").await;
+        // Swap this for another unimplemented operation when batching lands.
+        let (status, body) = send_signed(Some("AmazonSQS.SendMessageBatch"), "{}").await;
 
         // Recognised, but not built yet — which is not the same as unknown.
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
@@ -500,7 +501,7 @@ mod tests {
             body["message"]
                 .as_str()
                 .expect("message")
-                .contains("PurgeQueue"),
+                .contains("SendMessageBatch"),
             "{body}"
         );
     }

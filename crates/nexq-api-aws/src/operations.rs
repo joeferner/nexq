@@ -11,6 +11,7 @@ use std::time::Duration;
 use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
 use nexq_core::model::{MessageCounts, Priority, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
+use tracing::info;
 
 use crate::error::ApiError;
 use crate::message_attributes::Selection;
@@ -47,6 +48,7 @@ impl Operations {
             Operation::ReceiveMessage => self.receive_message(&input).await,
             Operation::DeleteMessage => self.delete_message(&input).await,
             Operation::ChangeMessageVisibility => self.change_message_visibility(&input).await,
+            Operation::PurgeQueue => self.purge_queue(&input).await,
             Operation::GetQueueAttributes => self.get_queue_attributes(&input).await,
             Operation::SetQueueAttributes => self.set_queue_attributes(&input).await,
             not_built_yet => Err(ApiError::not_implemented(not_built_yet)),
@@ -122,6 +124,25 @@ impl Operations {
         }
 
         Ok(output)
+    }
+
+    /// `PurgeQueue` — throw away every message, keep the queue.
+    ///
+    /// Logged at `info`, unlike every other operation here, because it is the one that
+    /// destroys data a client cannot get back. How much it destroyed is the thing
+    /// somebody will want to know afterwards.
+    ///
+    /// SQS refuses a second purge within sixty seconds with `PurgeQueueInProgress`; NexQ
+    /// does not, since that error exists to cover SQS's purge being asynchronous and
+    /// this one is finished when it answers.
+    async fn purge_queue(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let name = self.queue_from_url(input)?;
+
+        let purged = self.engine.purge_queue(&name).await?;
+
+        info!(queue = %name, purged, "purged queue");
+
+        Ok(json!({}))
     }
 
     /// `GetQueueAttributes` — a queue's configuration and the facts about it.
@@ -933,6 +954,140 @@ mod tests {
             .expect_err(&value.to_string());
 
             assert_eq!(error.code(), "InvalidParameterValue", "{value}");
+        }
+    }
+
+    #[tokio::test]
+    async fn purge_queue_empties_a_queue_without_removing_it() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        for body in ["one", "two", "three"] {
+            call(
+                &operations,
+                Operation::SendMessage,
+                json!({ "QueueUrl": url, "MessageBody": body }),
+            )
+            .await
+            .expect("send");
+        }
+
+        let output = call(
+            &operations,
+            Operation::PurgeQueue,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("purge");
+        assert_eq!(output, json!({}), "SQS answers with an empty body");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10 }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(received, json!({}), "nothing left");
+
+        // The queue itself is still usable, which is what separates purge from delete.
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "after" }),
+        )
+        .await
+        .expect("the queue should still accept messages");
+    }
+
+    #[tokio::test]
+    async fn purging_takes_in_flight_messages_with_it() {
+        // The case that would otherwise pass unnoticed: a purge that only removed
+        // visible messages would leave claimed ones to reappear when their claims lapse.
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "in flight" }),
+        )
+        .await
+        .expect("send");
+        let handle = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("receive")["Messages"][0]["ReceiptHandle"]
+            .clone();
+
+        call(
+            &operations,
+            Operation::PurgeQueue,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("purge");
+
+        // The consumer still working on it now holds a handle to nothing.
+        let error = call(
+            &operations,
+            Operation::DeleteMessage,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle }),
+        )
+        .await
+        .expect_err("the message was purged");
+        assert_eq!(error.code(), "ReceiptHandleIsInvalid");
+
+        let counts = call(
+            &operations,
+            Operation::GetQueueAttributes,
+            json!({ "QueueUrl": url, "AttributeNames": ["All"] }),
+        )
+        .await
+        .expect("attributes");
+        assert_eq!(
+            counts["Attributes"]["ApproximateNumberOfMessagesNotVisible"],
+            "0"
+        );
+    }
+
+    #[tokio::test]
+    async fn purging_is_allowed_twice_running() {
+        // SQS refuses a second purge within a minute, because its own purge is
+        // asynchronous. NexQ's has finished when it answers, so there is nothing to
+        // protect and refusing would be a limitation invented for its own sake.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        for attempt in 0..3 {
+            call(
+                &operations,
+                Operation::PurgeQueue,
+                json!({ "QueueUrl": url }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("purge {attempt}: {error:?}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn purging_a_queue_that_is_not_there_is_an_error() {
+        let operations = operations();
+
+        for (input, expected) in [
+            (json!({}), "MissingParameter"),
+            (
+                json!({ "QueueUrl": "http://localhost:8080/000000000000/nope" }),
+                "QueueDoesNotExist",
+            ),
+            (json!({ "QueueUrl": "nope" }), "InvalidAddress"),
+        ] {
+            let error = call(&operations, Operation::PurgeQueue, input.clone())
+                .await
+                .expect_err(&input.to_string());
+
+            assert_eq!(error.code(), expected, "{input}");
         }
     }
 
@@ -2206,7 +2361,9 @@ mod tests {
 
     #[tokio::test]
     async fn operations_without_handlers_are_still_not_implemented() {
-        let error = call(&operations(), Operation::PurgeQueue, json!({}))
+        // A real SQS operation with no handler here, which must be distinguishable from
+        // one that does not exist. Swap it when batching lands.
+        let error = call(&operations(), Operation::SendMessageBatch, json!({}))
             .await
             .expect_err("no handler yet");
 

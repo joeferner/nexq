@@ -194,6 +194,19 @@ impl Store for MemoryStore {
             .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
     }
 
+    async fn purge_queue(&self, name: &QueueName) -> Result<u64> {
+        let mut queues = self.write()?;
+        let held = queues
+            .get_mut(name)
+            .ok_or_else(|| StoreError::QueueNotFound(name.clone()))?;
+
+        // Everything, claimed included: the queue stays, its contents do not.
+        let purged = held.messages.len() as u64;
+        held.messages.clear();
+
+        Ok(purged)
+    }
+
     async fn list_queues(&self) -> Result<Vec<Queue>> {
         Ok(self
             .read()?
