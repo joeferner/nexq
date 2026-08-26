@@ -93,8 +93,10 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       create, get, delete, list — plus a `StoreError` that separates "no such queue"
       from "the backend broke"
 - [x] Memory store in `nexq-store-memory`, its own crate alongside the other backends
-- [ ] `nexq-store-conformance` suite covering the operations implemented so far,
-      running green against the memory store
+- [x] `nexq-store-conformance` suite covering the operations implemented so far,
+      running green against the memory store. 25 cases generated as individual
+      `#[tokio::test]`s by `conformance_tests!(new_store)`; verified to *fail* by
+      deliberately breaking five contract promises in the memory store
 - [x] Core engine operations: create, get, delete, list — with idempotent creation
       decided here, so every facade inherits it
 - [x] Queue URL construction *and parsing* from the configured public base URL — the

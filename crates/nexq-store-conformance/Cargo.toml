@@ -9,6 +9,8 @@ authors.workspace = true
 
 [dependencies]
 nexq-core = { workspace = true }
+# `rt` for the concurrency cases, `time` for the ones that wait out a claim.
+tokio = { workspace = true, features = ["rt", "time"] }
 
 [lints]
 workspace = true

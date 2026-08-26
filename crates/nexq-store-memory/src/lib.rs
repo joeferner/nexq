@@ -245,514 +245,88 @@ impl Store for MemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use nexq_core::model::{Priority, QueueAttributes};
-
     use super::*;
+
+    // The shared contract — ordering, claim expiry, acknowledgement, concurrency — is
+    // asserted by `nexq-store-conformance` in `tests/conformance.rs`, which every
+    // backend runs. What is left here is what belongs to this backend alone.
+
+    use nexq_core::model::Priority;
 
     fn name(name: &str) -> QueueName {
         QueueName::new(name).expect("valid queue name")
     }
 
-    fn queue(queue_name: &str) -> Queue {
-        Queue::new(name(queue_name))
-    }
-
-    fn message(body: &str, priority: i32) -> Message {
-        Message::new(body, Priority::new(priority))
-    }
-
-    /// A store with one empty queue named `jobs`.
-    async fn store_with_queue() -> MemoryStore {
-        let store = MemoryStore::new();
-        store.create_queue(queue("jobs")).await.expect("create");
-        store
-    }
-
-    async fn claim_body(store: &MemoryStore) -> Option<String> {
-        store
-            .claim_next(&name("jobs"), None)
-            .await
-            .expect("claim")
-            .map(|claimed| claimed.message.body)
-    }
-
     #[tokio::test]
-    async fn a_created_queue_can_be_read_back() {
-        let store = MemoryStore::new();
-
-        store.create_queue(queue("jobs")).await.expect("create");
-
-        let found = store.get_queue(&name("jobs")).await.expect("get");
-        assert_eq!(found.name, name("jobs"));
-        assert_eq!(found.attributes, QueueAttributes::default());
-    }
-
-    #[tokio::test]
-    async fn attributes_survive_the_round_trip() {
-        let store = MemoryStore::new();
-        let mut expected = queue("jobs");
-        expected.attributes = QueueAttributes {
-            visibility_timeout: Duration::from_secs(120),
-            delay: Duration::from_secs(5),
-            receive_wait_time: Duration::from_secs(20),
-            max_receive_count: Some(3),
-            dead_letter_queue: Some(name("jobs_dlq")),
-        };
-
-        store.create_queue(expected.clone()).await.expect("create");
-
-        let found = store.get_queue(&name("jobs")).await.expect("get");
-        assert_eq!(found, expected);
-    }
-
-    #[tokio::test]
-    async fn an_empty_store_has_no_queues() {
-        let store = MemoryStore::new();
-
-        assert!(store.list_queues().await.expect("list").is_empty());
-        assert_eq!(store.queue_count().expect("count"), 0);
-    }
-
-    #[tokio::test]
-    async fn every_queue_is_listed() {
-        let store = MemoryStore::new();
-        for queue_name in ["one", "two", "three"] {
-            store.create_queue(queue(queue_name)).await.expect("create");
-        }
-
-        let mut listed: Vec<String> = store
-            .list_queues()
-            .await
-            .expect("list")
-            .into_iter()
-            .map(|queue| queue.name.to_string())
-            .collect();
-        listed.sort();
-
-        assert_eq!(listed, ["one", "three", "two"]);
-        assert_eq!(store.queue_count().expect("count"), 3);
-    }
-
-    #[tokio::test]
-    async fn creating_a_queue_twice_fails_without_disturbing_the_first() {
-        let store = MemoryStore::new();
-        store.create_queue(queue("jobs")).await.expect("create");
-        let original = store.get_queue(&name("jobs")).await.expect("get");
-
-        let mut different = queue("jobs");
-        different.attributes.visibility_timeout = Duration::from_secs(600);
-        let error = store
-            .create_queue(different)
-            .await
-            .expect_err("already exists");
-
-        assert!(
-            matches!(&error, StoreError::QueueAlreadyExists(existing) if existing == &name("jobs")),
-            "{error:?}"
-        );
-        assert_eq!(
-            store.get_queue(&name("jobs")).await.expect("get"),
-            original,
-            "a rejected create must not have overwritten anything"
-        );
-    }
-
-    #[tokio::test]
-    async fn only_one_of_many_concurrent_creates_wins() {
-        let store = Arc::new(MemoryStore::new());
-
-        let attempts: Vec<_> = (0..16)
-            .map(|_| {
-                let store = Arc::clone(&store);
-                tokio::spawn(async move { store.create_queue(queue("jobs")).await })
-            })
-            .collect();
-
-        let mut created = 0;
-        let mut rejected = 0;
-        for attempt in attempts {
-            match attempt.await.expect("task") {
-                Ok(()) => created += 1,
-                Err(StoreError::QueueAlreadyExists(_)) => rejected += 1,
-                Err(other) => panic!("unexpected error: {other:?}"),
-            }
-        }
-
-        assert_eq!(created, 1, "exactly one create should succeed");
-        assert_eq!(rejected, 15);
-        assert_eq!(store.queue_count().expect("count"), 1);
-    }
-
-    #[tokio::test]
-    async fn a_deleted_queue_is_gone_and_the_name_is_reusable() {
-        let store = MemoryStore::new();
-        store.create_queue(queue("jobs")).await.expect("create");
-
-        store.delete_queue(&name("jobs")).await.expect("delete");
-
-        store.get_queue(&name("jobs")).await.expect_err("deleted");
-        assert!(store.list_queues().await.expect("list").is_empty());
-        store
-            .create_queue(queue("jobs"))
-            .await
-            .expect("the name is free again");
-    }
-
-    #[tokio::test]
-    async fn deleting_a_queue_discards_its_messages() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-
-        store.delete_queue(&name("jobs")).await.expect("delete");
-        store.create_queue(queue("jobs")).await.expect("recreate");
-
-        assert_eq!(store.message_count(&name("jobs")).expect("count"), 0);
-        assert!(claim_body(&store).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn acting_on_a_missing_queue_says_which_one() {
-        let store = MemoryStore::new();
-        let missing = name("nope");
-
-        let errors = [
-            store.get_queue(&missing).await.expect_err("get"),
-            store.delete_queue(&missing).await.expect_err("delete"),
-            store
-                .enqueue(&missing, message("hello", 0), None)
-                .await
-                .expect_err("enqueue"),
-            store.claim_next(&missing, None).await.expect_err("claim"),
-            store
-                .ack(&missing, &ReceiptHandle::new())
-                .await
-                .expect_err("ack"),
-        ];
-
-        for error in errors {
-            assert!(
-                matches!(&error, StoreError::QueueNotFound(reported) if reported == &missing),
-                "{error:?}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn the_backend_names_itself_as_config_does() {
+    async fn it_names_itself_the_way_config_does() {
+        // `memory` is what an operator writes in config, so the string matters.
         assert_eq!(MemoryStore::new().backend_name(), "memory");
         assert_eq!(BACKEND_NAME, "memory");
     }
 
     #[tokio::test]
-    async fn it_works_behind_dyn_store() {
-        // The shape the engine holds a backend in.
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-
-        store.create_queue(queue("jobs")).await.expect("create");
-
-        assert_eq!(store.list_queues().await.expect("list").len(), 1);
-    }
-
-    #[tokio::test]
-    async fn an_enqueued_message_can_be_claimed() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-
-        let claimed = store
-            .claim_next(&name("jobs"), None)
-            .await
-            .expect("claim")
-            .expect("a message is waiting");
-
-        assert_eq!(claimed.message.body, "hello");
-        assert_eq!(claimed.message.receive_count, 1);
-        assert!(claimed.message.first_received_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn claiming_an_empty_queue_yields_nothing() {
-        let store = store_with_queue().await;
-
-        assert!(claim_body(&store).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn a_claimed_message_is_hidden_from_other_consumers() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
+    async fn the_counters_track_what_the_store_holds() {
+        let store = MemoryStore::new();
+        assert_eq!(store.queue_count().expect("count"), 0);
+        assert_eq!(store.message_count(&name("jobs")).expect("count"), 0);
 
         store
-            .claim_next(&name("jobs"), None)
+            .create_queue(Queue::new(name("jobs")))
             .await
-            .expect("claim")
-            .expect("a message");
-
-        assert!(
-            claim_body(&store).await.is_none(),
-            "two consumers must not hold the same message"
-        );
-        assert_eq!(
-            store.message_count(&name("jobs")).expect("count"),
-            1,
-            "claiming does not remove it — only acking does"
-        );
-    }
-
-    #[tokio::test]
-    async fn higher_priority_is_served_first() {
-        let store = store_with_queue().await;
-        for (body, priority) in [("low", 0), ("urgent", 10), ("medium", 5)] {
-            store
-                .enqueue(&name("jobs"), message(body, priority), None)
-                .await
-                .expect("enqueue");
-        }
-
-        assert_eq!(claim_body(&store).await.as_deref(), Some("urgent"));
-        assert_eq!(claim_body(&store).await.as_deref(), Some("medium"));
-        assert_eq!(claim_body(&store).await.as_deref(), Some("low"));
-    }
-
-    #[tokio::test]
-    async fn equal_priority_is_served_in_order_of_arrival() {
-        let store = store_with_queue().await;
-        let mut first = message("first", 0);
-        let mut second = message("second", 0);
-        // Enqueued moments apart in reality; pinned here so the assertion is about
-        // ordering rather than about how fast the test ran.
-        first.enqueued_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
-        second.enqueued_at = SystemTime::UNIX_EPOCH + Duration::from_secs(2);
-
-        // Inserted in the opposite order, so arrival time is doing the work.
-        store
-            .enqueue(&name("jobs"), second, None)
-            .await
-            .expect("enqueue");
-        store
-            .enqueue(&name("jobs"), first, None)
-            .await
-            .expect("enqueue");
-
-        assert_eq!(claim_body(&store).await.as_deref(), Some("first"));
-        assert_eq!(claim_body(&store).await.as_deref(), Some("second"));
-    }
-
-    #[tokio::test]
-    async fn priority_outranks_arrival_order() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("early_but_low", 0), None)
-            .await
-            .expect("enqueue");
-        store
-            .enqueue(&name("jobs"), message("late_but_high", 1), None)
-            .await
-            .expect("enqueue");
-
-        assert_eq!(claim_body(&store).await.as_deref(), Some("late_but_high"));
-    }
-
-    #[tokio::test]
-    async fn a_delayed_message_is_not_claimable_yet() {
-        let store = store_with_queue().await;
+            .expect("create");
         store
             .enqueue(
                 &name("jobs"),
-                message("later", 0),
-                Some(Duration::from_millis(150)),
+                Message::new("hello", Priority::DEFAULT),
+                None,
             )
             .await
             .expect("enqueue");
 
-        assert!(claim_body(&store).await.is_none(), "still delayed");
-
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        assert_eq!(claim_body(&store).await.as_deref(), Some("later"));
+        assert_eq!(store.queue_count().expect("count"), 1);
+        assert_eq!(store.message_count(&name("jobs")).expect("count"), 1);
     }
 
     #[tokio::test]
-    async fn the_queues_delay_applies_when_none_is_given() {
+    async fn a_claimed_message_still_counts_until_it_is_acked() {
+        // The counters report what is stored, not what is visible — a claimed message
+        // is still occupying memory, which is the point of counting it.
         let store = MemoryStore::new();
-        let mut delayed = queue("jobs");
-        delayed.attributes.delay = Duration::from_millis(150);
-        store.create_queue(delayed).await.expect("create");
-
         store
-            .enqueue(&name("jobs"), message("later", 0), None)
+            .create_queue(Queue::new(name("jobs")))
+            .await
+            .expect("create");
+        store
+            .enqueue(
+                &name("jobs"),
+                Message::new("hello", Priority::DEFAULT),
+                None,
+            )
             .await
             .expect("enqueue");
 
-        assert!(claim_body(&store).await.is_none(), "the queue's own delay");
-
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        assert_eq!(claim_body(&store).await.as_deref(), Some("later"));
-    }
-
-    #[tokio::test]
-    async fn a_claim_that_expires_is_redelivered_under_a_new_handle() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-
-        let first = store
-            .claim_next(&name("jobs"), Some(Duration::from_millis(150)))
-            .await
-            .expect("claim")
-            .expect("a message");
-
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        let second = store
-            .claim_next(&name("jobs"), None)
-            .await
-            .expect("claim")
-            .expect("redelivered once the claim lapsed");
-
-        assert_eq!(second.message.id, first.message.id, "the same message");
-        assert_eq!(second.message.receive_count, 2, "a second delivery");
-        assert_ne!(
-            second.receipt, first.receipt,
-            "a redelivery comes with a new handle"
-        );
-        assert_eq!(
-            second.message.first_received_at, first.message.first_received_at,
-            "first delivery time is not overwritten"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_handle_from_a_lapsed_claim_cannot_delete_the_message() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-        let lapsed = store
-            .claim_next(&name("jobs"), Some(Duration::from_millis(150)))
-            .await
-            .expect("claim")
-            .expect("a message");
-
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        // Someone else now holds it.
-        store
-            .claim_next(&name("jobs"), None)
-            .await
-            .expect("claim")
-            .expect("redelivered");
-
-        let error = store
-            .ack(&name("jobs"), &lapsed.receipt)
-            .await
-            .expect_err("the old handle is spent");
-
-        assert!(matches!(error, StoreError::InvalidReceipt), "{error:?}");
-        assert_eq!(
-            store.message_count(&name("jobs")).expect("count"),
-            1,
-            "and it must not have deleted the other consumer's message"
-        );
-    }
-
-    #[tokio::test]
-    async fn acking_removes_the_message_for_good() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
         let claimed = store
-            .claim_next(&name("jobs"), Some(Duration::from_millis(100)))
+            .claim_next(&name("jobs"), None)
             .await
             .expect("claim")
             .expect("a message");
+        assert_eq!(store.message_count(&name("jobs")).expect("count"), 1);
 
         store
             .ack(&name("jobs"), &claimed.receipt)
             .await
             .expect("ack");
-
         assert_eq!(store.message_count(&name("jobs")).expect("count"), 0);
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(
-            claim_body(&store).await.is_none(),
-            "an acked message does not come back when its claim would have expired"
+    }
+
+    #[tokio::test]
+    async fn the_counters_ignore_queues_that_do_not_exist() {
+        assert_eq!(
+            MemoryStore::new()
+                .message_count(&name("nope"))
+                .expect("count"),
+            0,
+            "counting a missing queue is a question, not an error"
         );
-    }
-
-    #[tokio::test]
-    async fn acking_an_unissued_handle_is_refused() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-
-        let error = store
-            .ack(&name("jobs"), &ReceiptHandle::new())
-            .await
-            .expect_err("not a handle this store issued");
-
-        assert!(matches!(error, StoreError::InvalidReceipt), "{error:?}");
-        assert_eq!(store.message_count(&name("jobs")).expect("count"), 1);
-    }
-
-    #[tokio::test]
-    async fn acking_an_unclaimed_message_is_refused() {
-        let store = store_with_queue().await;
-        store
-            .enqueue(&name("jobs"), message("hello", 0), None)
-            .await
-            .expect("enqueue");
-
-        // Never claimed, so no handle exists for it.
-        let error = store
-            .ack(&name("jobs"), &ReceiptHandle::new())
-            .await
-            .expect_err("nothing to ack");
-
-        assert!(matches!(error, StoreError::InvalidReceipt), "{error:?}");
-    }
-
-    #[tokio::test]
-    async fn each_message_goes_to_exactly_one_of_many_concurrent_consumers() {
-        let store = Arc::new(store_with_queue().await);
-        for index in 0..8 {
-            store
-                .enqueue(&name("jobs"), message(&format!("m{index}"), 0), None)
-                .await
-                .expect("enqueue");
-        }
-
-        let consumers: Vec<_> = (0..8)
-            .map(|_| {
-                let store = Arc::clone(&store);
-                tokio::spawn(async move { claim_body(&store).await })
-            })
-            .collect();
-
-        let mut claimed = Vec::new();
-        for consumer in consumers {
-            claimed.push(consumer.await.expect("task").expect("a message each"));
-        }
-        claimed.sort();
-
-        let expected: Vec<String> = (0..8).map(|index| format!("m{index}")).collect();
-        assert_eq!(claimed, expected, "no message claimed twice, none skipped");
     }
 }

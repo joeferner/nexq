@@ -578,6 +578,7 @@ name = "nexq-store-conformance"
 version = "0.1.0"
 dependencies = [
  "nexq-core",
+ "tokio",
 ]
 
 [[package]]

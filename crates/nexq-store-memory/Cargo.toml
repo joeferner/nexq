@@ -16,7 +16,7 @@ nexq-core = { workspace = true }
 # this crate and the suite both depend on nexq-core, and neither depends on the other
 # outside of tests.
 nexq-store-conformance = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
