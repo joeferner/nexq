@@ -141,13 +141,20 @@ impl Engine {
         Ok(self.store.delete_queue(name).await?)
     }
 
-    /// Every queue.
+    /// Every queue, optionally limited to those whose name starts with `prefix`.
     ///
-    /// Unfiltered and unpaged while the operation set is small; prefix matching and
-    /// paging arrive with the requests that need them, and push down into the store so
-    /// a backend can answer them without loading everything.
-    pub async fn list_queues(&self) -> Result<Vec<Queue>> {
-        Ok(self.store.list_queues().await?)
+    /// Filtering lives here rather than in a facade so every protocol gets the same
+    /// answer for the same question. It is applied after loading for now; when the
+    /// store learns to filter, this pushes down into it so a backend with many queues
+    /// need not send them all back. Paging arrives the same way.
+    pub async fn list_queues(&self, prefix: Option<&str>) -> Result<Vec<Queue>> {
+        let mut queues = self.store.list_queues().await?;
+
+        if let Some(prefix) = prefix {
+            queues.retain(|queue| queue.name.as_str().starts_with(prefix));
+        }
+
+        Ok(queues)
     }
 }
 
@@ -267,7 +274,7 @@ mod tests {
         engine.delete_queue(&name("jobs")).await.expect("delete");
 
         engine.get_queue(&name("jobs")).await.expect_err("deleted");
-        assert!(engine.list_queues().await.expect("list").is_empty());
+        assert!(engine.list_queues(None).await.expect("list").is_empty());
     }
 
     #[tokio::test]
@@ -293,21 +300,47 @@ mod tests {
                 .expect("create");
         }
 
-        let mut listed: Vec<String> = engine
-            .list_queues()
-            .await
-            .expect("list")
-            .into_iter()
-            .map(|queue| queue.name.to_string())
-            .collect();
+        let mut listed = listed_names(&engine, None).await;
         listed.sort();
 
         assert_eq!(listed, ["one", "two"]);
     }
 
     #[tokio::test]
+    async fn listing_can_be_limited_to_a_prefix() {
+        let engine = engine();
+        for queue_name in ["jobs", "jobs_dlq", "emails"] {
+            engine
+                .create_queue(name(queue_name), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        let mut listed = listed_names(&engine, Some("jobs")).await;
+        listed.sort();
+
+        assert_eq!(listed, ["jobs", "jobs_dlq"]);
+        assert!(
+            listed_names(&engine, Some("nothing-matches"))
+                .await
+                .is_empty(),
+            "a prefix matching nothing is an empty list, not an error"
+        );
+    }
+
+    #[tokio::test]
     async fn listing_an_empty_deployment_yields_nothing() {
-        assert!(engine().list_queues().await.expect("list").is_empty());
+        assert!(engine().list_queues(None).await.expect("list").is_empty());
+    }
+
+    async fn listed_names(engine: &Engine, prefix: Option<&str>) -> Vec<String> {
+        engine
+            .list_queues(prefix)
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|queue| queue.name.to_string())
+            .collect()
     }
 
     #[tokio::test]

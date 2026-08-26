@@ -11,6 +11,9 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use nexq_core::Config;
+use nexq_core::engine::Engine;
+use nexq_core::store::Store;
+use nexq_store_memory::MemoryStore;
 use tokio::signal;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -39,6 +42,13 @@ async fn run() -> Result<(), BoxError> {
     // principals in whatever way its protocol expects.
     let auth = Arc::new(config.auth.clone());
 
+    // One engine over one backend for now. Per-queue backend selection arrives with
+    // the config that describes it; until then every queue lives in memory, so nothing
+    // outlives the process.
+    let store = Arc::new(MemoryStore::new());
+    info!(backend = store.backend_name(), "storage backend ready");
+    let engine = Arc::new(Engine::new(store));
+
     // Broadcasts "stop" to every facade at once, so one signal drains them all.
     let (shutdown_tx, _) = watch::channel(false);
     let mut facades = JoinSet::new();
@@ -46,7 +56,9 @@ async fn run() -> Result<(), BoxError> {
     if config.aws_api.enabled {
         // Bind before spawning, so a port conflict fails startup rather than
         // surfacing later from inside a task.
-        let server = nexq_api_aws::Server::bind(&config.aws_api, Arc::clone(&auth)).await?;
+        let server =
+            nexq_api_aws::Server::bind(&config.aws_api, Arc::clone(&auth), Arc::clone(&engine))
+                .await?;
         facades.spawn(server.serve(shutdown_on(shutdown_tx.subscribe())));
     }
 

@@ -11,10 +11,10 @@ NexQ is a queue server supporting multiple protocols and multiple storage engine
 ## Protocols
 
 - :scroll: [REST](crates/nexq-api-rest/README.md)
-- :scroll: [AWS (SQS/SNS)](crates/nexq-api-aws/README.md)
+- :ballot_box_with_check: [AWS (SQS/SNS)](crates/nexq-api-aws/README.md)
 
 ## Storage
 
-- :scroll: [Memory](crates/nexq-store-memory/README.md)
+- :ballot_box_with_check: [Memory](crates/nexq-store-memory/README.md)
 - :scroll: [Search](crates/nexq-store-search/README.md)
 - :scroll: [SQL](crates/nexq-store-sql/README.md)

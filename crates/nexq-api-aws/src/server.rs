@@ -13,21 +13,28 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Method, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
+use nexq_core::engine::Engine;
 use nexq_core::{AuthConfig, AwsApiConfig};
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
 use crate::error::ApiError;
-use crate::operations;
+use crate::operations::Operations;
 use crate::protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER, decode_input};
+use crate::queue_url::QueueUrls;
 use crate::sigv4::{self, SigningContext};
 
-/// What every request handler needs: the credentials to verify signatures against.
-///
-/// Shared rather than cloned per request, since the registry is read-only while
-/// serving.
-type FacadeState = Arc<AuthConfig>;
+/// What every request needs: credentials to check the signature against, and the
+/// operations to run once it passes.
+#[derive(Debug)]
+pub struct Facade {
+    auth: Arc<AuthConfig>,
+    operations: Operations,
+}
+
+/// Shared rather than cloned per request: everything in it is read-only while serving.
+type FacadeState = Arc<Facade>;
 
 /// A bound, not-yet-serving facade listener.
 ///
@@ -48,15 +55,23 @@ impl Server {
     /// caller checks; reaching here means it is meant to serve.
     ///
     /// `auth` is the registry every request is verified against — shared with the other
-    /// facades, which present the same credentials differently.
-    pub async fn bind(config: &AwsApiConfig, auth: Arc<AuthConfig>) -> io::Result<Self> {
+    /// facades, which present the same credentials differently. `engine` is the
+    /// operation set this facade translates to.
+    pub async fn bind(
+        config: &AwsApiConfig,
+        auth: Arc<AuthConfig>,
+        engine: Arc<Engine>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind(config.bind_addr).await?;
         let local_addr = listener.local_addr()?;
 
         Ok(Self {
             listener,
             local_addr,
-            router: router(auth),
+            router: router(Arc::new(Facade {
+                auth,
+                operations: Operations::new(engine, QueueUrls::new(config)),
+            })),
         })
     }
 
@@ -85,12 +100,12 @@ impl Server {
 /// `X-Amz-Target`, so there is one route rather than one per operation. Any method is
 /// accepted so that a misdirected request is answered by the protocol layer, with an
 /// error a client can read, rather than by a bare 405.
-pub fn router(auth: Arc<AuthConfig>) -> Router {
-    Router::new().route("/", any(handle)).with_state(auth)
+pub fn router(facade: FacadeState) -> Router {
+    Router::new().route("/", any(handle)).with_state(facade)
 }
 
 async fn handle(
-    State(auth): State<FacadeState>,
+    State(facade): State<FacadeState>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
@@ -103,7 +118,7 @@ async fn handle(
         body: &body,
     };
 
-    match route(&context, &auth).await {
+    match route(&context, &facade).await {
         Ok(output) => json_response(&output),
         Err(error) => {
             // Not `message`: tracing renders a field by that name as the event body,
@@ -123,8 +138,8 @@ async fn handle(
 ///
 /// Signature first: an unauthenticated caller learns nothing about which operations
 /// exist or whether its input parsed.
-async fn route(context: &SigningContext<'_>, auth: &AuthConfig) -> Result<Value, ApiError> {
-    let principal = sigv4::verify(context, auth)?;
+async fn route(context: &SigningContext<'_>, facade: &Facade) -> Result<Value, ApiError> {
+    let principal = sigv4::verify(context, &facade.auth)?;
 
     let target = context
         .headers
@@ -137,7 +152,7 @@ async fn route(context: &SigningContext<'_>, auth: &AuthConfig) -> Result<Value,
     let input = decode_input(context.body)?;
 
     debug!(%operation, %principal, "dispatching");
-    operations::dispatch(operation, input).await
+    facade.operations.dispatch(operation, input).await
 }
 
 fn json_response(output: &Value) -> Response {
@@ -156,6 +171,7 @@ mod tests {
     use axum::http::{HeaderValue, Request as HttpRequest, StatusCode};
     use http_body_util::BodyExt;
     use nexq_core::{Credential, Secret};
+    use nexq_store_memory::MemoryStore;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tower::ServiceExt;
@@ -189,6 +205,25 @@ mod tests {
         Arc::new(AuthConfig {
             credentials: vec![credential(SECRET)],
         })
+    }
+
+    /// An engine over an in-memory backend, so these tests exercise the whole path
+    /// rather than stopping at the protocol layer.
+    fn test_engine() -> Arc<Engine> {
+        let store: Arc<dyn nexq_core::store::Store> = Arc::new(MemoryStore::new());
+
+        Arc::new(Engine::new(store))
+    }
+
+    fn facade_with(auth: Arc<AuthConfig>) -> FacadeState {
+        Arc::new(Facade {
+            auth,
+            operations: Operations::new(test_engine(), crate::test_support::test_queue_urls()),
+        })
+    }
+
+    fn facade() -> FacadeState {
+        facade_with(test_auth())
     }
 
     /// Sign a set of headers the way botocore does, returning them with an
@@ -268,10 +303,7 @@ mod tests {
     }
 
     async fn send_request(request: HttpRequest<Body>) -> (StatusCode, Value) {
-        let response = router(test_auth())
-            .oneshot(request)
-            .await
-            .expect("response");
+        let response = router(facade()).oneshot(request).await.expect("response");
 
         let status = response.status();
         let bytes = response
@@ -356,7 +388,7 @@ mod tests {
             }],
         });
 
-        let response = router(auth)
+        let response = router(facade_with(auth))
             .oneshot(request_with(headers, "{}"))
             .await
             .expect("response");
@@ -450,7 +482,7 @@ mod tests {
             b"{}",
             SECRET,
         );
-        let response = router(test_auth())
+        let response = router(facade())
             .oneshot(request_with(headers, "{}"))
             .await
             .expect("response");
@@ -467,7 +499,7 @@ mod tests {
 
     #[tokio::test]
     async fn binding_port_zero_reports_the_real_port() {
-        let server = Server::bind(&test_config(), test_auth())
+        let server = Server::bind(&test_config(), test_auth(), test_engine())
             .await
             .expect("bind");
 
@@ -476,7 +508,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_over_tcp_then_shuts_down_gracefully() {
-        let server = Server::bind(&test_config(), test_auth())
+        let server = Server::bind(&test_config(), test_auth(), test_engine())
             .await
             .expect("bind");
         let address = server.local_addr();

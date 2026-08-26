@@ -104,9 +104,16 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] The account id in queue URLs is config (`aws_api.account_id`), not a constant,
       defaulting to `000000000000` and validated as exactly 12 digits. Changing it
       invalidates queue URLs clients already hold, which the docs now say.
-- [ ] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`
-- [ ] `QueueAlreadyExists` / `QueueDoesNotExist` error parity
-- [ ] **Gate: create, list, get-url, and delete a queue via `aws sqs`**
+- [x] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`, including
+      `QueueNamePrefix` and the `VisibilityTimeout`/`DelaySeconds`/
+      `ReceiveMessageWaitTimeSeconds` attributes
+- [x] `QueueNameExists` / `QueueDoesNotExist` error parity, plus
+      `InvalidParameterValue`, `InvalidAttributeName`, and `InvalidAttributeValue`
+- [x] **Gate: create, list, get-url, and delete a queue via `aws sqs`** — verified
+      against the real `aws-cli`, including idempotent re-create, a conflicting
+      re-create, prefix filtering, and deleting by the URL `create-queue` returned
+- [ ] Paging: `MaxResults`/`NextToken` on `ListQueues` are accepted and ignored, so
+      every queue comes back in one response
 
 ## M3 — The produce/consume loop
 

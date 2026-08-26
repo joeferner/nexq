@@ -19,6 +19,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
+# Test-only: lets facade tests run against a real engine and backend. No cycle —
+# both crates depend on nexq-core, and neither depends on the other outside tests.
+nexq-store-memory = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
 tower = { workspace = true }
 

@@ -473,6 +473,7 @@ dependencies = [
  "hmac",
  "http-body-util",
  "nexq-core",
+ "nexq-store-memory",
  "serde_json",
  "sha2",
  "tokio",

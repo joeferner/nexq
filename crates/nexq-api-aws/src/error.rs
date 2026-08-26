@@ -9,7 +9,9 @@
 
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use nexq_core::engine::EngineError;
 use serde_json::json;
+use tracing::error;
 
 use crate::protocol::JSON_CONTENT_TYPE;
 
@@ -121,6 +123,83 @@ impl ApiError {
         )
     }
 
+    /// A required input was absent.
+    pub fn missing_parameter(name: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "MissingParameter",
+            format!("The request must contain the parameter {name}."),
+        )
+    }
+
+    /// An input was present but unusable.
+    pub fn invalid_parameter_value(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "InvalidParameterValue",
+            detail.into(),
+        )
+    }
+
+    /// A queue attribute this facade does not know.
+    pub fn invalid_attribute_name(name: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "InvalidAttributeName",
+            format!("Unknown Attribute {name}."),
+        )
+    }
+
+    /// A queue attribute whose value is out of range or the wrong shape.
+    pub fn invalid_attribute_value(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "InvalidAttributeValue",
+            detail.into(),
+        )
+    }
+
+    /// No queue by that name. SQS answers this with a 400, not a 404.
+    pub fn queue_does_not_exist() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "QueueDoesNotExist",
+            "The specified queue does not exist.",
+        )
+    }
+
+    /// A queue of that name exists with different attributes.
+    pub fn queue_name_exists(name: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "QueueNameExists",
+            format!(
+                "A queue already exists with the same name and a different value for \
+                 attribute(s): {name}"
+            ),
+        )
+    }
+
+    /// Something transient. A 503 is deliberate: AWS SDKs retry it on their own, which
+    /// is exactly the right response to a lost race.
+    pub fn unavailable(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            detail.into(),
+        )
+    }
+
+    /// Something broke on this side. Carries no detail: what failed is for the log,
+    /// not for the client.
+    pub fn internal_error() -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "InternalError",
+            "We encountered an internal error. Please try again.",
+        )
+    }
+
     /// A real operation that is not built yet. Temporary, and not an AWS error code —
     /// it should disappear as the operations land.
     pub fn not_implemented(operation: impl std::fmt::Display) -> Self {
@@ -147,6 +226,26 @@ impl ApiError {
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+/// Translate an engine outcome into what SQS would say about it.
+///
+/// The backend case logs here rather than at the call site: this is the one place that
+/// still holds the underlying cause, and the client is told nothing about it.
+impl From<EngineError> for ApiError {
+    fn from(error: EngineError) -> Self {
+        match error {
+            EngineError::QueueNotFound(_) => Self::queue_does_not_exist(),
+            EngineError::QueueAlreadyExists(name) => Self::queue_name_exists(name.as_str()),
+            EngineError::Conflict(name) => {
+                Self::unavailable(format!("queue {name} is changing concurrently; retry"))
+            }
+            EngineError::Backend(source) => {
+                error!(cause = %source, "storage backend failed");
+                Self::internal_error()
+            }
+        }
     }
 }
 
