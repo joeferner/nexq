@@ -85,7 +85,7 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - The Query/XML protocol still matters for older SDKs, but is deliberately deferred
   until the JSON path works.
 
-## M2 — Queue lifecycle against the memory backend
+## ✅ M2 — Queue lifecycle against the memory backend
 
 - [x] Domain model: queue, message, receipt handle — `QueueName` validates on
       construction, `Message` and `ClaimedMessage` separate the durable item from a
@@ -115,8 +115,11 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] **Gate: create, list, get-url, and delete a queue via `aws sqs`** — verified
       against the real `aws-cli`, including idempotent re-create, a conflicting
       re-create, prefix filtering, and deleting by the URL `create-queue` returned
-- [ ] Paging: `MaxResults`/`NextToken` on `ListQueues` are accepted and ignored, so
-      every queue comes back in one response
+- [x] Paging on `ListQueues` — `MaxResults` and `NextToken`, by cursor rather than
+      offset, so churn between pages cannot skip or repeat a queue. A token comes back
+      whenever more remain, even unasked, rather than truncating at the 1000 cap
+      silently. Verified with botocore's own paginator (`--page-size`, `--max-items`,
+      `--starting-token`).
 
 ## M3 — The produce/consume loop
 

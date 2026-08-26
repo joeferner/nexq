@@ -45,8 +45,11 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 - :white_check_mark: `DeleteQueue`
 - :white_check_mark: `GetQueueUrl` — a real lookup, so a missing queue fails here
   rather than on the client's next request
-- :ballot_box_with_check: `ListQueues` — `QueueNamePrefix` is honoured; `MaxResults`
-  and `NextToken` are accepted and ignored, so every queue comes back at once
+- :white_check_mark: `ListQueues` — `QueueNamePrefix`, plus `MaxResults`/`NextToken`
+  paging that botocore's own paginator walks. Paging is by cursor, so queues created or
+  deleted between pages cannot make a caller skip or repeat one. A `NextToken` comes
+  back whenever more queues remain, even if `MaxResults` was not given — real SQS only
+  returns one when it was, but silently truncating at the 1000 cap seemed worse
 - :scroll: `GetQueueAttributes` / `SetQueueAttributes`
 - :scroll: `PurgeQueue`
 - :scroll: `TagQueue` / `UntagQueue` / `ListQueueTags`

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexq_core::engine::Engine;
+use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery};
 use nexq_core::model::{Priority, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 
@@ -79,28 +79,43 @@ impl Operations {
         Ok(json!({ "QueueUrl": self.queue_urls.for_queue(&queue.name) }))
     }
 
-    /// `ListQueues`.
+    /// `ListQueues`, paged.
     ///
-    /// `MaxResults` and `NextToken` are accepted and ignored while paging is unbuilt —
-    /// every queue comes back in one response. That is a difference from real SQS worth
-    /// knowing about, and it is why paging is on the list rather than forgotten.
+    /// A `NextToken` comes back whenever more queues remain — including when the client
+    /// did not ask for a `MaxResults`, because the alternative is truncating at the cap
+    /// and saying nothing about it. SQS only returns a token when `MaxResults` was
+    /// given; losing queues silently seemed the worse difference to have.
     async fn list_queues(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
-        let prefix = optional_string(input, "QueueNamePrefix")?;
+        let query = QueueQuery {
+            prefix: optional_string(input, "QueueNamePrefix")?,
+            limit: optional_count(input, "MaxResults", MAX_QUEUES_PER_PAGE as u64)?
+                .map(|limit| limit as usize),
+            after: match optional_string(input, "NextToken")? {
+                Some(token) => Some(decode_next_token(&token)?),
+                None => None,
+            },
+        };
 
-        let queues = self.engine.list_queues(prefix.as_deref()).await?;
+        let page = self.engine.list_queues(&query).await?;
 
         // SQS omits the field entirely when there are no queues, and `aws sqs
         // list-queues` prints nothing at all in that case.
-        if queues.is_empty() {
+        if page.queues.is_empty() {
             return Ok(json!({}));
         }
 
-        let urls: Vec<String> = queues
+        let urls: Vec<String> = page
+            .queues
             .iter()
             .map(|queue| self.queue_urls.for_queue(&queue.name))
             .collect();
 
-        Ok(json!({ "QueueUrls": urls }))
+        let mut output = json!({ "QueueUrls": urls });
+        if let Some(next) = page.next {
+            output["NextToken"] = json!(encode_next_token(&next));
+        }
+
+        Ok(output)
     }
 
     /// `SendMessage`.
@@ -205,6 +220,26 @@ impl Operations {
 
 /// Most messages SQS will hand back from one `ReceiveMessage`.
 const MAX_MESSAGES_PER_RECEIVE: u64 = 10;
+
+/// Render a paging cursor as a token to hand to a client.
+///
+/// Hex-encoded so it reads as opaque. A client that decoded it would find a queue name,
+/// which is nothing it could not already list — the encoding is there to stop anyone
+/// building on the shape, since cursors will change when paging pushes down into the
+/// storage backends.
+fn encode_next_token(cursor: &QueueName) -> String {
+    hex::encode(cursor.as_str())
+}
+
+/// Read a cursor back from a token a client returned.
+fn decode_next_token(token: &str) -> Result<QueueName, ApiError> {
+    let invalid = || ApiError::invalid_parameter_value("NextToken is not valid.");
+
+    let bytes = hex::decode(token).map_err(|_| invalid())?;
+    let name = String::from_utf8(bytes).map_err(|_| invalid())?;
+
+    QueueName::new(name).map_err(|_| invalid())
+}
 
 /// Refuse inputs that would otherwise be silently dropped.
 ///
@@ -598,6 +633,165 @@ mod tests {
         .await
         .expect("list");
         assert_eq!(output["QueueUrls"].as_array().expect("array").len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_queues_pages_with_a_token() {
+        let operations = operations();
+        for queue_name in ["a", "b", "c"] {
+            call(
+                &operations,
+                Operation::CreateQueue,
+                json!({ "QueueName": queue_name }),
+            )
+            .await
+            .expect("create");
+        }
+
+        let first = call(
+            &operations,
+            Operation::ListQueues,
+            json!({ "MaxResults": 2 }),
+        )
+        .await
+        .expect("first page");
+
+        assert_eq!(first["QueueUrls"].as_array().expect("urls").len(), 2);
+        let token = first["NextToken"].as_str().expect("a token").to_owned();
+
+        let second = call(
+            &operations,
+            Operation::ListQueues,
+            json!({ "MaxResults": 2, "NextToken": token }),
+        )
+        .await
+        .expect("second page");
+
+        assert_eq!(second["QueueUrls"].as_array().expect("urls").len(), 1);
+        assert!(
+            second.get("NextToken").is_none(),
+            "the last page must not offer to continue: {second}"
+        );
+    }
+
+    #[tokio::test]
+    async fn walking_the_pages_yields_every_queue_once() {
+        let operations = operations();
+        let expected: Vec<String> = (0..7).map(|index| format!("q{index}")).collect();
+        for queue_name in &expected {
+            call(
+                &operations,
+                Operation::CreateQueue,
+                json!({ "QueueName": queue_name }),
+            )
+            .await
+            .expect("create");
+        }
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let input = match &token {
+                Some(token) => json!({ "MaxResults": 3, "NextToken": token }),
+                None => json!({ "MaxResults": 3 }),
+            };
+            let page = call(&operations, Operation::ListQueues, input)
+                .await
+                .expect("page");
+
+            seen.extend(
+                page["QueueUrls"]
+                    .as_array()
+                    .expect("urls")
+                    .iter()
+                    .map(|url| {
+                        url.as_str()
+                            .expect("string")
+                            .rsplit('/')
+                            .next()
+                            .expect("name")
+                            .to_owned()
+                    }),
+            );
+
+            match page.get("NextToken").and_then(Value::as_str) {
+                Some(next) => token = Some(next.to_owned()),
+                None => break,
+            }
+        }
+
+        assert_eq!(seen, expected, "every queue exactly once, in order");
+    }
+
+    #[tokio::test]
+    async fn a_token_is_opaque_but_round_trips() {
+        let operations = operations();
+        for queue_name in ["a", "b"] {
+            call(
+                &operations,
+                Operation::CreateQueue,
+                json!({ "QueueName": queue_name }),
+            )
+            .await
+            .expect("create");
+        }
+
+        let page = call(
+            &operations,
+            Operation::ListQueues,
+            json!({ "MaxResults": 1 }),
+        )
+        .await
+        .expect("page");
+        let token = page["NextToken"].as_str().expect("token");
+
+        assert_ne!(token, "a", "the cursor should not be handed over verbatim");
+        assert_eq!(
+            decode_next_token(token).expect("decodes"),
+            QueueName::new("a").expect("valid")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_that_did_not_come_from_here_is_refused() {
+        let operations = operations();
+
+        for token in ["not-hex", "", "zz", "6e6f7420612071756575652e"] {
+            let error = call(
+                &operations,
+                Operation::ListQueues,
+                json!({ "MaxResults": 1, "NextToken": token }),
+            )
+            .await;
+
+            match token {
+                // An empty token reads as absent, the way an unset flag arrives.
+                "" => {
+                    error.expect("an empty token is the same as none");
+                }
+                _ => {
+                    let error = error.expect_err(token);
+                    assert_eq!(error.code(), "InvalidParameterValue", "{token}");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn max_results_is_bounded_the_way_sqs_bounds_it() {
+        let operations = operations();
+
+        for value in [0, (MAX_QUEUES_PER_PAGE + 1) as u64] {
+            let error = call(
+                &operations,
+                Operation::ListQueues,
+                json!({ "MaxResults": value }),
+            )
+            .await
+            .expect_err(&value.to_string());
+
+            assert_eq!(error.code(), "InvalidParameterValue", "{value}");
+        }
     }
 
     #[tokio::test]

@@ -33,6 +33,35 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 /// How many times [`Engine::create_queue`] will retry a create that lost a race.
 const CREATE_ATTEMPTS: usize = 2;
 
+/// Most queues returned by one [`Engine::list_queues`] call, matching SQS's own cap.
+///
+/// Applied whether or not a caller asked for a limit, so a deployment with more queues
+/// than this is paged rather than silently truncated.
+pub const MAX_QUEUES_PER_PAGE: usize = 1000;
+
+/// Which queues to list, and how many.
+#[derive(Debug, Clone, Default)]
+pub struct QueueQuery {
+    /// Only queues whose name starts with this.
+    pub prefix: Option<String>,
+
+    /// How many to return, capped at [`MAX_QUEUES_PER_PAGE`].
+    pub limit: Option<usize>,
+
+    /// Resume after this name — the cursor from a previous page.
+    pub after: Option<QueueName>,
+}
+
+/// One page of queues.
+#[derive(Debug, Clone)]
+pub struct QueuePage {
+    pub queues: Vec<Queue>,
+
+    /// Cursor to pass as [`QueueQuery::after`] for the next page, or `None` when this
+    /// is the last one.
+    pub next: Option<QueueName>,
+}
+
 /// Why an engine operation failed.
 ///
 /// Flat on purpose: a facade maps these to its own wire errors, and should not have to
@@ -153,20 +182,44 @@ impl Engine {
         Ok(self.store.delete_queue(name).await?)
     }
 
-    /// Every queue, optionally limited to those whose name starts with `prefix`.
+    /// One page of queues, in name order.
     ///
-    /// Filtering lives here rather than in a facade so every protocol gets the same
-    /// answer for the same question. It is applied after loading for now; when the
-    /// store learns to filter, this pushes down into it so a backend with many queues
-    /// need not send them all back. Paging arrives the same way.
-    pub async fn list_queues(&self, prefix: Option<&str>) -> Result<Vec<Queue>> {
+    /// Filtering and paging live here rather than in a facade so every protocol gets
+    /// the same answer for the same question. Both are applied after loading for now;
+    /// when the store learns to do them, this pushes down into it so a backend with
+    /// many queues need not send them all back.
+    ///
+    /// **Paging is by cursor, not by offset.** The cursor is the last name returned, so
+    /// the next page is "everything after that name". Queues created or deleted between
+    /// pages therefore cannot make a caller skip or repeat one that was present
+    /// throughout, which an offset would. Ordering by name is what makes that work, so
+    /// it is part of the contract rather than incidental.
+    pub async fn list_queues(&self, query: &QueueQuery) -> Result<QueuePage> {
         let mut queues = self.store.list_queues().await?;
 
-        if let Some(prefix) = prefix {
+        if let Some(prefix) = &query.prefix {
             queues.retain(|queue| queue.name.as_str().starts_with(prefix));
         }
 
-        Ok(queues)
+        queues.sort_by(|left, right| left.name.cmp(&right.name));
+
+        if let Some(after) = &query.after {
+            queues.retain(|queue| &queue.name > after);
+        }
+
+        let limit = query
+            .limit
+            .unwrap_or(MAX_QUEUES_PER_PAGE)
+            .clamp(1, MAX_QUEUES_PER_PAGE);
+        let has_more = queues.len() > limit;
+        queues.truncate(limit);
+
+        // The cursor is the last name on this page, so the next page starts after it.
+        let next = has_more
+            .then(|| queues.last().map(|queue| queue.name.clone()))
+            .flatten();
+
+        Ok(QueuePage { queues, next })
     }
 
     /// Add a message to a queue, returning it as stored.
@@ -340,7 +393,11 @@ mod tests {
         engine.delete_queue(&name("jobs")).await.expect("delete");
 
         engine.get_queue(&name("jobs")).await.expect_err("deleted");
-        assert!(engine.list_queues(None).await.expect("list").is_empty());
+        assert!(
+            listed_names(&engine, &QueueQuery::default())
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -357,19 +414,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn listing_returns_every_queue() {
+    async fn listing_returns_every_queue_in_name_order() {
         let engine = engine();
-        for queue_name in ["one", "two"] {
+        // Created out of order, so the ordering is the engine's doing.
+        for queue_name in ["two", "one", "three"] {
             engine
                 .create_queue(name(queue_name), QueueAttributes::default())
                 .await
                 .expect("create");
         }
 
-        let mut listed = listed_names(&engine, None).await;
-        listed.sort();
-
-        assert_eq!(listed, ["one", "two"]);
+        assert_eq!(
+            listed_names(&engine, &QueueQuery::default()).await,
+            ["one", "three", "two"],
+            "name order, since that is what makes cursor paging stable"
+        );
     }
 
     #[tokio::test]
@@ -382,31 +441,212 @@ mod tests {
                 .expect("create");
         }
 
-        let mut listed = listed_names(&engine, Some("jobs")).await;
-        listed.sort();
+        let matching = QueueQuery {
+            prefix: Some("jobs".to_owned()),
+            ..QueueQuery::default()
+        };
+        assert_eq!(listed_names(&engine, &matching).await, ["jobs", "jobs_dlq"]);
 
-        assert_eq!(listed, ["jobs", "jobs_dlq"]);
+        let nothing = QueueQuery {
+            prefix: Some("nothing-matches".to_owned()),
+            ..QueueQuery::default()
+        };
         assert!(
-            listed_names(&engine, Some("nothing-matches"))
-                .await
-                .is_empty(),
+            listed_names(&engine, &nothing).await.is_empty(),
             "a prefix matching nothing is an empty list, not an error"
         );
     }
 
     #[tokio::test]
     async fn listing_an_empty_deployment_yields_nothing() {
-        assert!(engine().list_queues(None).await.expect("list").is_empty());
+        let page = engine()
+            .list_queues(&QueueQuery::default())
+            .await
+            .expect("list");
+
+        assert!(page.queues.is_empty());
+        assert!(page.next.is_none(), "nothing to continue from");
     }
 
-    async fn listed_names(engine: &Engine, prefix: Option<&str>) -> Vec<String> {
-        engine
-            .list_queues(prefix)
+    #[tokio::test]
+    async fn a_limit_pages_the_results() {
+        let engine = engine();
+        for queue_name in ["a", "b", "c"] {
+            engine
+                .create_queue(name(queue_name), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        let first = engine
+            .list_queues(&QueueQuery {
+                limit: Some(2),
+                ..QueueQuery::default()
+            })
             .await
-            .expect("list")
-            .into_iter()
+            .expect("first page");
+
+        assert_eq!(names_of(&first), ["a", "b"]);
+        assert_eq!(
+            first.next.as_ref(),
+            Some(&name("b")),
+            "the cursor is the last name returned"
+        );
+
+        let second = engine
+            .list_queues(&QueueQuery {
+                limit: Some(2),
+                after: first.next,
+                ..QueueQuery::default()
+            })
+            .await
+            .expect("second page");
+
+        assert_eq!(names_of(&second), ["c"]);
+        assert!(second.next.is_none(), "the last page has no cursor");
+    }
+
+    #[tokio::test]
+    async fn walking_the_pages_visits_every_queue_once() {
+        let engine = engine();
+        let expected: Vec<String> = (0..10).map(|index| format!("q{index}")).collect();
+        for queue_name in &expected {
+            engine
+                .create_queue(name(queue_name), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = engine
+                .list_queues(&QueueQuery {
+                    limit: Some(3),
+                    after: cursor,
+                    ..QueueQuery::default()
+                })
+                .await
+                .expect("page");
+
+            seen.extend(names_of(&page));
+            match page.next {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+
+        assert_eq!(seen, expected, "every queue exactly once, in order");
+    }
+
+    #[tokio::test]
+    async fn a_cursor_survives_the_queue_it_names_being_deleted() {
+        // The reason for cursor paging rather than an offset: churn between pages must
+        // not make a caller skip or repeat a queue that was there all along.
+        let engine = engine();
+        for queue_name in ["a", "b", "c", "d"] {
+            engine
+                .create_queue(name(queue_name), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        let first = engine
+            .list_queues(&QueueQuery {
+                limit: Some(2),
+                ..QueueQuery::default()
+            })
+            .await
+            .expect("first page");
+        assert_eq!(names_of(&first), ["a", "b"]);
+
+        // Everything already returned disappears, cursor included.
+        engine.delete_queue(&name("a")).await.expect("delete");
+        engine.delete_queue(&name("b")).await.expect("delete");
+
+        let second = engine
+            .list_queues(&QueueQuery {
+                limit: Some(2),
+                after: first.next,
+                ..QueueQuery::default()
+            })
+            .await
+            .expect("second page");
+
+        assert_eq!(
+            names_of(&second),
+            ["c", "d"],
+            "the rest still follow the cursor's name"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_beyond_the_cap_is_clamped_rather_than_refused() {
+        let engine = engine();
+        engine
+            .create_queue(name("jobs"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        for limit in [0, MAX_QUEUES_PER_PAGE + 1, usize::MAX] {
+            let page = engine
+                .list_queues(&QueueQuery {
+                    limit: Some(limit),
+                    ..QueueQuery::default()
+                })
+                .await
+                .unwrap_or_else(|error| panic!("limit {limit}: {error}"));
+
+            assert_eq!(names_of(&page), ["jobs"], "limit {limit}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_prefix_and_a_limit_apply_together() {
+        let engine = engine();
+        for queue_name in ["jobs_a", "jobs_b", "jobs_c", "emails"] {
+            engine
+                .create_queue(name(queue_name), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        let page = engine
+            .list_queues(&QueueQuery {
+                prefix: Some("jobs".to_owned()),
+                limit: Some(2),
+                after: None,
+            })
+            .await
+            .expect("page");
+
+        assert_eq!(names_of(&page), ["jobs_a", "jobs_b"]);
+
+        let rest = engine
+            .list_queues(&QueueQuery {
+                prefix: Some("jobs".to_owned()),
+                limit: Some(2),
+                after: page.next,
+            })
+            .await
+            .expect("page");
+
+        assert_eq!(
+            names_of(&rest),
+            ["jobs_c"],
+            "the prefix still applies on later pages"
+        );
+    }
+
+    fn names_of(page: &QueuePage) -> Vec<String> {
+        page.queues
+            .iter()
             .map(|queue| queue.name.to_string())
             .collect()
+    }
+
+    async fn listed_names(engine: &Engine, query: &QueueQuery) -> Vec<String> {
+        names_of(&engine.list_queues(query).await.expect("list"))
     }
 
     #[tokio::test]
