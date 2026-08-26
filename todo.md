@@ -92,7 +92,7 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] `Store` trait, behind `dyn` via `async-trait`, covering queue lifecycle only —
       create, get, delete, list — plus a `StoreError` that separates "no such queue"
       from "the backend broke"
-- [ ] Memory store in `nexq-store-memory`, its own crate alongside the other backends
+- [x] Memory store in `nexq-store-memory`, its own crate alongside the other backends
 - [ ] `nexq-store-conformance` suite covering the operations implemented so far,
       running green against the memory store
 - [ ] Core engine operations: create, delete, list
