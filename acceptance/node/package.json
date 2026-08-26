@@ -1,0 +1,12 @@
+{
+  "name": "nexq-acceptance-node",
+  "private": true,
+  "type": "module",
+  "description": "Drives NexQ with the AWS SDK for JavaScript, a different client from the CLI",
+  "scripts": {
+    "acceptance": "node acceptance.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "3.1118.0"
+  }
+}

@@ -64,7 +64,7 @@ jobs:
   # No secrets and no services: NexQ is its own trust root and the memory backend needs
   # nothing, so this runs on a pull request from a fork exactly as it does on a laptop.
   # GitHub's ubuntu runners ship the AWS CLI already, so there is nothing to install.
-  acceptance:
+  acceptance-cli:
     name: aws-cli acceptance
     runs-on: ubuntu-latest
     # Waits for long polls are part of the suite; this only bites if something hangs.
@@ -76,4 +76,23 @@ jobs:
       # Recorded so a failure caused by a runner image changing its CLI is obvious, and
       # so this step fails loudly if a future image stops shipping one.
       - run: aws --version
-      - run: cargo xtask acceptance
+      - run: cargo xtask acceptance-cli
+
+  # A second client, because passing against botocore alone leaves NexQ compatible with
+  # one implementation of SQS's protocol rather than with the protocol. This SDK signs
+  # differently, deserialises errors differently, and — unlike botocore — validates the
+  # MD5s NexQ reports, refusing a message whose checksum does not match.
+  acceptance-node:
+    name: aws-sdk-js acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: acceptance/node/package-lock.json
+      - run: cargo xtask acceptance-node

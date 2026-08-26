@@ -249,6 +249,7 @@ belongs — see Future for why that is not a timer.
       New config: `aws_api.region`, default `us-east-1`, used *only* for the region slot
       in a queue ARN. It is not checked against what a client signs with — any region
       still works. Verified against the real `aws-cli`.
+
 - [x] `PurgeQueue` — empties a queue and keeps it, taking **in-flight messages with
       it**, so a consumer holding a receipt handle across a purge finds it invalid. A
       backend that only deleted what was visible would leave claimed messages to reappear
@@ -262,6 +263,7 @@ belongs — see Future for why that is not a timer.
 
       The only operation logged at `info` rather than `debug`, since it is the one that
       destroys data irrecoverably — the line carries how many messages went.
+
 - [x] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`, sharing
       a `batch` module for entry parsing and result rendering. **Partial success is the
       point**: each entry succeeds or fails on its own, and a batch with one bad entry
@@ -287,6 +289,7 @@ belongs — see Future for why that is not a timer.
       `SenderFault` is read off the error's status rather than tracked separately: a 4xx
       *means* the caller was wrong. `VisibilityTimeout` is optional per entry, as SQS's
       model marks it, falling back to the queue's configured timeout.
+
 - [x] All 23 SQS operations are now recognised, not just the 14 implemented — so
       `TagQueue` answers `NotImplemented` rather than `UnknownOperationException`, which
       would send a client looking for a typo it has not made
@@ -322,10 +325,10 @@ belongs — see Future for why that is not a timer.
         infrastructure-as-code support becomes a goal, since a Terraform
         `aws_sqs_queue` sets tags; worth nothing otherwise.
 
-## M7 — Lock it in
+## ✅ M7 — Lock it in
 
 - [x] Acceptance test that drives a real `aws-cli` against a running NexQ, scripted
-      rather than manual — `cargo xtask acceptance`, or `make acceptance`. Twelve checks
+      rather than manual — `cargo xtask acceptance-cli`, or `make acceptance-cli`. Twelve checks
       covering the queue lifecycle, paging through botocore's own paginator, the
       produce/consume loop, message and system attributes, long polling, visibility
       changes, batches with a partial failure, queue attributes and counts, purge,
@@ -345,6 +348,7 @@ belongs — see Future for why that is not a timer.
       wrong body MD5 (caught by "send, receive, delete"), a long poll that returns at
       once (caught by "long polling"), and SigV4 accepting any signature (caught by
       "authentication"). A green acceptance suite that cannot go red is decoration.
+
 - [x] Run it in CI, with `aws-cli` available to the job — its own `acceptance` job.
       Nothing to install: GitHub's ubuntu runners ship AWS CLI 2.36.24, checked against
       their published runner manifest rather than assumed, and near-identical to the
@@ -352,9 +356,45 @@ belongs — see Future for why that is not a timer.
       own trust root and the memory backend needs nothing — so it runs on a pull request
       from a fork exactly as it does locally. The job also prints `aws --version`, so a
       runner image dropping the CLI fails loudly instead of mysteriously.
-- [ ] Repeat the run against at least one AWS SDK in another language, since SDK
-      behavior differs from the CLI's in checksum validation and retries
-- [ ] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end
+- [x] Repeat the run against at least one AWS SDK in another language, since SDK
+      behavior differs from the CLI's in checksum validation and retries — the AWS SDK
+      for JavaScript, in `acceptance/node/`, run by `cargo xtask acceptance-node` or
+      `make acceptance-node`. Node rather than Python because the CLI _is_ botocore, so a
+      Python SDK would have re-tested the same implementation.
+
+      That worry turned out to be exactly right. **This SDK validates the MD5s and
+      botocore does not**: `SendMessage`, `SendMessageBatch`, and `ReceiveMessage` each
+      recompute the body digest in middleware the client installs by default, and throw
+      rather than return. Confirmed by reading the middleware wiring, then by breaking
+      NexQ's digest and watching it refuse the message with
+      `Invalid MD5 checksum on messages: <ids>`. Until this suite existed, nothing had
+      held NexQ's checksums to a client that checks them — the CLI suite only caught a
+      wrong digest because it asserts the literal value.
+
+      Second finding: the SDK deserialises errors into **typed classes** picked from the
+      `__type` field, so `instanceof QueueDoesNotExist` is a check on the error envelope
+      by something not written against us. Breaking a code turned it into a generic
+      `SQSServiceException`, which the suite caught. Breaking the *namespace* did not —
+      the SDK matches only the part after the `#`, so `com.amazonaws.sqs` is decorative
+      to this client. Worth knowing rather than assuming.
+
+      Seven checks, chosen for where the two clients differ rather than to repeat the CLI
+      suite: the round trip and the batch under MD5 validation, typed errors, long
+      polling against the SDK's own timeouts, its paginator, message attributes with
+      binary sent as bytes rather than pre-encoded base64, and queue attributes with a
+      visibility hand-back. About nine seconds including the install, from a committed
+      lockfile so a run is reproducible. Its own CI job.
+
+- [x] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end. The root
+      README was twenty lines of feature tables with no way in — the setup already
+      existed, but only in the AWS facade's README, which is not where anyone lands.
+
+      Split so the two cannot drift into disagreeing: the root has the shortest path that
+      works — `make server`, four exports, create/send/receive with the real output — plus
+      configuration, what works today, and the development commands. The facade README
+      keeps the fuller version, and now says so at the top: the alternatives to those
+      exports, `aws configure`, `~/.aws/config`, running behind a proxy, and the error
+      table. Every command in the quick start was run as written, and every link checked.
 
 # M8 - SSL
 
@@ -384,6 +424,7 @@ belongs — see Future for why that is not a timer.
   messages. It also raises a question NexQ has not had to answer yet — whether an expired
   message is dropped or sent to a dead-letter queue — so it is worth doing alongside DLQ
   rather than before it.
+
 - Per-principal authorization — the registry authenticates _who_ a caller is, but
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason

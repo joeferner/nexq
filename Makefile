@@ -46,12 +46,15 @@ clippy: ## Lint every crate and target
 doc: ## Build the API docs
 	$(CARGO) doc --workspace --no-deps --all-features --locked
 
-acceptance: ## Drive a real server with the real aws CLI (needs the aws CLI installed)
-	$(CARGO) xtask acceptance
+acceptance-cli: ## Drive a real server with the real aws CLI (needs the aws CLI installed)
+	$(CARGO) xtask acceptance-cli
+
+acceptance-node: ## Same, with the AWS SDK for JavaScript (needs Node.js installed)
+	$(CARGO) xtask acceptance-node
 
 # Deliberately not depended on by pre-commit: it starts a server and waits out real
 # long-poll timeouts, so it takes about a minute of wall clock. CI runs it as its own
-# job, and `make acceptance` runs it here.
+# job, and `make acceptance-cli` runs it here.
 pre-commit: fmt-check clippy build test doc ## Run every check CI runs
 	@echo "pre-commit: all checks passed"
 

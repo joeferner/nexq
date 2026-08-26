@@ -140,6 +140,10 @@ scenes — so no operation that works today quietly depends on one of the nine.
 
 # Running the AWS CLI against NexQ
 
+The shortest path is in the [root README](../../README.md#quick-start) — four exports and
+three commands. This is the fuller version: the alternatives to those exports, what to do
+behind a proxy, and what each error means.
+
 ## 1. Start a server
 
 From the repository root:
@@ -521,7 +525,7 @@ and why anything was rejected.
 Everything above is checked by driving the real `aws` CLI against a real server:
 
 ```sh
-make acceptance          # or: cargo xtask acceptance
+make acceptance-cli      # or: cargo xtask acceptance-cli
 ```
 
 It builds the server, starts it on a free port, and runs twelve checks — the queue
@@ -539,6 +543,30 @@ quick: this takes about a minute, most of it the CLI's own startup cost across s
 invocations plus the long-poll waits it has to sit through.
 
 The reason for driving the CLI rather than a Rust client is that the CLI is not ours. It
-signs its own requests, verifies its own checksums, walks its own paginators, and decides
-for itself what an error means — so a check that passes here is evidence about
-compatibility, where a test agreeing with our own understanding of SQS is not.
+signs its own requests, walks its own paginators, and decides for itself what an error
+means — so a check that passes here is evidence about compatibility, where a test
+agreeing with our own understanding of SQS is not.
+
+## A second client
+
+```sh
+make acceptance-node     # or: cargo xtask acceptance-node
+```
+
+The AWS SDK for JavaScript, in [`acceptance/node/`](../../acceptance/node). Passing
+against the CLI alone would leave NexQ compatible with *botocore* rather than with SQS's
+protocol, and this SDK differs in ways that matter:
+
+- **It validates the MD5s.** `SendMessage`, `SendMessageBatch`, and `ReceiveMessage` all
+  recompute the body digest in middleware the client installs by default, and throw
+  `Invalid MD5 checksum on messages` rather than returning a result. botocore does not do
+  this, so until this suite existed nothing had held NexQ's checksums to a client that
+  cares.
+- **It deserialises errors into typed classes**, chosen by reading the `__type` field
+  NexQ writes. Landing in `QueueDoesNotExist` rather than a generic `SQSServiceException`
+  is a check on the error envelope by something that was not written against us.
+- **It has its own SigV4 signer**, its own paginator, and its own request timeouts — the
+  last of which a twenty-second long poll has to survive.
+
+It needs Node.js and nothing else; the SDK is installed from a committed lockfile on
+first run. Seven checks, about nine seconds including the install.
