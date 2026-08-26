@@ -68,6 +68,8 @@ macro_rules! conformance_tests {
 
         // Sending and claiming.
         $crate::conformance_case!($new_store, an_enqueued_message_can_be_claimed);
+        $crate::conformance_case!($new_store, message_attributes_survive_a_round_trip);
+        $crate::conformance_case!($new_store, a_message_without_attributes_has_none);
         $crate::conformance_case!($new_store, claiming_an_empty_queue_yields_nothing);
         $crate::conformance_case!($new_store, a_claimed_message_is_hidden_from_other_consumers);
         $crate::conformance_case!($new_store, claiming_counts_the_delivery);

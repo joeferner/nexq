@@ -56,9 +56,10 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 
 ## Message operations
 
-- :ballot_box_with_check: `SendMessage` — body and `DelaySeconds`. `MessageAttributes`,
-  `MessageGroupId`, and `MessageDeduplicationId` are refused rather than dropped, so a
-  client is never told a message was stored with data that was thrown away
+- :white_check_mark: `SendMessage` — body, `DelaySeconds`, and `MessageAttributes`.
+  `MessageGroupId`, `MessageDeduplicationId`, and `MessageSystemAttributes` are refused
+  rather than dropped, so a client is never told a message was stored with data that was
+  thrown away
 - :ballot_box_with_check: `ReceiveMessage` — `MaxNumberOfMessages` and a per-request
   `VisibilityTimeout`. `WaitTimeSeconds` is validated and then ignored, so a client
   asking to long-poll gets an immediate empty answer and polls again
@@ -72,10 +73,16 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   verify these, so they are correctness, not decoration
 - :white_check_mark: Visibility timeouts and redelivery — an expired claim makes the
   message claimable again under a new receipt handle, which invalidates the old one
+- :white_check_mark: Message attributes — `String`, `Number`, and `Binary`, custom
+  labels like `String.uuid` included, carried through untouched and validated by SQS's
+  own rules. On receive they are selected with `MessageAttributeNames`: `All`, `.*`,
+  exact names, or a `bar.*` prefix
+- :white_check_mark: `MD5OfMessageAttributes` on send and receive, matching digests
+  published by AWS itself. On receive it covers the attributes actually *returned*, so a
+  client asking for a subset can verify what it got
 - :scroll: `SendMessageBatch` / `DeleteMessageBatch`
 - :scroll: `ChangeMessageVisibility` / `ChangeMessageVisibilityBatch`
 - :scroll: Long polling — the request returns immediately instead of waiting
-- :scroll: Message attributes, and the `MD5OfMessageAttributes` that goes with them
 
 ## Not planned
 
@@ -204,6 +211,46 @@ older clients. Timestamps are milliseconds since the epoch, as strings, the way 
 reports them. `ApproximateReceiveCount` includes the delivery in progress, so a first
 receive says `1`, and `ApproximateFirstReceiveTimestamp` stays pinned to the first
 delivery rather than moving with the latest.
+
+## Attaching your own metadata
+
+Message attributes are the producer's own key-value data, carried alongside the body:
+
+```sh
+cat > attrs.json <<'JSON'
+{
+  "City":       { "DataType": "String",      "StringValue": "Any City" },
+  "Population": { "DataType": "Number",      "StringValue": "1250800" },
+  "Label":      { "DataType": "String.uuid", "StringValue": "3f2b1c" },
+  "Thumb":      { "DataType": "Binary",      "BinaryValue": "iVBORw0KGgo=" }
+}
+JSON
+
+aws sqs send-message --queue-url "$QUEUE" --message-body "hello" \
+  --message-attributes file://attrs.json
+# { "MD5OfMessageBody": "5d41402a...", "MD5OfMessageAttributes": "b972cde9...", ... }
+
+aws sqs receive-message --queue-url "$QUEUE" --message-attribute-names All
+aws sqs receive-message --queue-url "$QUEUE" --message-attribute-names City Population
+aws sqs receive-message --queue-url "$QUEUE" --message-attribute-names 'bar.*'
+```
+
+Like system attributes, they come back only when asked for. `All` and `.*` fetch
+everything; a `bar.*` request fetches the family under that prefix. Asking for a name the
+message does not carry is not an error — the name is the producer's to choose, so a miss
+is just a miss.
+
+`MD5OfMessageAttributes` accompanies them, and on receive it covers **what was
+returned**: ask for one of three attributes and you get the digest of that one, so a
+client verifying a subset gets an answer that checks out. Binary values travel base64
+encoded and are stored as the bytes they decode to, which is what the digest covers.
+
+The rules are SQS's, and NexQ enforces rather than ignores them — up to 10 attributes;
+names of at most 256 characters made of letters, digits, `_`, `-`, and `.`, with no
+leading, trailing, or doubled period, and not starting with `AWS.` or `Amazon.`; a
+`DataType` of `String`, `Number`, or `Binary` with an optional custom label; a `Number`
+that really is one; and no empty values. Names, types, and values all count towards the
+256 KB message size limit, so metadata cannot be used to smuggle a larger payload.
 
 `list-queues` printing nothing means there are no queues — the same as real SQS, which
 omits the field rather than returning an empty list.

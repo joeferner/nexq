@@ -8,6 +8,7 @@
 pub mod attributes;
 pub mod checksum;
 pub mod error;
+pub mod message_attributes;
 pub mod operations;
 pub mod protocol;
 pub mod queue_url;

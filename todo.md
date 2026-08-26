@@ -121,7 +121,7 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       silently. Verified with botocore's own paginator (`--page-size`, `--max-items`,
       `--starting-token`).
 
-## M3 — The produce/consume loop
+## ✅ M3 — The produce/consume loop
 
 - [x] `enqueue`, `claim_next`, `ack` in the engine and memory store, including
       priority ordering, per-queue delay, and a new receipt handle on each redelivery
@@ -143,11 +143,20 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       attribute — is refused with `InvalidAttributeName`, while `All` stays silent about
       it, since `All` means "whatever you have". Verified against the real `aws-cli`,
       which does not filter the names client-side
-- [ ] `SenderId`, which needs the sending principal recorded on the message. Refused
-      today rather than answered with a placeholder
-- [ ] `MessageAttributes` on send and receive, with their own MD5. Currently refused
-      rather than silently dropped, so no data is lost — but a client that needs them
-      cannot use this facade
+- [x] `MessageAttributes` on send and receive, with their own MD5. `String`, `Number`,
+      and `Binary`, custom labels included, validated against SQS's own published rules
+      and counted towards the message size limit. On receive, selected with
+      `MessageAttributeNames` — `All`, `.*`, exact names, or a `bar.*` prefix — and a
+      name the message does not carry is a miss rather than an error, since the name is
+      the producer's to choose.
+
+      `MD5OfMessageAttributes` is checked against four digests **AWS itself published**
+      in the `aws-cli` documentation examples, whose outputs are real SQS responses. That
+      also settled a question the spec text does not: on receive the digest covers the
+      attributes *returned*, not every attribute the message holds — AWS's own example
+      shows a different digest for the same message when only one of its two attributes
+      was requested. Verified end to end against the real `aws-cli`, with the digest
+      cross-checked against an independent implementation of the encoding.
 
 ## M4 — Long-polling receive
 
@@ -201,12 +210,14 @@ two consumers — the part still missing is the timer, not the expiry.
 # M8 - SSL
 
 - [ ] Add SSL support to servers
-- [ ] Add SSL to clients
 
 # Future
 
 - FIFO Queues
 - AWS Query/XML protocol
+- `SenderId` on receive, which needs the sending principal recorded on the message.
+  Named explicitly it is refused rather than answered with a placeholder, and `All`
+  stays silent about it.
 - Per-principal authorization — the registry authenticates _who_ a caller is, but
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason

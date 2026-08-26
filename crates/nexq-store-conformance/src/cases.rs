@@ -10,7 +10,10 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use nexq_core::model::{Message, Priority, Queue, QueueAttributes, QueueName};
+use nexq_core::model::{
+    AttributeValue, Message, MessageAttribute, MessageAttributes, Priority, Queue, QueueAttributes,
+    QueueName,
+};
 use nexq_core::store::{Store, StoreError};
 
 /// Visibility timeout used where a case needs a claim to lapse during the test.
@@ -252,6 +255,81 @@ pub async fn an_enqueued_message_can_be_claimed(store: Arc<dyn Store>) {
         !claimed.receipt.as_str().is_empty(),
         "a claim must come with a handle"
     );
+}
+
+/// A backend must hand back exactly the attributes it was given.
+///
+/// Worth asserting across backends rather than trusting: these are covered by a checksum
+/// the client recomputes, so a backend that reorders them, loses one, or turns bytes into
+/// text makes a consumer reject a message whose data arrived intact. A store column too
+/// narrow for a value, or a JSON round trip that mangles binary, would show up here.
+pub async fn message_attributes_survive_a_round_trip(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+
+    let attributes: MessageAttributes = [
+        (
+            "City".to_owned(),
+            MessageAttribute {
+                data_type: "String".to_owned(),
+                value: AttributeValue::Text("Any City".to_owned()),
+            },
+        ),
+        (
+            "Population".to_owned(),
+            MessageAttribute {
+                data_type: "Number.count".to_owned(),
+                value: AttributeValue::Text("1250800".to_owned()),
+            },
+        ),
+        (
+            "Thumb".to_owned(),
+            MessageAttribute {
+                data_type: "Binary".to_owned(),
+                // Deliberately not valid UTF-8, and with an interior zero byte: a
+                // backend that stores binary values as text would corrupt this.
+                value: AttributeValue::Binary(vec![0xff, 0x00, 0x01, 0xfe]),
+            },
+        ),
+    ]
+    .into();
+
+    store
+        .enqueue(
+            &queue_name,
+            message("hello", 0).with_attributes(attributes.clone()),
+            None,
+        )
+        .await
+        .expect("enqueue");
+
+    let claimed = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("a message is waiting");
+
+    assert_eq!(
+        claimed.message.attributes, attributes,
+        "attributes must come back exactly as they went in"
+    );
+}
+
+/// A message with no attributes must come back with none, not with an absent-yet-present
+/// empty entry that would change its checksum.
+pub async fn a_message_without_attributes_has_none(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+
+    let claimed = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("a message is waiting");
+
+    assert!(claimed.message.attributes.is_empty());
 }
 
 /// An empty queue is a normal answer, not a failure — every consumer polls one.

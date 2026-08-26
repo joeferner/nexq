@@ -13,10 +13,11 @@ use nexq_core::model::{Priority, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 
 use crate::error::ApiError;
+use crate::message_attributes::Selection;
 use crate::protocol::Operation;
 use crate::queue_url::QueueUrls;
 use crate::system_attributes::Requested;
-use crate::{attributes, checksum};
+use crate::{attributes, checksum, message_attributes};
 
 /// The engine, plus what this facade needs to talk about queues in URLs.
 #[derive(Debug)]
@@ -121,17 +122,17 @@ impl Operations {
 
     /// `SendMessage`.
     ///
-    /// The MD5 in the response is not decoration: SDKs verify it, and a wrong one makes
-    /// a client reject a message that was in fact stored.
+    /// The MD5s in the response are not decoration: SDKs verify them, and a wrong one
+    /// makes a client reject a message that was in fact stored.
     async fn send_message(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
         let body = required_string(input, "MessageBody")?.to_owned();
         let delay = optional_duration(input, "DelaySeconds", attributes::DELAY_SECONDS_MAX)?;
+        let message_attributes = message_attributes::from_input(input.get("MessageAttributes"))?;
 
         reject_unsupported(
             input,
             &[
-                "MessageAttributes",
                 "MessageSystemAttributes",
                 "MessageDeduplicationId",
                 "MessageGroupId",
@@ -143,13 +144,22 @@ impl Operations {
         // client chooses.
         let message = self
             .engine
-            .enqueue(&queue, body, Priority::DEFAULT, delay)
+            .enqueue(&queue, body, Priority::DEFAULT, message_attributes, delay)
             .await?;
 
-        Ok(json!({
+        let mut output = json!({
             "MessageId": message.id.as_str(),
             "MD5OfMessageBody": checksum::md5_of_body(&message.body),
-        }))
+        });
+
+        // Omitted rather than sent as the digest of nothing, which is what SQS does and
+        // what stops a client verifying a checksum over attributes it never sent.
+        if !message.attributes.is_empty() {
+            output["MD5OfMessageAttributes"] =
+                json!(checksum::md5_of_attributes(&message.attributes));
+        }
+
+        Ok(output)
     }
 
     /// `ReceiveMessage`.
@@ -175,6 +185,7 @@ impl Operations {
         // Read before anything is claimed, so a request naming an attribute NexQ cannot
         // report fails without having made a message invisible for nothing.
         let requested = Requested::from_input(input)?;
+        let selection = Selection::from_input(input)?;
 
         let mut claimed = Vec::new();
         for _ in 0..wanted {
@@ -208,6 +219,18 @@ impl Operations {
                 let system_attributes = requested.render(&claimed.message);
                 if !system_attributes.is_empty() {
                     message["Attributes"] = Value::Object(system_attributes);
+                }
+
+                // The checksum covers what is *returned*, not everything the message
+                // holds — a client asking for one of three attributes verifies the
+                // digest of that one. AWS's own published digests show this, and the
+                // checksum tests pin it.
+                let selected = selection.select(&claimed.message.attributes);
+                if !selected.is_empty() {
+                    message["MD5OfMessageAttributes"] =
+                        json!(checksum::md5_of_attributes(&selected));
+                    message["MessageAttributes"] =
+                        Value::Object(message_attributes::to_output(&selected));
                 }
 
                 message
@@ -994,6 +1017,274 @@ mod tests {
         assert_eq!(again, json!({}), "someone else already holds it");
     }
 
+    /// The attribute map used by the send/receive round-trip tests.
+    fn sent_attributes() -> Value {
+        json!({
+            "City": { "DataType": "String", "StringValue": "Any City" },
+            "Population": { "DataType": "Number", "StringValue": "1250800" },
+            "Thumb": { "DataType": "Binary", "BinaryValue": "SGVsbG8sIFdvcmxkIQ==" },
+        })
+    }
+
+    #[tokio::test]
+    async fn message_attributes_survive_a_send_and_receive() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let sent = call(
+            &operations,
+            Operation::SendMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageBody": "hello",
+                "MessageAttributes": sent_attributes(),
+            }),
+        )
+        .await
+        .expect("send");
+
+        let digest = sent["MD5OfMessageAttributes"]
+            .as_str()
+            .expect("a digest of the attributes");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MessageAttributeNames": ["All"] }),
+        )
+        .await
+        .expect("receive");
+        let message = &received["Messages"][0];
+
+        assert_eq!(
+            message["MessageAttributes"],
+            sent_attributes(),
+            "what comes back must be what went in, byte for byte"
+        );
+        assert_eq!(
+            message["MD5OfMessageAttributes"], digest,
+            "and it must checksum the same on the way out as on the way in"
+        );
+    }
+
+    #[tokio::test]
+    async fn attributes_are_omitted_entirely_unless_asked_for() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageBody": "hello",
+                "MessageAttributes": sent_attributes(),
+            }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        let message = &received["Messages"][0];
+
+        assert!(message.get("MessageAttributes").is_none(), "{message}");
+        assert!(
+            message.get("MD5OfMessageAttributes").is_none(),
+            "a digest with nothing to verify is worse than no digest: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_subset_is_checksummed_as_a_subset() {
+        // The behaviour AWS's own published digests show: asking for some attributes
+        // gives the digest of those, not of everything the message holds. Getting this
+        // wrong makes an SDK reject a message whose data arrived intact.
+        let operations = operations();
+        let url = queue(&operations).await;
+        let sent = call(
+            &operations,
+            Operation::SendMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageBody": "hello",
+                "MessageAttributes": sent_attributes(),
+            }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({
+                "QueueUrl": url,
+                "VisibilityTimeout": 0,
+                "MessageAttributeNames": ["City"],
+            }),
+        )
+        .await
+        .expect("receive");
+        let message = &received["Messages"][0];
+
+        assert_eq!(
+            message["MessageAttributes"],
+            json!({ "City": { "DataType": "String", "StringValue": "Any City" } })
+        );
+        assert_ne!(
+            message["MD5OfMessageAttributes"], sent["MD5OfMessageAttributes"],
+            "a subset must not carry the digest of the whole"
+        );
+        assert_eq!(
+            message["MD5OfMessageAttributes"],
+            json!(checksum::md5_of_attributes(
+                &message_attributes::from_input(Some(&message["MessageAttributes"]))
+                    .expect("parse")
+            )),
+            "the digest must cover exactly the attributes alongside it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_prefix_selects_a_family_of_attributes() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageBody": "hello",
+                "MessageAttributes": {
+                    "bar.one": { "DataType": "String", "StringValue": "1" },
+                    "bar.two": { "DataType": "String", "StringValue": "2" },
+                    "other": { "DataType": "String", "StringValue": "3" },
+                },
+            }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MessageAttributeNames": ["bar.*"] }),
+        )
+        .await
+        .expect("receive");
+
+        let attributes = received["Messages"][0]["MessageAttributes"]
+            .as_object()
+            .expect("attributes");
+        assert_eq!(
+            attributes.keys().collect::<Vec<_>>(),
+            ["bar.one", "bar.two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_attribute_a_message_does_not_carry_is_simply_absent() {
+        // Unlike a system attribute, the name here is the producer's, so a miss is not
+        // the server's to complain about.
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MessageAttributeNames": ["Nope"] }),
+        )
+        .await
+        .expect("no error for a name that is not there");
+
+        let message = &received["Messages"][0];
+        assert_eq!(message["Body"], "hello");
+        assert!(message.get("MessageAttributes").is_none(), "{message}");
+    }
+
+    #[tokio::test]
+    async fn attributes_that_break_sqs_rules_are_refused_on_send() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        for (label, attributes) in [
+            ("no DataType", json!({ "x": { "StringValue": "v" } })),
+            (
+                "value field does not match the type",
+                json!({ "x": { "DataType": "Binary", "StringValue": "v" } }),
+            ),
+            (
+                "a Number that is not a number",
+                json!({ "x": { "DataType": "Number", "StringValue": "soon" } }),
+            ),
+            (
+                "an AWS-reserved name",
+                json!({ "AWS.Thing": { "DataType": "String", "StringValue": "v" } }),
+            ),
+            (
+                "an empty value",
+                json!({ "x": { "DataType": "String", "StringValue": "" } }),
+            ),
+        ] {
+            let error = call(
+                &operations,
+                Operation::SendMessage,
+                json!({ "QueueUrl": url, "MessageBody": "hello",
+                        "MessageAttributes": attributes }),
+            )
+            .await
+            .expect_err(label);
+
+            assert_eq!(error.code(), "InvalidParameterValue", "{label}");
+        }
+
+        // And nothing was stored on the way to failing.
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(received, json!({}), "no message should have been accepted");
+    }
+
+    #[tokio::test]
+    async fn attributes_count_towards_the_size_limit() {
+        // A body just under the limit plus attributes that push it over. Accounting for
+        // the body alone would let a producer smuggle unbounded metadata past the cap.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let error = call(
+            &operations,
+            Operation::SendMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageBody": "x".repeat(256 * 1024 - 4),
+                "MessageAttributes": {
+                    "City": { "DataType": "String", "StringValue": "Any City" },
+                },
+            }),
+        )
+        .await
+        .expect_err("over the limit once the attributes count");
+
+        assert_eq!(error.code(), "InvalidParameterValue");
+        assert!(error.message().contains("262144"), "{}", error.message());
+    }
+
     #[tokio::test]
     async fn no_attributes_come_back_unless_they_are_asked_for() {
         let operations = operations();
@@ -1221,7 +1512,6 @@ mod tests {
         // Accepting these while ignoring them would lose a client's data, or imply
         // FIFO ordering that does not exist.
         for field in [
-            "MessageAttributes",
             "MessageSystemAttributes",
             "MessageDeduplicationId",
             "MessageGroupId",

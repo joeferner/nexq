@@ -22,8 +22,8 @@ use std::time::{Duration, SystemTime};
 use thiserror::Error;
 
 use crate::model::{
-    ClaimedMessage, MAX_BODY_BYTES, Message, Priority, Queue, QueueAttributes, QueueName,
-    ReceiptHandle,
+    ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, Priority, Queue, QueueAttributes,
+    QueueName, ReceiptHandle,
 };
 use crate::store::{Store, StoreError};
 
@@ -235,15 +235,17 @@ impl Engine {
         queue: &QueueName,
         body: String,
         priority: Priority,
+        attributes: MessageAttributes,
         delay: Option<Duration>,
     ) -> Result<Message> {
-        let message = Message::new(body, priority);
+        let message = Message::new(body, priority).with_attributes(attributes);
 
-        // Checked before the store is touched: a body over the limit is the caller's
-        // mistake, and no backend should have to decide what to do about it.
-        if !message.body_within_limit() {
+        // Checked before the store is touched: a message over the limit is the caller's
+        // mistake, and no backend should have to decide what to do about it. Attributes
+        // count towards the limit, so this is not the body's length alone.
+        if !message.within_size_limit() {
             return Err(EngineError::MessageTooLarge {
-                bytes: message.body.len(),
+                bytes: message.size_bytes(),
             });
         }
 
@@ -673,7 +675,13 @@ mod tests {
             .await
             .expect("create queue");
         engine
-            .enqueue(&queue, body.to_owned(), Priority::DEFAULT, None)
+            .enqueue(
+                &queue,
+                body.to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
             .await
             .expect("enqueue");
 
@@ -691,7 +699,13 @@ mod tests {
         let before = SystemTime::now();
 
         let message = engine
-            .enqueue(&queue, "hello".to_owned(), Priority::new(5), None)
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::new(5),
+                MessageAttributes::new(),
+                None,
+            )
             .await
             .expect("enqueue");
 
@@ -706,7 +720,13 @@ mod tests {
     #[tokio::test]
     async fn enqueueing_to_a_missing_queue_is_an_error() {
         let error = engine()
-            .enqueue(&name("nope"), "hello".to_owned(), Priority::DEFAULT, None)
+            .enqueue(
+                &name("nope"),
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
             .await
             .expect_err("no such queue");
 
@@ -727,6 +747,7 @@ mod tests {
                 &name("jobs"),
                 "x".repeat(MAX_BODY_BYTES + 1),
                 Priority::DEFAULT,
+                MessageAttributes::new(),
                 None,
             )
             .await
@@ -748,7 +769,13 @@ mod tests {
             .expect("create queue");
 
         engine
-            .enqueue(&queue, "x".repeat(MAX_BODY_BYTES), Priority::DEFAULT, None)
+            .enqueue(
+                &queue,
+                "x".repeat(MAX_BODY_BYTES),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
             .await
             .expect("exactly at the limit is allowed");
     }

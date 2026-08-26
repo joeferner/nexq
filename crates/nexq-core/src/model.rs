@@ -10,6 +10,7 @@
 //! - A [`ClaimedMessage`] is a message handed to one consumer for a limited time,
 //!   identified by a [`ReceiptHandle`]. The claim expires; the message does not.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -110,12 +111,45 @@ pub struct ReceiptHandle(String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Priority(i32);
 
+/// Client-supplied metadata carried alongside a message, keyed by name.
+///
+/// A [`BTreeMap`] rather than a `HashMap` for two reasons: the order is stable, so two
+/// backends cannot disagree about it, and it is *name order by UTF-8 bytes*, which is
+/// the order SQS's attribute checksum is defined over. That makes the sort the checksum
+/// needs an invariant of the type rather than a step a caller has to remember.
+pub type MessageAttributes = BTreeMap<String, MessageAttribute>;
+
+/// One client-supplied attribute: a value plus the label the producer typed it with.
+///
+/// The label is free-form here because it is the producer's to choose — SQS constrains
+/// it to `String`, `Number`, or `Binary` with an optional custom suffix, but that is an
+/// SQS rule the facade enforces, not a property of carrying metadata around.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageAttribute {
+    pub data_type: String,
+    pub value: AttributeValue,
+}
+
+/// An attribute's value: text, or bytes.
+///
+/// The distinction is not cosmetic — it decides how the value is framed on the wire and
+/// in the checksum, so text that happens to hold base64 is not the same as the bytes it
+/// decodes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttributeValue {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
 /// A durable message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub id: MessageId,
     pub body: String,
     pub priority: Priority,
+
+    /// Metadata the producer attached. Empty for a message that carries none.
+    pub attributes: MessageAttributes,
 
     /// When the message was accepted, not when it becomes visible.
     pub enqueued_at: SystemTime,
@@ -297,25 +331,65 @@ impl From<i32> for Priority {
 }
 
 impl Message {
-    /// A message as first accepted: never delivered, so no receive count and no first
-    /// delivery time.
+    /// A message as first accepted: no attributes, never delivered, so no receive count
+    /// and no first delivery time.
     pub fn new(body: impl Into<String>, priority: Priority) -> Self {
         Self {
             id: MessageId::new(),
             body: body.into(),
             priority,
+            attributes: MessageAttributes::new(),
             enqueued_at: SystemTime::now(),
             receive_count: 0,
             first_received_at: None,
         }
     }
 
-    /// Whether the body is within [`MAX_BODY_BYTES`].
+    /// The same message, carrying attributes.
     ///
-    /// Measured in bytes, since that is what the limit is about, and a multi-byte
-    /// character therefore counts for more than one.
-    pub fn body_within_limit(&self) -> bool {
-        self.body.len() <= MAX_BODY_BYTES
+    /// Separate from [`Message::new`] because most messages have none, and a producer
+    /// that attaches them is doing something extra rather than filling in a blank.
+    pub fn with_attributes(mut self, attributes: MessageAttributes) -> Self {
+        self.attributes = attributes;
+        self
+    }
+
+    /// What this message counts against [`MAX_BODY_BYTES`].
+    ///
+    /// The body plus every attribute's name, type, and value, which is how SQS accounts
+    /// for it — "all parts of the message attribute, including Name, Type, and Value,
+    /// are part of the message size restriction". Framing bytes are not counted, since
+    /// they belong to a wire format the model knows nothing about.
+    ///
+    /// Measured in bytes throughout, since that is what the limit is about, so a
+    /// multi-byte character counts for more than one.
+    pub fn size_bytes(&self) -> usize {
+        self.attributes
+            .iter()
+            .map(|(name, attribute)| name.len() + attribute.data_type.len() + attribute.value.len())
+            .sum::<usize>()
+            .saturating_add(self.body.len())
+    }
+
+    /// Whether this message is within [`MAX_BODY_BYTES`].
+    pub fn within_size_limit(&self) -> bool {
+        self.size_bytes() <= MAX_BODY_BYTES
+    }
+}
+
+impl AttributeValue {
+    /// The value's size in bytes, whichever form it takes.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Text(text) => text.len(),
+            Self::Binary(bytes) => bytes.len(),
+        }
+    }
+
+    /// Whether the value carries nothing. SQS refuses an empty attribute value, so a
+    /// facade needs to be able to ask.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -472,20 +546,83 @@ mod tests {
         assert_eq!(message.body, "hello");
         assert_eq!(message.receive_count, 0);
         assert_eq!(message.first_received_at, None);
-        assert!(message.body_within_limit());
+        assert!(message.attributes.is_empty(), "none unless attached");
+        assert!(message.within_size_limit());
     }
 
     #[test]
-    fn the_body_limit_is_counted_in_bytes() {
+    fn the_size_limit_is_counted_in_bytes() {
         let at_limit = Message::new("x".repeat(MAX_BODY_BYTES), Priority::DEFAULT);
-        assert!(at_limit.body_within_limit());
+        assert!(at_limit.within_size_limit());
 
         let over_by_one = Message::new("x".repeat(MAX_BODY_BYTES + 1), Priority::DEFAULT);
-        assert!(!over_by_one.body_within_limit());
+        assert!(!over_by_one.within_size_limit());
 
         // Two bytes per character, so half as many characters reach the limit.
         let multibyte = Message::new("é".repeat(MAX_BODY_BYTES / 2 + 1), Priority::DEFAULT);
-        assert!(!multibyte.body_within_limit());
+        assert!(!multibyte.within_size_limit());
+    }
+
+    #[test]
+    fn attributes_count_towards_the_size_limit() {
+        // A body at the limit leaves no room for metadata, so attaching any is over it.
+        // Otherwise a producer could smuggle unbounded data past the limit.
+        let at_limit = Message::new("x".repeat(MAX_BODY_BYTES), Priority::DEFAULT);
+        assert!(at_limit.within_size_limit());
+
+        let with_attribute = at_limit.with_attributes(
+            [(
+                "City".to_owned(),
+                MessageAttribute {
+                    data_type: "String".to_owned(),
+                    value: AttributeValue::Text("Any City".to_owned()),
+                },
+            )]
+            .into(),
+        );
+
+        assert!(!with_attribute.within_size_limit());
+        assert_eq!(
+            with_attribute.size_bytes(),
+            MAX_BODY_BYTES + "City".len() + "String".len() + "Any City".len(),
+            "name, type, and value all count, as SQS counts them"
+        );
+    }
+
+    #[test]
+    fn an_attribute_value_measures_whichever_form_it_takes() {
+        assert_eq!(AttributeValue::Text("héllo".to_owned()).len(), 6, "bytes");
+        assert_eq!(AttributeValue::Binary(vec![0, 1, 2]).len(), 3);
+
+        assert!(AttributeValue::Text(String::new()).is_empty());
+        assert!(AttributeValue::Binary(Vec::new()).is_empty());
+        assert!(!AttributeValue::Text("x".to_owned()).is_empty());
+    }
+
+    #[test]
+    fn attributes_are_held_in_the_order_the_checksum_needs() {
+        // Name order by UTF-8 bytes, which is what SQS's attribute MD5 is defined over.
+        // Insertion order must not survive, or the checksum would depend on it.
+        let message = Message::new("hello", Priority::DEFAULT).with_attributes(
+            ["Population", "City", "aardvark", "Greeting"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.to_owned(),
+                        MessageAttribute {
+                            data_type: "String".to_owned(),
+                            value: AttributeValue::Text("x".to_owned()),
+                        },
+                    )
+                })
+                .collect(),
+        );
+
+        assert_eq!(
+            message.attributes.keys().collect::<Vec<_>>(),
+            ["City", "Greeting", "Population", "aardvark"],
+            "uppercase sorts before lowercase, since this is bytes and not locale"
+        );
     }
 
     #[test]
