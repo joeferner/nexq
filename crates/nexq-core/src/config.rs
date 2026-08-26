@@ -308,11 +308,6 @@ impl AwsApiConfig {
     pub fn base_url(&self) -> &str {
         self.public_base_url.trim_end_matches('/')
     }
-
-    /// The URL reported for a queue, and the URL clients then send requests to.
-    pub fn queue_url(&self, queue_name: &str) -> String {
-        format!("{}/{}/{}", self.base_url(), self.account_id, queue_name)
-    }
 }
 
 impl Default for AwsApiConfig {
@@ -384,10 +379,7 @@ mod tests {
             assert!(config.aws_api.enabled);
             assert_eq!(config.aws_api.bind_addr.to_string(), "0.0.0.0:8080");
             assert_eq!(config.aws_api.base_url(), "http://localhost:8080");
-            assert_eq!(
-                config.aws_api.queue_url("jobs"),
-                "http://localhost:8080/000000000000/jobs"
-            );
+            assert_eq!(config.aws_api.account_id, "000000000000");
 
             let credential = config.auth.credential("AKIANEXQEXAMPLE").expect("lookup");
             assert_eq!(credential.name, "dev");
@@ -420,10 +412,7 @@ mod tests {
             assert_eq!(config.aws_api.bind_addr.to_string(), "127.0.0.1:9999");
             // Trailing slash trimmed so paths can be joined without doubling it.
             assert_eq!(config.aws_api.base_url(), "https://queue.example.com");
-            assert_eq!(
-                config.aws_api.queue_url("jobs"),
-                "https://queue.example.com/123456789012/jobs"
-            );
+            assert_eq!(config.aws_api.account_id, "123456789012");
             Ok(())
         });
     }
@@ -595,10 +584,8 @@ mod tests {
 
             assert_eq!(config.auth.credentials.len(), 1);
             assert!(config.aws_api.enabled);
-            assert_eq!(
-                config.aws_api.queue_url("jobs"),
-                "http://localhost:8080/000000000000/jobs"
-            );
+            assert_eq!(config.aws_api.base_url(), "http://localhost:8080");
+            assert_eq!(config.aws_api.account_id, "000000000000");
             Ok(())
         });
     }

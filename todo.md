@@ -97,9 +97,10 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       running green against the memory store
 - [x] Core engine operations: create, get, delete, list — with idempotent creation
       decided here, so every facade inherits it
-- [ ] Queue URL construction from the configured public base URL — the CLI sends every
-      subsequent request to whatever URL `CreateQueue`/`GetQueueUrl` returns, so a
-      wrong host here breaks the client silently
+- [x] Queue URL construction *and parsing* from the configured public base URL — the
+      CLI sends every subsequent request to whatever URL `CreateQueue`/`GetQueueUrl`
+      returns, so both directions have to agree; `QueueUrls` owns the format and a
+      round-trip test pins it
 - [ ] Pick and document the fake account id used in queue URLs
 - [ ] `CreateQueue`, `DeleteQueue`, `ListQueues`, `GetQueueUrl`
 - [ ] `QueueAlreadyExists` / `QueueDoesNotExist` error parity

@@ -110,6 +110,17 @@ impl ApiError {
         )
     }
 
+    /// The `QueueUrl` a client sent is not one this facade can act on.
+    ///
+    /// SQS reports a bad queue URL as a 404, which is what an SDK expects to see.
+    pub fn invalid_address(url: &str) -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "InvalidAddress",
+            format!("The address {url} is not valid for this endpoint."),
+        )
+    }
+
     /// A real operation that is not built yet. Temporary, and not an AWS error code —
     /// it should disappear as the operations land.
     pub fn not_implemented(operation: impl std::fmt::Display) -> Self {

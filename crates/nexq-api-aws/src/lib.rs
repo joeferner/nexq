@@ -8,10 +8,12 @@
 pub mod error;
 pub mod operations;
 pub mod protocol;
+pub mod queue_url;
 pub mod server;
 pub mod sigv4;
 
 pub use error::ApiError;
 pub use protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER};
+pub use queue_url::QueueUrls;
 pub use server::Server;
 pub use sigv4::SigningContext;
