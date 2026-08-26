@@ -18,11 +18,12 @@
 //! arrive with the operations that need them.
 
 use std::fmt;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::model::{Queue, QueueName};
+use crate::model::{ClaimedMessage, Message, Queue, QueueName, ReceiptHandle};
 
 /// The result of a storage operation.
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -37,6 +38,14 @@ pub enum StoreError {
     /// A queue by that name already exists.
     #[error("queue already exists: {0}")]
     QueueAlreadyExists(QueueName),
+
+    /// The receipt handle names no claim: it was never issued, its claim already
+    /// ended, or the message has since been redelivered under a new handle.
+    ///
+    /// Carries no payload on purpose — a handle authorizes deleting a message, so it
+    /// does not belong in an error string that will be logged.
+    #[error("the receipt handle does not identify a current claim")]
+    InvalidReceipt,
 
     /// The backend itself failed — a connection dropped, a query was rejected, a
     /// response could not be decoded. Distinct from the cases above, which are normal
@@ -86,6 +95,45 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     /// matching and paging come with the operations that need them, and belong here
     /// rather than in the caller so a backend can push them down to storage.
     async fn list_queues(&self) -> Result<Vec<Queue>>;
+
+    /// Add a message to a queue.
+    ///
+    /// `delay` is how long before the message may be claimed; `None` means the queue's
+    /// configured delay. The option is resolved here rather than by the caller because
+    /// the backend already holds the queue record, so reading the default costs it
+    /// nothing while the caller would need an extra round trip.
+    async fn enqueue(
+        &self,
+        queue: &QueueName,
+        message: Message,
+        delay: Option<Duration>,
+    ) -> Result<()>;
+
+    /// Claim the next message, or `None` if there is nothing claimable.
+    ///
+    /// "Next" is the backend's judgement, but every backend owes the same contract:
+    /// higher [`crate::model::Priority`] first, and within one priority the earliest
+    /// enqueued first.
+    ///
+    /// A claim makes the message invisible to other consumers until it expires, at
+    /// which point the message becomes claimable again — under a *new* receipt handle,
+    /// which invalidates the old one. `visibility_timeout` of `None` means the queue's
+    /// configured default.
+    ///
+    /// Claiming also increments the message's receive count and, on first delivery,
+    /// records when that happened.
+    async fn claim_next(
+        &self,
+        queue: &QueueName,
+        visibility_timeout: Option<Duration>,
+    ) -> Result<Option<ClaimedMessage>>;
+
+    /// Delete a claimed message, ending the claim for good.
+    ///
+    /// Fails with [`StoreError::InvalidReceipt`] unless the handle identifies a claim
+    /// that is still current — so a consumer whose claim expired and was redelivered to
+    /// someone else cannot delete the other consumer's message.
+    async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()>;
 }
 
 #[cfg(test)]

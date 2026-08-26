@@ -168,6 +168,16 @@ impl ApiError {
         )
     }
 
+    /// The receipt handle names no current claim — never issued, already used, or
+    /// superseded because the claim expired and the message went to someone else.
+    pub fn receipt_handle_is_invalid() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "ReceiptHandleIsInvalid",
+            "The specified receipt handle isn't valid.",
+        )
+    }
+
     /// A queue of that name exists with different attributes.
     pub fn queue_name_exists(name: &str) -> Self {
         Self::new(
@@ -241,6 +251,11 @@ impl From<EngineError> for ApiError {
             EngineError::Conflict(name) => {
                 Self::unavailable(format!("queue {name} is changing concurrently; retry"))
             }
+            EngineError::MessageTooLarge { bytes } => Self::invalid_parameter_value(format!(
+                "One or more parameters are invalid. Reason: Message must be shorter \
+                 than 262144 bytes, got {bytes}."
+            )),
+            EngineError::InvalidReceipt => Self::receipt_handle_is_invalid(),
             EngineError::Backend(source) => {
                 error!(cause = %source, "storage backend failed");
                 Self::internal_error()

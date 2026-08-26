@@ -117,7 +117,8 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 
 ## M3 — The produce/consume loop
 
-- [ ] `enqueue`, `claim_next`, `ack` in the engine and memory store
+- [x] `enqueue`, `claim_next`, `ack` in the engine and memory store, including
+      priority ordering, per-queue delay, and a new receipt handle on each redelivery
 - [ ] `SendMessage`, `ReceiveMessage`, `DeleteMessage`
 - [ ] `MD5OfMessageBody` in send/receive responses — some SDKs verify this checksum
       and will error out if it is absent or wrong

@@ -17,11 +17,14 @@
 //! its backend is exactly this layer's job.
 
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
 
-use crate::model::{Queue, QueueAttributes, QueueName};
+use crate::model::{
+    ClaimedMessage, MAX_BODY_BYTES, Message, Priority, Queue, QueueAttributes, QueueName,
+    ReceiptHandle,
+};
 use crate::store::{Store, StoreError};
 
 /// The result of an engine operation.
@@ -51,6 +54,14 @@ pub enum EngineError {
     #[error("queue {0} is being created and deleted concurrently; retry")]
     Conflict(QueueName),
 
+    /// The message body is over [`MAX_BODY_BYTES`].
+    #[error("message body is {bytes} bytes, over the {MAX_BODY_BYTES} byte limit")]
+    MessageTooLarge { bytes: usize },
+
+    /// The receipt handle does not identify a claim that is still current.
+    #[error("the receipt handle does not identify a current claim")]
+    InvalidReceipt,
+
     /// The storage backend failed.
     #[error("backend failure: {0}")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -61,6 +72,7 @@ impl From<StoreError> for EngineError {
         match error {
             StoreError::QueueNotFound(name) => Self::QueueNotFound(name),
             StoreError::QueueAlreadyExists(name) => Self::QueueAlreadyExists(name),
+            StoreError::InvalidReceipt => Self::InvalidReceipt,
             StoreError::Backend(source) => Self::Backend(source),
         }
     }
@@ -155,6 +167,60 @@ impl Engine {
         }
 
         Ok(queues)
+    }
+
+    /// Add a message to a queue, returning it as stored.
+    ///
+    /// The identifier and enqueue time are minted here, not accepted from the caller,
+    /// for the same reason a queue's creation time is: they record what the server did.
+    /// The returned message is what a caller needs to answer with — an id to report, a
+    /// body to checksum.
+    ///
+    /// `delay` of `None` means the queue's configured delay.
+    pub async fn enqueue(
+        &self,
+        queue: &QueueName,
+        body: String,
+        priority: Priority,
+        delay: Option<Duration>,
+    ) -> Result<Message> {
+        let message = Message::new(body, priority);
+
+        // Checked before the store is touched: a body over the limit is the caller's
+        // mistake, and no backend should have to decide what to do about it.
+        if !message.body_within_limit() {
+            return Err(EngineError::MessageTooLarge {
+                bytes: message.body.len(),
+            });
+        }
+
+        self.store.enqueue(queue, message.clone(), delay).await?;
+
+        Ok(message)
+    }
+
+    /// Claim the next message for a consumer, or `None` if the queue has nothing
+    /// claimable right now.
+    ///
+    /// This returns immediately either way. Waiting for a message to arrive — long
+    /// polling — is a separate concern that belongs above this call, since it is about
+    /// holding a request open rather than about storage.
+    ///
+    /// `visibility_timeout` of `None` means the queue's configured default.
+    pub async fn claim_next(
+        &self,
+        queue: &QueueName,
+        visibility_timeout: Option<Duration>,
+    ) -> Result<Option<ClaimedMessage>> {
+        Ok(self.store.claim_next(queue, visibility_timeout).await?)
+    }
+
+    /// Delete a claimed message.
+    ///
+    /// A message is only gone once this is called: until then an expired claim means
+    /// redelivery, which is what makes delivery at-least-once rather than at-most-once.
+    pub async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()> {
+        Ok(self.store.ack(queue, receipt).await?)
     }
 }
 
@@ -359,6 +425,208 @@ mod tests {
         );
     }
 
+    /// Create a queue and put one message in it, returning the queue's name.
+    async fn queue_with_message(engine: &Engine, body: &str) -> QueueName {
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create queue");
+        engine
+            .enqueue(&queue, body.to_owned(), Priority::DEFAULT, None)
+            .await
+            .expect("enqueue");
+
+        queue
+    }
+
+    #[tokio::test]
+    async fn an_enqueued_message_gets_server_owned_fields() {
+        let engine = engine();
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create queue");
+        let before = SystemTime::now();
+
+        let message = engine
+            .enqueue(&queue, "hello".to_owned(), Priority::new(5), None)
+            .await
+            .expect("enqueue");
+
+        assert_eq!(message.body, "hello");
+        assert_eq!(message.priority, Priority::new(5));
+        assert_eq!(message.receive_count, 0);
+        assert_eq!(message.first_received_at, None);
+        assert!(message.enqueued_at >= before, "stamped by the server");
+        assert!(!message.id.as_str().is_empty(), "given an id");
+    }
+
+    #[tokio::test]
+    async fn enqueueing_to_a_missing_queue_is_an_error() {
+        let error = engine()
+            .enqueue(&name("nope"), "hello".to_owned(), Priority::DEFAULT, None)
+            .await
+            .expect_err("no such queue");
+
+        assert!(
+            matches!(&error, EngineError::QueueNotFound(n) if n == &name("nope")),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_oversized_body_is_refused_before_the_store_is_touched() {
+        let engine = Engine::new(Arc::new(BrokenStore));
+
+        // A backend that fails everything: reaching it would surface as a backend
+        // error instead of the caller's own mistake.
+        let error = engine
+            .enqueue(
+                &name("jobs"),
+                "x".repeat(MAX_BODY_BYTES + 1),
+                Priority::DEFAULT,
+                None,
+            )
+            .await
+            .expect_err("too large");
+
+        assert!(
+            matches!(error, EngineError::MessageTooLarge { bytes } if bytes == MAX_BODY_BYTES + 1),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_body_at_the_limit_is_accepted() {
+        let engine = engine();
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create queue");
+
+        engine
+            .enqueue(&queue, "x".repeat(MAX_BODY_BYTES), Priority::DEFAULT, None)
+            .await
+            .expect("exactly at the limit is allowed");
+    }
+
+    #[tokio::test]
+    async fn claiming_hands_out_a_message_and_counts_the_delivery() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "hello").await;
+
+        let claimed = engine
+            .claim_next(&queue, None)
+            .await
+            .expect("claim")
+            .expect("a message is waiting");
+
+        assert_eq!(claimed.message.body, "hello");
+        assert_eq!(claimed.message.receive_count, 1, "this delivery counts");
+        assert!(claimed.message.first_received_at.is_some());
+        assert!(claimed.claim_expires_at > SystemTime::now());
+    }
+
+    #[tokio::test]
+    async fn claiming_an_empty_queue_returns_nothing_rather_than_failing() {
+        let engine = engine();
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create queue");
+
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_none(),
+            "an empty queue is a normal answer, not an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn claiming_from_a_missing_queue_is_an_error() {
+        let error = engine()
+            .claim_next(&name("nope"), None)
+            .await
+            .expect_err("no such queue");
+
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_claimed_message_is_not_handed_to_a_second_consumer() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "hello").await;
+        engine
+            .claim_next(&queue, None)
+            .await
+            .expect("claim")
+            .expect("a message");
+
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_none(),
+            "the only message is already claimed"
+        );
+    }
+
+    #[tokio::test]
+    async fn acking_a_claim_removes_the_message() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "hello").await;
+        let claimed = engine
+            .claim_next(&queue, None)
+            .await
+            .expect("claim")
+            .expect("a message");
+
+        engine.ack(&queue, &claimed.receipt).await.expect("ack");
+
+        // Nothing left, and the spent handle no longer names anything.
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_none()
+        );
+        let error = engine
+            .ack(&queue, &claimed.receipt)
+            .await
+            .expect_err("already acked");
+        assert!(matches!(error, EngineError::InvalidReceipt), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn acking_with_an_unissued_handle_is_refused() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "hello").await;
+
+        let error = engine
+            .ack(&queue, &ReceiptHandle::new())
+            .await
+            .expect_err("not a handle we issued");
+
+        assert!(matches!(error, EngineError::InvalidReceipt), "{error:?}");
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_some(),
+            "the message must still be there"
+        );
+    }
+
     /// Reports the queue as existing, then as gone, for a set number of creates —
     /// the interleaving where another caller deletes the queue between our failed
     /// create and our read of it.
@@ -403,6 +671,27 @@ mod tests {
 
         async fn list_queues(&self) -> StoreResult<Vec<Queue>> {
             self.inner.list_queues().await
+        }
+
+        async fn enqueue(
+            &self,
+            queue: &QueueName,
+            message: Message,
+            delay: Option<Duration>,
+        ) -> StoreResult<()> {
+            self.inner.enqueue(queue, message, delay).await
+        }
+
+        async fn claim_next(
+            &self,
+            queue: &QueueName,
+            visibility_timeout: Option<Duration>,
+        ) -> StoreResult<Option<ClaimedMessage>> {
+            self.inner.claim_next(queue, visibility_timeout).await
+        }
+
+        async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> StoreResult<()> {
+            self.inner.ack(queue, receipt).await
         }
     }
 

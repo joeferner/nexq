@@ -7,16 +7,32 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 
-use crate::model::{Queue, QueueName};
+use crate::model::{ClaimedMessage, Message, Queue, QueueName, ReceiptHandle};
 use crate::store::{Result, Store, StoreError};
 
 /// A store that works, backed by a map.
+///
+/// Messages are handled first-in-first-out, with no attention to priority and no
+/// visibility bookkeeping beyond what a claim needs. That is enough for engine tests,
+/// which care about what the engine does with a store's answers, not about ordering —
+/// ordering is a backend behavior, and `nexq-store-conformance` is what will hold real
+/// backends to it.
 #[derive(Debug, Default)]
 pub struct FakeStore {
     queues: Mutex<HashMap<QueueName, Queue>>,
+    messages: Mutex<Vec<Claimable>>,
+}
+
+/// A message and, while a consumer holds it, the handle it was given.
+#[derive(Debug)]
+struct Claimable {
+    queue: QueueName,
+    message: Message,
+    claim: Option<ReceiptHandle>,
 }
 
 impl FakeStore {
@@ -69,6 +85,68 @@ impl Store for FakeStore {
             .cloned()
             .collect())
     }
+
+    async fn enqueue(
+        &self,
+        queue: &QueueName,
+        message: Message,
+        _delay: Option<Duration>,
+    ) -> Result<()> {
+        if !self.queues.lock().expect("lock").contains_key(queue) {
+            return Err(StoreError::QueueNotFound(queue.clone()));
+        }
+
+        self.messages.lock().expect("lock").push(Claimable {
+            queue: queue.clone(),
+            message,
+            claim: None,
+        });
+        Ok(())
+    }
+
+    async fn claim_next(
+        &self,
+        queue: &QueueName,
+        visibility_timeout: Option<Duration>,
+    ) -> Result<Option<ClaimedMessage>> {
+        if !self.queues.lock().expect("lock").contains_key(queue) {
+            return Err(StoreError::QueueNotFound(queue.clone()));
+        }
+
+        let mut messages = self.messages.lock().expect("lock");
+        let Some(claimable) = messages
+            .iter_mut()
+            .find(|held| &held.queue == queue && held.claim.is_none())
+        else {
+            return Ok(None);
+        };
+
+        let now = SystemTime::now();
+        let receipt = ReceiptHandle::new();
+        claimable.claim = Some(receipt.clone());
+        claimable.message.receive_count += 1;
+        claimable.message.first_received_at.get_or_insert(now);
+
+        Ok(Some(ClaimedMessage {
+            message: claimable.message.clone(),
+            receipt,
+            claim_expires_at: now + visibility_timeout.unwrap_or(Duration::from_secs(30)),
+        }))
+    }
+
+    async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()> {
+        let mut messages = self.messages.lock().expect("lock");
+
+        let Some(index) = messages
+            .iter()
+            .position(|held| &held.queue == queue && held.claim.as_ref() == Some(receipt))
+        else {
+            return Err(StoreError::InvalidReceipt);
+        };
+
+        messages.remove(index);
+        Ok(())
+    }
 }
 
 /// A store whose backend is down: every operation fails the same way.
@@ -103,6 +181,27 @@ impl Store for BrokenStore {
     }
 
     async fn list_queues(&self) -> Result<Vec<Queue>> {
+        Err(Self::failure())
+    }
+
+    async fn enqueue(
+        &self,
+        _queue: &QueueName,
+        _message: Message,
+        _delay: Option<Duration>,
+    ) -> Result<()> {
+        Err(Self::failure())
+    }
+
+    async fn claim_next(
+        &self,
+        _queue: &QueueName,
+        _visibility_timeout: Option<Duration>,
+    ) -> Result<Option<ClaimedMessage>> {
+        Err(Self::failure())
+    }
+
+    async fn ack(&self, _queue: &QueueName, _receipt: &ReceiptHandle) -> Result<()> {
         Err(Self::failure())
     }
 }
