@@ -9,7 +9,9 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-# Will depend on nexq-api-rest to dump the spec from the real router.
+# Reading `cargo build`'s JSON output to find the server binary, and parsing what the
+# `aws` CLI prints. Will also depend on nexq-api-rest to dump the OpenAPI spec.
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

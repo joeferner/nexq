@@ -57,3 +57,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps --all-features --locked
+
+  # Drives a running server with the real `aws` CLI, which is the only test that is
+  # evidence about compatibility rather than about our own understanding of it.
+  #
+  # No secrets and no services: NexQ is its own trust root and the memory backend needs
+  # nothing, so this runs on a pull request from a fork exactly as it does on a laptop.
+  # GitHub's ubuntu runners ship the AWS CLI already, so there is nothing to install.
+  acceptance:
+    name: aws-cli acceptance
+    runs-on: ubuntu-latest
+    # Waits for long polls are part of the suite; this only bites if something hangs.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Recorded so a failure caused by a runner image changing its CLI is obvious, and
+      # so this step fails loudly if a future image stops shipping one.
+      - run: aws --version
+      - run: cargo xtask acceptance

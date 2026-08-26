@@ -63,7 +63,12 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   messages too, so a handle held across a purge stops working. No sixty-second rate
   limit: SQS needs one because its purge is asynchronous, and this one is done when it
   answers
-- :scroll: `TagQueue` / `UntagQueue` / `ListQueueTags`
+- :scroll: `TagQueue` / `UntagQueue` / `ListQueueTags` — a string map NexQ would store
+  and attach no meaning to. Worth building for infrastructure-as-code, which sets tags,
+  and for nothing else
+- :scroll: `ListDeadLetterSourceQueues`, `StartMessageMoveTask`,
+  `CancelMessageMoveTask`, `ListMessageMoveTasks` — the API around dead-letter queues,
+  arriving with dead-letter queues rather than before them
 
 ## Message operations
 
@@ -109,6 +114,27 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   believing it has ordering guarantees that do not exist
 - Per-message priority through this facade — SQS has no way to express it, so messages
   sent here take the default priority. The REST API is where priority lives
+- Access policies: `AddPermission`, `RemovePermission`, and the `Policy` attribute.
+  Supporting them means evaluating IAM policy documents, which is a second
+  authorization model beside NexQ's own credential registry — and two models deciding
+  the same question is worse than one. Authorization here will grow out of the
+  credential registry instead
+
+---
+
+# Coverage
+
+14 of SQS's 23 operations are implemented, and the other 9 are the three groups above:
+access policies, tagging, and the dead-letter queue API.
+
+All 23 are *recognised*, which is the part that matters for a client: an operation that
+is real but not built answers `NotImplemented` naming itself, rather than
+`UnknownOperationException`, so nobody goes hunting for a typo they did not make.
+
+Every subcommand `aws sqs` offers has been driven against a running NexQ. The 14 work;
+the 9 report `NotImplemented`. Worth knowing alongside that: the CLI issues **no implicit
+calls** — every request matches a command someone typed, with nothing fetched behind the
+scenes — so no operation that works today quietly depends on one of the nine.
 
 ---
 
@@ -487,3 +513,32 @@ region = "eu-west-2"
 
 Run the server with `RUST_LOG=nexq=debug` to see which operation each request routed to
 and why anything was rejected.
+
+---
+
+# The acceptance suite
+
+Everything above is checked by driving the real `aws` CLI against a real server:
+
+```sh
+make acceptance          # or: cargo xtask acceptance
+```
+
+It builds the server, starts it on a free port, and runs twelve checks — the queue
+lifecycle, paging through botocore's own paginator, the produce/consume loop, message and
+system attributes, long polling, visibility changes, batches with a deliberate partial
+failure, queue attributes and counts, purge, the authentication failures, and
+`NotImplemented` on a real operation NexQ does not have.
+
+It needs the `aws` CLI on the path and nothing else — no credentials, since the server is
+started from [`nexq.example.toml`](../../nexq.example.toml) and NexQ issues its own. That
+also means the example config is checked every run.
+
+CI runs it as its own job. It is not part of `make pre-commit`, which is meant to be
+quick: this takes about a minute, most of it the CLI's own startup cost across some fifty
+invocations plus the long-poll waits it has to sit through.
+
+The reason for driving the CLI rather than a Rust client is that the CLI is not ours. It
+signs its own requests, verifies its own checksums, walks its own paginators, and decides
+for itself what an error means — so a check that passes here is evidence about
+compatibility, where a test agreeing with our own understanding of SQS is not.

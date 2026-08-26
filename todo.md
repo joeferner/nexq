@@ -225,7 +225,7 @@ belongs — see Future for why that is not a timer.
       `MessageNotInflight` is not distinguished from `ReceiptHandleIsInvalid` — a receipt
       handle only exists while a claim does, so the two are the same condition here.
 
-## M6 — The rest of what the CLI commonly exercises
+## ✅ M6 — The rest of what the CLI commonly exercises
 
 - [x] `GetQueueAttributes` / `SetQueueAttributes`, including the approximate-count
       attributes. Ten reported under `All`: the three settable ones, the three counts,
@@ -290,16 +290,68 @@ belongs — see Future for why that is not a timer.
 - [x] All 23 SQS operations are now recognised, not just the 14 implemented — so
       `TagQueue` answers `NotImplemented` rather than `UnknownOperationException`, which
       would send a client looking for a typo it has not made
-- [ ] Message attributes, with their own MD5
-- [ ] `DelaySeconds` on send and as a queue attribute
-- [ ] Audit which operations `aws-cli` and the SDKs actually reach for, and stop
-      there — replicating the full API surface is an explicit non-goal
+- [x] Audit which operations `aws-cli` and the SDKs actually reach for, and stop
+      there — replicating the full API surface is an explicit non-goal.
+
+      Done empirically: every one of SQS's 23 operations has an `aws sqs` subcommand, and
+      all 23 were driven against a running NexQ with well-formed arguments. The 14
+      implemented ones **all work**; the other 9 all answer `NotImplemented` cleanly, so
+      the CLI reports something a human can act on rather than a parse failure.
+
+      The finding that mattered was a negative one: 28 requests arrived, 23 distinct
+      operations, and **exactly the ones asked for**. The CLI makes no implicit calls — no
+      `GetQueueAttributes` behind a receive, no `ListQueues` behind a lookup — so nothing
+      already working secretly depends on an operation that is not built. That is what
+      makes stopping here safe rather than merely convenient.
+
+      Verdict on the remaining 9, by what each would actually need:
+
+      - **Access policies** (`AddPermission`, `RemovePermission`, and the `Policy`
+        attribute) — **not planned**. Implementing them means implementing an
+        IAM-policy evaluator, a second authorization model beside NexQ's own credential
+        registry. Two models deciding the same question is worse than one, so this is a
+        deliberate no rather than a not-yet.
+      - **DLQ and redrive** (`ListDeadLetterSourceQueues`, `StartMessageMoveTask`,
+        `CancelMessageMoveTask`, `ListMessageMoveTasks`) — deferred **with DLQ itself**,
+        which is already on the list after this milestone. They are the API around a
+        feature, not features of their own, and building them first would mean four
+        operations reporting on something that does not exist.
+      - **Tagging** (`TagQueue`, `UntagQueue`, `ListQueueTags`) — the only honest
+        maybe, moved to Future. It needs nothing of the engine, just a string map on a
+        queue, and NexQ would attach no meaning to it. Worth building if
+        infrastructure-as-code support becomes a goal, since a Terraform
+        `aws_sqs_queue` sets tags; worth nothing otherwise.
 
 ## M7 — Lock it in
 
-- [ ] Acceptance test that drives a real `aws-cli` against a running NexQ, scripted
-      rather than manual
-- [ ] Run it in CI, with `aws-cli` available to the job
+- [x] Acceptance test that drives a real `aws-cli` against a running NexQ, scripted
+      rather than manual — `cargo xtask acceptance`, or `make acceptance`. Twelve checks
+      covering the queue lifecycle, paging through botocore's own paginator, the
+      produce/consume loop, message and system attributes, long polling, visibility
+      changes, batches with a partial failure, queue attributes and counts, purge,
+      the authentication failures, and `NotImplemented` on a real operation we do not
+      have.
+
+      In `xtask` rather than a shell script so it runs the same way on a laptop as in CI
+      — a script only CI runs is a script that rots. It builds the server itself, finds
+      a free port, waits for the port to answer rather than sleeping, and reports every
+      failing check rather than stopping at the first.
+
+      Deliberately **not** part of `make pre-commit`: it takes about a minute of wall
+      clock, most of it the CLI's own startup cost across ~50 invocations plus the real
+      long-poll waits it has to sit through.
+
+      Checked that it *fails* as well as passes, by breaking three things in turn: a
+      wrong body MD5 (caught by "send, receive, delete"), a long poll that returns at
+      once (caught by "long polling"), and SigV4 accepting any signature (caught by
+      "authentication"). A green acceptance suite that cannot go red is decoration.
+- [x] Run it in CI, with `aws-cli` available to the job — its own `acceptance` job.
+      Nothing to install: GitHub's ubuntu runners ship AWS CLI 2.36.24, checked against
+      their published runner manifest rather than assumed, and near-identical to the
+      2.36.30 used locally. **No secrets and no service containers**, since NexQ is its
+      own trust root and the memory backend needs nothing — so it runs on a pull request
+      from a fork exactly as it does locally. The job also prints `aws --version`, so a
+      runner image dropping the CLI fails loudly instead of mysteriously.
 - [ ] Repeat the run against at least one AWS SDK in another language, since SDK
       behavior differs from the CLI's in checksum validation and retries
 - [ ] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end
@@ -312,6 +364,12 @@ belongs — see Future for why that is not a timer.
 
 - FIFO Queues
 - AWS Query/XML protocol
+- Queue tagging — `TagQueue`, `UntagQueue`, `ListQueueTags`, and the tags `CreateQueue`
+  already refuses. Needs nothing of the engine: a string map on a queue, which NexQ
+  would store and attach no meaning to. The reason to build it is
+  infrastructure-as-code, since a Terraform `aws_sqs_queue` sets tags and would fail
+  without it; there is no reason beyond that, which is why it is here rather than in a
+  milestone.
 - `SenderId` on receive, which needs the sending principal recorded on the message.
   Named explicitly it is refused rather than answered with a placeholder, and `All`
   stays silent about it.
