@@ -262,7 +262,34 @@ belongs — see Future for why that is not a timer.
 
       The only operation logged at `info` rather than `debug`, since it is the one that
       destroys data irrecoverably — the line carries how many messages went.
-- [ ] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`
+- [x] `SendMessageBatch`, `DeleteMessageBatch`, `ChangeMessageVisibilityBatch`, sharing
+      a `batch` module for entry parsing and result rendering. **Partial success is the
+      point**: each entry succeeds or fails on its own, and a batch with one bad entry
+      answers `200` with both `Successful` and `Failed` lists. Verified against the real
+      `aws-cli`.
+
+      Each batch entry runs the *same code* a lone request does — `send_one`,
+      `delete_one`, `change_one` — rather than a second implementation that could drift.
+      A test asserts a batched send and a single send produce the same
+      `MD5OfMessageAttributes`.
+
+      Nothing reaches the engine: batching decomposes into operations it already has.
+      One storage round trip per batch is an optimisation for a backend that can do it,
+      not a change in meaning.
+
+      Five failures reject the whole batch, all about the *list* rather than its
+      contents: `EmptyBatchRequest`, `TooManyEntriesInBatchRequest`,
+      `BatchEntryIdsNotDistinct`, `InvalidBatchEntryId`, `BatchRequestTooLong`. A missing
+      queue joins them — the `QueueUrl` belongs to the request, so ten copies of
+      `QueueDoesNotExist` in a `Failed` list would be worse than one raised error, and
+      SDKs raise on the latter while the former can be silently ignored.
+
+      `SenderFault` is read off the error's status rather than tracked separately: a 4xx
+      *means* the caller was wrong. `VisibilityTimeout` is optional per entry, as SQS's
+      model marks it, falling back to the queue's configured timeout.
+- [x] All 23 SQS operations are now recognised, not just the 14 implemented — so
+      `TagQueue` answers `NotImplemented` rather than `UnknownOperationException`, which
+      would send a client looking for a typo it has not made
 - [ ] Message attributes, with their own MD5
 - [ ] `DelaySeconds` on send and as a queue attribute
 - [ ] Audit which operations `aws-cli` and the SDKs actually reach for, and stop

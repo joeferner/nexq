@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
-use nexq_core::model::{MessageCounts, Priority, QueueName, ReceiptHandle};
+use nexq_core::model::{MAX_BODY_BYTES, MessageCounts, Priority, Queue, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 use tracing::info;
 
+use crate::batch;
 use crate::error::ApiError;
 use crate::message_attributes::Selection;
 use crate::protocol::Operation;
@@ -49,6 +50,11 @@ impl Operations {
             Operation::DeleteMessage => self.delete_message(&input).await,
             Operation::ChangeMessageVisibility => self.change_message_visibility(&input).await,
             Operation::PurgeQueue => self.purge_queue(&input).await,
+            Operation::SendMessageBatch => self.send_message_batch(&input).await,
+            Operation::DeleteMessageBatch => self.delete_message_batch(&input).await,
+            Operation::ChangeMessageVisibilityBatch => {
+                self.change_message_visibility_batch(&input).await
+            }
             Operation::GetQueueAttributes => self.get_queue_attributes(&input).await,
             Operation::SetQueueAttributes => self.set_queue_attributes(&input).await,
             not_built_yet => Err(ApiError::not_implemented(not_built_yet)),
@@ -206,6 +212,20 @@ impl Operations {
     /// makes a client reject a message that was in fact stored.
     async fn send_message(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
+
+        self.send_one(&queue, input).await
+    }
+
+    /// Send one message to a queue already identified.
+    ///
+    /// Split out from [`Operations::send_message`] so a batch entry runs *this*, rather
+    /// than a second implementation that could drift from it. A batch entry differs from
+    /// a lone request only in where the queue came from and in carrying an `Id`.
+    async fn send_one(
+        &self,
+        queue: &QueueName,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
         let body = required_string(input, "MessageBody")?.to_owned();
         let delay = optional_duration(input, "DelaySeconds", attributes::DELAY_SECONDS_MAX)?;
         let message_attributes = message_attributes::from_input(input.get("MessageAttributes"))?;
@@ -224,7 +244,7 @@ impl Operations {
         // client chooses.
         let message = self
             .engine
-            .enqueue(&queue, body, Priority::DEFAULT, message_attributes, delay)
+            .enqueue(queue, body, Priority::DEFAULT, message_attributes, delay)
             .await?;
 
         let mut output = json!({
@@ -328,9 +348,19 @@ impl Operations {
     /// `DeleteMessage` — the acknowledgement that a message was handled.
     async fn delete_message(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
+
+        self.delete_one(&queue, input).await
+    }
+
+    /// Delete one claimed message from a queue already identified.
+    async fn delete_one(
+        &self,
+        queue: &QueueName,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
         let receipt = ReceiptHandle::from_backend(required_string(input, "ReceiptHandle")?);
 
-        self.engine.ack(&queue, &receipt).await?;
+        self.engine.ack(queue, &receipt).await?;
 
         Ok(json!({}))
     }
@@ -346,18 +376,126 @@ impl Operations {
         input: &Map<String, Value>,
     ) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
-        let receipt = ReceiptHandle::from_backend(required_string(input, "ReceiptHandle")?);
         let visibility_timeout = required_duration(
             input,
             "VisibilityTimeout",
             attributes::VISIBILITY_TIMEOUT_MAX,
         )?;
 
+        self.change_one(&queue, input, visibility_timeout).await
+    }
+
+    /// Reset one claim's visibility on a queue already identified.
+    ///
+    /// The timeout is passed in rather than read from `input` because the batch form
+    /// makes it optional per entry, falling back to the queue's default, while the single
+    /// form requires it. Resolving that is the caller's business; this does the work.
+    async fn change_one(
+        &self,
+        queue: &QueueName,
+        input: &Map<String, Value>,
+        visibility_timeout: Duration,
+    ) -> Result<Value, ApiError> {
+        let receipt = ReceiptHandle::from_backend(required_string(input, "ReceiptHandle")?);
+
         self.engine
-            .change_visibility(&queue, &receipt, visibility_timeout)
+            .change_visibility(queue, &receipt, visibility_timeout)
             .await?;
 
         Ok(json!({}))
+    }
+
+    /// `SendMessageBatch` — up to ten messages, each succeeding or failing on its own.
+    ///
+    /// The batch total is checked as well as each message: SQS caps both an individual
+    /// message and the sum of a batch at the same 256 KiB, so ten messages of 200 KiB is
+    /// a `BatchRequestTooLong` rather than ten accepted sends.
+    async fn send_message_batch(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let queue = self.batch_queue(input).await?.name;
+        let entries = batch::entries(input)?;
+
+        // Checked before anything is sent, so an oversized batch stores none of itself
+        // rather than however much fitted before the limit was reached.
+        let total: usize = entries.iter().map(|entry| entry_size(&entry.input)).sum();
+        if total > MAX_BODY_BYTES {
+            return Err(ApiError::batch_request_too_long(total, MAX_BODY_BYTES));
+        }
+
+        let mut outcomes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let outcome = self.send_one(&queue, &entry.input).await;
+            outcomes.push((entry.id, outcome));
+        }
+
+        Ok(batch::results(outcomes))
+    }
+
+    /// `DeleteMessageBatch` — up to ten acknowledgements, each on its own.
+    ///
+    /// The one clients lean on hardest, since a consumer that received ten messages has
+    /// ten handles to spend, and a stale handle among them must not sink the other nine.
+    async fn delete_message_batch(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let queue = self.batch_queue(input).await?.name;
+        let entries = batch::entries(input)?;
+
+        let mut outcomes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let outcome = self.delete_one(&queue, &entry.input).await;
+            outcomes.push((entry.id, outcome));
+        }
+
+        Ok(batch::results(outcomes))
+    }
+
+    /// `ChangeMessageVisibilityBatch` — up to ten claims retimed, each on its own.
+    ///
+    /// `VisibilityTimeout` is optional per entry here, unlike on the single operation,
+    /// because SQS's own model marks it so. An entry that omits it gets the queue's
+    /// configured visibility timeout, which is the only reading of "unspecified" that
+    /// means anything — and the queue is read once for the batch rather than per entry.
+    async fn change_message_visibility_batch(
+        &self,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
+        let queue = self.batch_queue(input).await?;
+        let entries = batch::entries(input)?;
+
+        let mut outcomes = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let outcome = match optional_duration(
+                &entry.input,
+                "VisibilityTimeout",
+                attributes::VISIBILITY_TIMEOUT_MAX,
+            ) {
+                Ok(timeout) => {
+                    let timeout = timeout.unwrap_or(queue.attributes.visibility_timeout);
+                    self.change_one(&queue.name, &entry.input, timeout).await
+                }
+                // A bad timeout is this entry's problem, not the batch's.
+                Err(error) => Err(error),
+            };
+            outcomes.push((entry.id, outcome));
+        }
+
+        Ok(batch::results(outcomes))
+    }
+
+    /// The queue a batch is about, looked up rather than merely parsed.
+    ///
+    /// The `QueueUrl` belongs to the request, not to any entry, so a queue that does not
+    /// exist is a request-level failure — one clear error rather than ten copies of the
+    /// same one buried in a `Failed` list. It is also the difference between an SDK
+    /// raising and an SDK handing back a result the caller has to remember to inspect,
+    /// which for a misspelled queue name is the difference between noticing and not.
+    ///
+    /// Costs one read per batch, amortised over up to ten operations, and it gives
+    /// `ChangeMessageVisibilityBatch` the queue's default timeout for nothing extra.
+    /// Advisory rather than a guarantee: a queue deleted while the batch runs still
+    /// surfaces per entry, which is the same race a single request has.
+    async fn batch_queue(&self, input: &Map<String, Value>) -> Result<Queue, ApiError> {
+        let name = self.queue_from_url(input)?;
+
+        Ok(self.engine.get_queue(&name).await?)
     }
 
     /// The queue a request is about, from the `QueueUrl` it carries.
@@ -370,6 +508,40 @@ impl Operations {
 
 /// Most messages SQS will hand back from one `ReceiveMessage`.
 const MAX_MESSAGES_PER_RECEIVE: u64 = 10;
+
+/// What one `SendMessageBatch` entry counts towards the batch's size limit.
+///
+/// A rough measure on purpose: it is the body plus whatever the attributes weigh, read
+/// straight off the wire form rather than by parsing them, because an entry that will be
+/// refused for a bad attribute should still be counted before that is discovered. The
+/// authoritative per-message check is the engine's, on the parsed message.
+fn entry_size(input: &Map<String, Value>) -> usize {
+    let body = input
+        .get("MessageBody")
+        .and_then(Value::as_str)
+        .map_or(0, str::len);
+
+    let attributes = input
+        .get("MessageAttributes")
+        .and_then(Value::as_object)
+        .map_or(0, |attributes| {
+            attributes
+                .iter()
+                .map(|(name, value)| {
+                    name.len()
+                        + value.as_object().map_or(0, |fields| {
+                            fields
+                                .values()
+                                .filter_map(Value::as_str)
+                                .map(str::len)
+                                .sum()
+                        })
+                })
+                .sum()
+        });
+
+    body + attributes
+}
 
 /// Render a paging cursor as a token to hand to a client.
 ///
@@ -955,6 +1127,472 @@ mod tests {
 
             assert_eq!(error.code(), "InvalidParameterValue", "{value}");
         }
+    }
+
+    #[tokio::test]
+    async fn send_message_batch_sends_every_entry() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let output = call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "a", "MessageBody": "one" },
+                { "Id": "b", "MessageBody": "two" },
+                { "Id": "c", "MessageBody": "three", "DelaySeconds": 0 },
+            ] }),
+        )
+        .await
+        .expect("send batch");
+
+        let successful = output["Successful"].as_array().expect("successful");
+        assert_eq!(successful.len(), 3);
+        assert!(output.get("Failed").is_none(), "{output}");
+
+        // Each entry gets back what a lone `SendMessage` would have.
+        for entry in successful {
+            assert!(!entry["MessageId"].as_str().expect("id").is_empty());
+            assert!(!entry["MD5OfMessageBody"].as_str().expect("md5").is_empty());
+        }
+        assert_eq!(
+            successful[0]["MD5OfMessageBody"], "f97c5d29941bfb1b2fdab0874906ab82",
+            "the MD5 of \"one\", the same as a single send would report"
+        );
+
+        // And all three actually arrived.
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10 }),
+        )
+        .await
+        .expect("receive");
+        let mut bodies: Vec<&str> = received["Messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .map(|message| message["Body"].as_str().expect("body"))
+            .collect();
+        bodies.sort_unstable();
+        assert_eq!(bodies, ["one", "three", "two"]);
+    }
+
+    #[tokio::test]
+    async fn a_batch_entry_carries_its_own_message_attributes() {
+        // A batch entry must go through the same code a single send does, MD5 included.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let batched = call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "a", "MessageBody": "hello", "MessageAttributes": {
+                    "City": { "DataType": "String", "StringValue": "Any City" },
+                } },
+            ] }),
+        )
+        .await
+        .expect("send batch");
+
+        let single = call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello", "MessageAttributes": {
+                "City": { "DataType": "String", "StringValue": "Any City" },
+            } }),
+        )
+        .await
+        .expect("send");
+
+        assert_eq!(
+            batched["Successful"][0]["MD5OfMessageAttributes"], single["MD5OfMessageAttributes"],
+            "a batched send and a lone one must agree"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_bad_entry_does_not_sink_the_others() {
+        // The whole point of a batch, and the thing a client would be hurt most by
+        // getting wrong: nine good messages must not be lost to one bad one.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let output = call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "good", "MessageBody": "fine" },
+                { "Id": "no-body" },
+                { "Id": "bad-delay", "MessageBody": "x", "DelaySeconds": 901 },
+                { "Id": "also-good", "MessageBody": "also fine" },
+            ] }),
+        )
+        .await
+        .expect("the batch itself is valid");
+
+        let successful = output["Successful"].as_array().expect("successful");
+        let failed = output["Failed"].as_array().expect("failed");
+        assert_eq!(successful.len(), 2, "{output}");
+        assert_eq!(failed.len(), 2, "{output}");
+
+        assert_eq!(failed[0]["Id"], "no-body");
+        assert_eq!(failed[0]["Code"], "MissingParameter");
+        assert_eq!(failed[0]["SenderFault"], true);
+        assert_eq!(failed[1]["Id"], "bad-delay");
+        assert_eq!(failed[1]["Code"], "InvalidParameterValue");
+
+        // The good two are really in the queue, not merely reported.
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10 }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(received["Messages"].as_array().expect("messages").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_batch_bigger_than_one_message_may_be_is_refused_whole() {
+        // SQS caps a batch's total at the same 256 KiB as one message. Checked before
+        // anything is sent, so an oversized batch stores none of itself rather than
+        // however much fitted before the limit was reached.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let entries: Vec<Value> = (0..4)
+            .map(
+                |index| json!({ "Id": format!("e{index}"), "MessageBody": "x".repeat(100 * 1024) }),
+            )
+            .collect();
+
+        let error = call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": entries }),
+        )
+        .await
+        .expect_err("400 KiB in total");
+
+        assert_eq!(error.code(), "BatchRequestTooLong");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(received, json!({}), "nothing should have been stored");
+    }
+
+    #[tokio::test]
+    async fn delete_message_batch_spends_every_handle() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "a", "MessageBody": "one" },
+                { "Id": "b", "MessageBody": "two" },
+            ] }),
+        )
+        .await
+        .expect("send batch");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10 }),
+        )
+        .await
+        .expect("receive");
+        let entries: Vec<Value> = received["Messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .enumerate()
+            .map(|(index, message)| {
+                json!({ "Id": format!("d{index}"), "ReceiptHandle": message["ReceiptHandle"] })
+            })
+            .collect();
+
+        let output = call(
+            &operations,
+            Operation::DeleteMessageBatch,
+            json!({ "QueueUrl": url, "Entries": entries }),
+        )
+        .await
+        .expect("delete batch");
+
+        let successful = output["Successful"].as_array().expect("successful");
+        assert_eq!(successful.len(), 2);
+        assert_eq!(
+            successful[0].as_object().expect("object").len(),
+            1,
+            "a successful delete reports only its id: {}",
+            successful[0]
+        );
+        assert!(output.get("Failed").is_none(), "{output}");
+    }
+
+    #[tokio::test]
+    async fn a_stale_handle_in_a_delete_batch_fails_only_itself() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+        let handle = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive")["Messages"][0]["ReceiptHandle"]
+            .clone();
+
+        let output = call(
+            &operations,
+            Operation::DeleteMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "real", "ReceiptHandle": handle },
+                { "Id": "stale", "ReceiptHandle": "00000000-0000-0000-0000-000000000000" },
+            ] }),
+        )
+        .await
+        .expect("the batch itself is valid");
+
+        assert_eq!(output["Successful"][0]["Id"], "real");
+        assert_eq!(output["Failed"][0]["Id"], "stale");
+        assert_eq!(output["Failed"][0]["Code"], "ReceiptHandleIsInvalid");
+    }
+
+    #[tokio::test]
+    async fn change_message_visibility_batch_retimes_every_claim() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "a", "MessageBody": "one" },
+                { "Id": "b", "MessageBody": "two" },
+            ] }),
+        )
+        .await
+        .expect("send batch");
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10,
+                    "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("receive");
+        let entries: Vec<Value> = received["Messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .enumerate()
+            .map(|(index, message)| {
+                json!({
+                    "Id": format!("c{index}"),
+                    "ReceiptHandle": message["ReceiptHandle"],
+                    "VisibilityTimeout": 0,
+                })
+            })
+            .collect();
+
+        let output = call(
+            &operations,
+            Operation::ChangeMessageVisibilityBatch,
+            json!({ "QueueUrl": url, "Entries": entries }),
+        )
+        .await
+        .expect("change batch");
+
+        assert_eq!(output["Successful"].as_array().expect("ok").len(), 2);
+
+        // Both handed back, so both claimable again despite the twelve-hour claims.
+        let again = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 10 }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(again["Messages"].as_array().expect("messages").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_visibility_batch_entry_may_omit_its_timeout() {
+        // SQS's own model marks `VisibilityTimeout` optional on a batch entry while
+        // requiring it on the single operation. An entry that omits it gets the queue's
+        // configured visibility timeout.
+        let operations = operations();
+        let url = call(
+            &operations,
+            Operation::CreateQueue,
+            json!({ "QueueName": "jobs", "Attributes": { "VisibilityTimeout": "43200" } }),
+        )
+        .await
+        .expect("create")["QueueUrl"]
+            .clone();
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+        let handle = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "VisibilityTimeout": 0 }),
+        )
+        .await
+        .expect("receive")["Messages"][0]["ReceiptHandle"]
+            .clone();
+
+        call(
+            &operations,
+            Operation::ChangeMessageVisibilityBatch,
+            json!({ "QueueUrl": url, "Entries": [{ "Id": "a", "ReceiptHandle": handle }] }),
+        )
+        .await
+        .expect("change batch")["Successful"][0]["Id"]
+            .as_str()
+            .expect("succeeded");
+
+        // The queue's twelve hours now apply, so it is no longer claimable.
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(
+            received,
+            json!({}),
+            "the queue's own visibility timeout should have been applied"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bad_timeout_in_a_visibility_batch_fails_only_that_entry() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+        let handle = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("receive")["Messages"][0]["ReceiptHandle"]
+            .clone();
+
+        let output = call(
+            &operations,
+            Operation::ChangeMessageVisibilityBatch,
+            json!({ "QueueUrl": url, "Entries": [
+                { "Id": "ok", "ReceiptHandle": handle, "VisibilityTimeout": 0 },
+                { "Id": "too-long", "ReceiptHandle": handle, "VisibilityTimeout": 43_201 },
+            ] }),
+        )
+        .await
+        .expect("the batch itself is valid");
+
+        assert_eq!(output["Successful"][0]["Id"], "ok");
+        assert_eq!(output["Failed"][0]["Id"], "too-long");
+        assert_eq!(output["Failed"][0]["Code"], "InvalidParameterValue");
+    }
+
+    #[tokio::test]
+    async fn the_batch_operations_share_their_whole_batch_failures() {
+        // All three reject a malformed batch the same way, since the rules are about the
+        // list rather than what the entries mean.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let too_many: Vec<Value> = (0..11)
+            .map(|index| {
+                json!({ "Id": format!("e{index}"), "MessageBody": "x",
+                                 "ReceiptHandle": "h", "VisibilityTimeout": 0 })
+            })
+            .collect();
+
+        for operation in [
+            Operation::SendMessageBatch,
+            Operation::DeleteMessageBatch,
+            Operation::ChangeMessageVisibilityBatch,
+        ] {
+            for (input, expected) in [
+                (json!({ "QueueUrl": url }), "EmptyBatchRequest"),
+                (
+                    json!({ "QueueUrl": url, "Entries": [] }),
+                    "EmptyBatchRequest",
+                ),
+                (
+                    json!({ "QueueUrl": url, "Entries": too_many }),
+                    "TooManyEntriesInBatchRequest",
+                ),
+                (
+                    json!({ "QueueUrl": url, "Entries": [
+                        { "Id": "a", "MessageBody": "x", "ReceiptHandle": "h" },
+                        { "Id": "a", "MessageBody": "y", "ReceiptHandle": "h" },
+                    ] }),
+                    "BatchEntryIdsNotDistinct",
+                ),
+                (
+                    json!({ "QueueUrl": url, "Entries": [
+                        { "Id": "not valid", "MessageBody": "x", "ReceiptHandle": "h" },
+                    ] }),
+                    "InvalidBatchEntryId",
+                ),
+            ] {
+                let error = call(&operations, operation, input.clone())
+                    .await
+                    .expect_err(&format!("{operation}: {input}"));
+
+                assert_eq!(error.code(), expected, "{operation}: {input}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_for_a_queue_that_does_not_exist_fails_whole() {
+        // The queue is read from the batch, not the entries, so this is not a per-entry
+        // failure — there is no queue for any of them.
+        let operations = operations();
+
+        let error = call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({
+                "QueueUrl": "http://localhost:8080/000000000000/nope",
+                "Entries": [{ "Id": "a", "MessageBody": "hello" }],
+            }),
+        )
+        .await
+        .expect_err("no such queue");
+
+        assert_eq!(error.code(), "QueueDoesNotExist");
     }
 
     #[tokio::test]
@@ -2361,12 +2999,19 @@ mod tests {
 
     #[tokio::test]
     async fn operations_without_handlers_are_still_not_implemented() {
-        // A real SQS operation with no handler here, which must be distinguishable from
-        // one that does not exist. Swap it when batching lands.
-        let error = call(&operations(), Operation::SendMessageBatch, json!({}))
-            .await
-            .expect_err("no handler yet");
+        // Real SQS operations with no handler here, which must be distinguishable from
+        // ones that do not exist.
+        for operation in [
+            Operation::TagQueue,
+            Operation::ListQueueTags,
+            Operation::AddPermission,
+            Operation::StartMessageMoveTask,
+        ] {
+            let error = call(&operations(), operation, json!({}))
+                .await
+                .expect_err(&format!("{operation} should not be implemented"));
 
-        assert_eq!(error.code(), "NotImplemented");
+            assert_eq!(error.code(), "NotImplemented", "{operation}");
+        }
     }
 }

@@ -27,6 +27,11 @@ pub const SQS_TARGET_PREFIX: &str = "AmazonSQS";
 ///
 /// Being an enum rather than a string is what separates "operation we have not built
 /// yet" from "operation that does not exist", which are different errors to a client.
+///
+/// **Every operation SQS has**, not only the ones implemented here — that is what makes
+/// the distinction possible. A client calling `TagQueue` is calling something real, and
+/// telling it the operation does not exist would send it looking for a typo it has not
+/// made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation {
     ChangeMessageVisibility,
@@ -43,6 +48,23 @@ pub enum Operation {
     SendMessage,
     SendMessageBatch,
     SetQueueAttributes,
+
+    // Recognised, not built. Access policies, which NexQ answers with its own
+    // credential registry instead.
+    AddPermission,
+    RemovePermission,
+
+    // Recognised, not built. Tagging, which needs somewhere on a queue to put tags.
+    TagQueue,
+    UntagQueue,
+    ListQueueTags,
+
+    // Recognised, not built. All dead-letter queue territory, which arrives with DLQ
+    // and redrive.
+    ListDeadLetterSourceQueues,
+    StartMessageMoveTask,
+    CancelMessageMoveTask,
+    ListMessageMoveTasks,
 }
 
 impl Operation {
@@ -63,6 +85,15 @@ impl Operation {
             Self::SendMessage => "SendMessage",
             Self::SendMessageBatch => "SendMessageBatch",
             Self::SetQueueAttributes => "SetQueueAttributes",
+            Self::AddPermission => "AddPermission",
+            Self::RemovePermission => "RemovePermission",
+            Self::TagQueue => "TagQueue",
+            Self::UntagQueue => "UntagQueue",
+            Self::ListQueueTags => "ListQueueTags",
+            Self::ListDeadLetterSourceQueues => "ListDeadLetterSourceQueues",
+            Self::StartMessageMoveTask => "StartMessageMoveTask",
+            Self::CancelMessageMoveTask => "CancelMessageMoveTask",
+            Self::ListMessageMoveTasks => "ListMessageMoveTasks",
         }
     }
 
@@ -101,6 +132,15 @@ impl FromStr for Operation {
             "SendMessage" => Self::SendMessage,
             "SendMessageBatch" => Self::SendMessageBatch,
             "SetQueueAttributes" => Self::SetQueueAttributes,
+            "AddPermission" => Self::AddPermission,
+            "RemovePermission" => Self::RemovePermission,
+            "TagQueue" => Self::TagQueue,
+            "UntagQueue" => Self::UntagQueue,
+            "ListQueueTags" => Self::ListQueueTags,
+            "ListDeadLetterSourceQueues" => Self::ListDeadLetterSourceQueues,
+            "StartMessageMoveTask" => Self::StartMessageMoveTask,
+            "CancelMessageMoveTask" => Self::CancelMessageMoveTask,
+            "ListMessageMoveTasks" => Self::ListMessageMoveTasks,
             _ => return Err(UnknownOperation),
         })
     }
@@ -176,7 +216,23 @@ mod tests {
             Operation::SendMessage,
             Operation::SendMessageBatch,
             Operation::SetQueueAttributes,
+            Operation::AddPermission,
+            Operation::RemovePermission,
+            Operation::TagQueue,
+            Operation::UntagQueue,
+            Operation::ListQueueTags,
+            Operation::ListDeadLetterSourceQueues,
+            Operation::StartMessageMoveTask,
+            Operation::CancelMessageMoveTask,
+            Operation::ListMessageMoveTasks,
         ];
+
+        assert_eq!(
+            operations.len(),
+            23,
+            "SQS has 23 operations, and all of them should be recognised — an \
+             unimplemented one is a different answer from an unknown one"
+        );
 
         for operation in operations {
             let target = format!("{SQS_TARGET_PREFIX}.{operation}");

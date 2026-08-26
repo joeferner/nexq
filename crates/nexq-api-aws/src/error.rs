@@ -160,6 +160,57 @@ impl ApiError {
         )
     }
 
+    /// A batch request with no entries in it.
+    ///
+    /// One of five failures that reject a *whole* batch rather than one entry: there is
+    /// nothing to report per entry when the trouble is with the list itself.
+    pub fn empty_batch_request() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "EmptyBatchRequest",
+            "There should be at least one entry in the request.",
+        )
+    }
+
+    /// More entries in a batch than SQS accepts.
+    pub fn too_many_entries_in_batch_request(entries: usize, max: usize) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "TooManyEntriesInBatchRequest",
+            format!("Maximum number of entries per request is {max}. You have sent {entries}."),
+        )
+    }
+
+    /// Two entries in one batch sharing an `Id`.
+    ///
+    /// Fatal to the batch rather than to the entries, because the ids are how results are
+    /// matched back to requests — with a duplicate there is no answer that means anything.
+    pub fn batch_entry_ids_not_distinct(id: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "BatchEntryIdsNotDistinct",
+            format!("Id {id} repeated."),
+        )
+    }
+
+    /// A batch entry `Id` that breaks the rules for one.
+    pub fn invalid_batch_entry_id(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "InvalidBatchEntryId",
+            detail.into(),
+        )
+    }
+
+    /// A batch whose messages come to more than one message may hold.
+    pub fn batch_request_too_long(bytes: usize, max: usize) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "BatchRequestTooLong",
+            format!("Batch requests cannot be longer than {max} bytes. You have sent {bytes}."),
+        )
+    }
+
     /// No queue by that name. SQS answers this with a 400, not a 404.
     pub fn queue_does_not_exist() -> Self {
         Self::new(
@@ -243,6 +294,16 @@ impl ApiError {
 
     pub fn status(&self) -> StatusCode {
         self.status
+    }
+
+    /// Whether the caller caused this, which is what a batch result's `SenderFault`
+    /// says.
+    ///
+    /// Read off the status rather than tracked separately: a 4xx *means* the request was
+    /// wrong and a 5xx means this server was, so keeping a second flag in step with the
+    /// status would only create a way for the two to disagree.
+    pub fn is_sender_fault(&self) -> bool {
+        self.status.is_client_error()
     }
 
     pub fn code(&self) -> &str {

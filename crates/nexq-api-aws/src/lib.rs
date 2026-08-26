@@ -6,6 +6,7 @@
 //! whether to run it.
 
 pub mod attributes;
+pub mod batch;
 pub mod checksum;
 pub mod error;
 pub mod message_attributes;

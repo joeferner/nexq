@@ -98,8 +98,10 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 - :white_check_mark: `ChangeMessageVisibility` — counted from now, so it extends a claim
   that needs longer and shortens one that does not. A timeout of `0` hands the message
   back at once, and wakes a consumer that is long-polling for it
-- :scroll: `SendMessageBatch` / `DeleteMessageBatch`
-- :scroll: `ChangeMessageVisibilityBatch`
+- :white_check_mark: `SendMessageBatch` / `DeleteMessageBatch` /
+  `ChangeMessageVisibilityBatch` — up to ten entries, each succeeding or failing on its
+  own, so one bad entry does not sink the rest. `SenderFault` says whether retrying could
+  help
 
 ## Not planned
 
@@ -345,6 +347,58 @@ aws sqs get-queue-attributes --queue-url "$QUEUE" \
 aws sqs set-queue-attributes --queue-url "$QUEUE" --attributes VisibilityTimeout=600
 ```
 
+## Batching
+
+Up to ten messages at a time, on all three of send, delete, and change-visibility:
+
+```sh
+cat > entries.json <<'JSON'
+[
+  {"Id": "a", "MessageBody": "one"},
+  {"Id": "b", "MessageBody": "two", "DelaySeconds": 30}
+]
+JSON
+
+aws sqs send-message-batch --queue-url "$QUEUE" --entries file://entries.json
+aws sqs delete-message-batch --queue-url "$QUEUE" --entries file://handles.json
+aws sqs change-message-visibility-batch --queue-url "$QUEUE" --entries file://retime.json
+```
+
+**A batch is not a transaction.** Each entry succeeds or fails on its own, and the
+response carries both outcomes — so nine good messages are not lost to one bad one:
+
+```json
+{
+  "Successful": [
+    {"Id": "good", "MessageId": "d26b6968-...", "MD5OfMessageBody": "fff25994..."}
+  ],
+  "Failed": [
+    {"Id": "bad-delay", "SenderFault": true, "Code": "InvalidParameterValue",
+     "Message": "DelaySeconds must be between 0 and 900, got 901."}
+  ]
+}
+```
+
+That is still a `200`, so a client has to *look* at `Failed` rather than relying on an
+error being raised. `SenderFault` tells it whether retrying could help: `true` means the
+request was wrong and will fail again, `false` means this server was and it might not.
+Each `Id` is yours, echoed back — it is the only way to tell which entry an outcome
+belongs to. `Successful` and `Failed` are omitted when empty.
+
+Five things reject the *whole* batch, and they are all about the list rather than its
+contents: no entries (`EmptyBatchRequest`), more than ten
+(`TooManyEntriesInBatchRequest`), a repeated `Id` (`BatchEntryIdsNotDistinct`), an `Id`
+that is not alphanumeric-plus-`-_` and at most 80 characters (`InvalidBatchEntryId`), and
+a `SendMessageBatch` whose messages come to more than 256 KiB in total
+(`BatchRequestTooLong` — SQS caps the batch and the individual message at the same size).
+A queue that does not exist joins them, since the `QueueUrl` belongs to the request rather
+than to any entry.
+
+On `change-message-visibility-batch`, `VisibilityTimeout` is optional per entry — an entry
+that omits it gets the queue's configured visibility timeout.
+
+## Purging
+
 To throw away everything in a queue without deleting the queue:
 
 ```sh
@@ -428,7 +482,8 @@ region = "eu-west-2"
 | `InvalidAttributeName` | An attribute this facade does not support — a queue attribute such as `FifoQueue`, or a message system attribute it has no value for, such as `SenderId` |
 | `RequestTimeTooSkewed` | The client's clock is too far from the server's — the message says by how much |
 | `MissingAction` | No `X-Amz-Target`, so probably an older Query-protocol client |
-| `NotImplemented` | A real SQS operation that is not built yet |
+| `NotImplemented` | A real SQS operation that is not built yet — all 23 are recognised, so this is never confused with a typo |
+| `EmptyBatchRequest`, `TooManyEntriesInBatchRequest`, `BatchEntryIdsNotDistinct`, `InvalidBatchEntryId`, `BatchRequestTooLong` | The batch itself is malformed, so no entry ran |
 
 Run the server with `RUST_LOG=nexq=debug` to see which operation each request routed to
 and why anything was rejected.
