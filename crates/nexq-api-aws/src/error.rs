@@ -141,7 +141,8 @@ impl ApiError {
         )
     }
 
-    /// A queue attribute this facade does not know.
+    /// An attribute this facade cannot report or set — a queue attribute it does not
+    /// know, or a message system attribute it has no value for.
     pub fn invalid_attribute_name(name: &str) -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,

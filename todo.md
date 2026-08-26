@@ -135,9 +135,16 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       (`Messages` omitted, not an empty array)
 - [x] **Gate: send a message, receive it, delete it, confirm it does not come back** —
       verified against the real `aws-cli`
-- [ ] Message system attributes on receive: `AttributeNames`/
-      `MessageSystemAttributeNames` are ignored, so `ApproximateReceiveCount` and
-      `SentTimestamp` are never returned even when asked for
+- [x] Message system attributes on receive. Both `AttributeNames` (deprecated) and
+      `MessageSystemAttributeNames` are honoured, and a request carrying both gets the
+      union. `All` and the Query protocol's `.*` return every attribute there is:
+      `SentTimestamp`, `ApproximateReceiveCount`, `ApproximateFirstReceiveTimestamp`.
+      An attribute named explicitly that NexQ has no value for — `SenderId`, or a FIFO
+      attribute — is refused with `InvalidAttributeName`, while `All` stays silent about
+      it, since `All` means "whatever you have". Verified against the real `aws-cli`,
+      which does not filter the names client-side
+- [ ] `SenderId`, which needs the sending principal recorded on the message. Refused
+      today rather than answered with a placeholder
 - [ ] `MessageAttributes` on send and receive, with their own MD5. Currently refused
       rather than silently dropped, so no data is lost — but a client that needs them
       cannot use this facade
@@ -166,8 +173,9 @@ two consumers — the part still missing is the timer, not the expiry.
 - [ ] An in-process expiry timer. Expiry is currently noticed only when someone next
       tries to claim, which is enough for correctness but cannot wake a long-poller
       waiting on a message whose claim just lapsed
-- [ ] `ApproximateReceiveCount` surfaced to clients — it is counted, but receive does
-      not return message attributes yet
+- [x] `ApproximateReceiveCount` surfaced to clients, counting the delivery in progress
+      so a first receive reports `1`. `ApproximateFirstReceiveTimestamp` came with it,
+      and stays pinned to the first delivery rather than the latest
 - [ ] `ChangeMessageVisibility`
 
 ## M6 — The rest of what the CLI commonly exercises

@@ -61,8 +61,12 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   client is never told a message was stored with data that was thrown away
 - :ballot_box_with_check: `ReceiveMessage` — `MaxNumberOfMessages` and a per-request
   `VisibilityTimeout`. `WaitTimeSeconds` is validated and then ignored, so a client
-  asking to long-poll gets an immediate empty answer and polls again. Message system
-  attributes such as `ApproximateReceiveCount` are not returned yet
+  asking to long-poll gets an immediate empty answer and polls again
+- :ballot_box_with_check: Message system attributes on receive, through either
+  `AttributeNames` (deprecated) or `MessageSystemAttributeNames`, with `All` and the
+  Query protocol's `.*` both understood: `SentTimestamp`, `ApproximateReceiveCount`, and
+  `ApproximateFirstReceiveTimestamp`. `SenderId` needs a sending principal NexQ does not
+  record yet, so naming it is refused rather than answered with a placeholder
 - :white_check_mark: `DeleteMessage`, with `ReceiptHandleIsInvalid` on a spent handle
 - :white_check_mark: `MD5OfMessageBody` on send and `MD5OfBody` on receive — SDKs
   verify these, so they are correctness, not decoration
@@ -184,6 +188,23 @@ A received message is invisible to other consumers until its visibility timeout 
 out — 30 seconds by default, or whatever `--visibility-timeout` says. Delete it to
 finish; leave it and it comes back, which is what makes delivery at-least-once.
 
+To see how many times that has happened, ask for the system attributes:
+
+```sh
+aws sqs receive-message --queue-url "$QUEUE" --message-system-attribute-names All
+# "Attributes": {
+#   "SentTimestamp": "1787753610033",
+#   "ApproximateReceiveCount": "2",
+#   "ApproximateFirstReceiveTimestamp": "1787753610825"
+# }
+```
+
+They come back only when asked for, and `--attribute-names` works the same way for
+older clients. Timestamps are milliseconds since the epoch, as strings, the way SQS
+reports them. `ApproximateReceiveCount` includes the delivery in progress, so a first
+receive says `1`, and `ApproximateFirstReceiveTimestamp` stays pinned to the first
+delivery rather than moving with the latest.
+
 `list-queues` printing nothing means there are no queues — the same as real SQS, which
 omits the field rather than returning an empty list.
 
@@ -215,7 +236,7 @@ different one belongs to another deployment.
 | `QueueDoesNotExist` | No queue by that name |
 | `QueueNameExists` | A queue of that name exists with different attributes |
 | `ReceiptHandleIsInvalid` | The handle was never issued, is already used, or its claim expired and the message went to another consumer |
-| `InvalidAttributeName` | An attribute this facade does not support, such as `FifoQueue` |
+| `InvalidAttributeName` | An attribute this facade does not support — a queue attribute such as `FifoQueue`, or a message system attribute it has no value for, such as `SenderId` |
 | `RequestTimeTooSkewed` | The client's clock is too far from the server's — the message says by how much |
 | `MissingAction` | No `X-Amz-Target`, so probably an older Query-protocol client |
 | `NotImplemented` | A real SQS operation that is not built yet |

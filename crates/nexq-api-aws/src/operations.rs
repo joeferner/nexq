@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 use crate::error::ApiError;
 use crate::protocol::Operation;
 use crate::queue_url::QueueUrls;
+use crate::system_attributes::Requested;
 use crate::{attributes, checksum};
 
 /// The engine, plus what this facade needs to talk about queues in URLs.
@@ -157,6 +158,9 @@ impl Operations {
     /// `WaitTimeSeconds` is validated and then ignored: holding the request open until
     /// a message arrives is long polling, which is not built yet, so a client asking to
     /// wait gets an immediate empty answer and will poll again.
+    ///
+    /// System attributes come back only when asked for — see
+    /// [`crate::system_attributes`] for which ones exist and how they are selected.
     async fn receive_message(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
         let wanted =
@@ -167,6 +171,10 @@ impl Operations {
             attributes::VISIBILITY_TIMEOUT_MAX,
         )?;
         let _ = optional_duration(input, "WaitTimeSeconds", attributes::RECEIVE_WAIT_TIME_MAX)?;
+
+        // Read before anything is claimed, so a request naming an attribute NexQ cannot
+        // report fails without having made a message invisible for nothing.
+        let requested = Requested::from_input(input)?;
 
         let mut claimed = Vec::new();
         for _ in 0..wanted {
@@ -186,14 +194,23 @@ impl Operations {
         let messages: Vec<Value> = claimed
             .iter()
             .map(|claimed| {
-                json!({
+                let mut message = json!({
                     "MessageId": claimed.message.id.as_str(),
                     "ReceiptHandle": claimed.receipt.as_str(),
                     // Note the name: SQS calls this `MD5OfBody` on receive and
                     // `MD5OfMessageBody` on send.
                     "MD5OfBody": checksum::md5_of_body(&claimed.message.body),
                     "Body": claimed.message.body,
-                })
+                });
+
+                // Omitted rather than sent empty when nothing was asked for, which is
+                // what SQS does and what keeps the common response as small as it was.
+                let system_attributes = requested.render(&claimed.message);
+                if !system_attributes.is_empty() {
+                    message["Attributes"] = Value::Object(system_attributes);
+                }
+
+                message
             })
             .collect();
 
@@ -975,6 +992,160 @@ mod tests {
         .await
         .expect("receive");
         assert_eq!(again, json!({}), "someone else already holds it");
+    }
+
+    #[tokio::test]
+    async fn no_attributes_come_back_unless_they_are_asked_for() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+
+        assert!(
+            received["Messages"][0].get("Attributes").is_none(),
+            "an empty map would make the CLI print one: {received}"
+        );
+    }
+
+    #[tokio::test]
+    async fn system_attributes_come_back_when_asked_for() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        let before = nexq_core::model::epoch_millis(std::time::SystemTime::now());
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MessageSystemAttributeNames": ["All"] }),
+        )
+        .await
+        .expect("receive");
+
+        let attributes = received["Messages"][0]["Attributes"]
+            .as_object()
+            .expect("attributes");
+        assert_eq!(
+            attributes["ApproximateReceiveCount"], "1",
+            "the delivery in progress counts, so a first receive is 1"
+        );
+
+        // A real timestamp rather than a placeholder: sent between the two readings.
+        let sent: u64 = attributes["SentTimestamp"]
+            .as_str()
+            .expect("string")
+            .parse()
+            .expect("epoch millis");
+        let after = nexq_core::model::epoch_millis(std::time::SystemTime::now());
+        assert!(
+            (before..=after).contains(&sent),
+            "{sent} not in {before}..{after}"
+        );
+
+        // First receive, so this is the same delivery that is happening now.
+        assert!(attributes.contains_key("ApproximateFirstReceiveTimestamp"));
+    }
+
+    #[tokio::test]
+    async fn the_receive_count_climbs_with_each_redelivery() {
+        // The attribute exists to let a consumer notice a message that keeps coming
+        // back, so counting redeliveries is the whole point of it.
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let mut first_receive: Option<String> = None;
+        for expected in ["1", "2", "3"] {
+            let received = call(
+                &operations,
+                Operation::ReceiveMessage,
+                // A zero visibility timeout, so the claim lapses at once and the next
+                // receive is a redelivery without waiting for a real timeout.
+                json!({
+                    "QueueUrl": url,
+                    "VisibilityTimeout": 0,
+                    "AttributeNames": ["All"],
+                }),
+            )
+            .await
+            .expect("receive");
+
+            let attributes = received["Messages"][0]["Attributes"]
+                .as_object()
+                .expect("attributes");
+            assert_eq!(attributes["ApproximateReceiveCount"], expected);
+
+            // First delivery, not most recent: it must not move.
+            let first = attributes["ApproximateFirstReceiveTimestamp"]
+                .as_str()
+                .expect("string")
+                .to_owned();
+            match &first_receive {
+                Some(original) => assert_eq!(&first, original, "first delivery, not latest"),
+                None => first_receive = Some(first),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_attribute_that_cannot_be_answered_does_not_consume_a_message() {
+        // The request is refused before anything is claimed, so a client that asks for
+        // an unsupported attribute has not quietly made its message invisible.
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        let error = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "AttributeNames": ["SenderId"] }),
+        )
+        .await
+        .expect_err("not supported");
+        assert_eq!(error.code(), "InvalidAttributeName");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(
+            received["Messages"][0]["Body"], "hello",
+            "still there, still visible"
+        );
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ pub mod protocol;
 pub mod queue_url;
 pub mod server;
 pub mod sigv4;
+pub mod system_attributes;
 
 #[cfg(test)]
 mod test_support;
