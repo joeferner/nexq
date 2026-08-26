@@ -60,9 +60,9 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   `MessageGroupId`, `MessageDeduplicationId`, and `MessageSystemAttributes` are refused
   rather than dropped, so a client is never told a message was stored with data that was
   thrown away
-- :ballot_box_with_check: `ReceiveMessage` — `MaxNumberOfMessages` and a per-request
-  `VisibilityTimeout`. `WaitTimeSeconds` is validated and then ignored, so a client
-  asking to long-poll gets an immediate empty answer and polls again
+- :white_check_mark: `ReceiveMessage` — `MaxNumberOfMessages`, a per-request
+  `VisibilityTimeout`, and `WaitTimeSeconds` up to 20 seconds. Omitting the wait falls
+  back to the queue's `ReceiveMessageWaitTimeSeconds`
 - :ballot_box_with_check: Message system attributes on receive, through either
   `AttributeNames` (deprecated) or `MessageSystemAttributeNames`, with `All` and the
   Query protocol's `.*` both understood: `SentTimestamp`, `ApproximateReceiveCount`, and
@@ -80,9 +80,12 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 - :white_check_mark: `MD5OfMessageAttributes` on send and receive, matching digests
   published by AWS itself. On receive it covers the attributes actually *returned*, so a
   client asking for a subset can verify what it got
+- :white_check_mark: Long polling — the request is held open until a message arrives or
+  the wait runs out, woken by the enqueue rather than by a poll. A delay elapsing or a
+  visibility timeout lapsing does not wake a waiter yet, since those need a timer rather
+  than an event; a consumer sees them on its next receive
 - :scroll: `SendMessageBatch` / `DeleteMessageBatch`
 - :scroll: `ChangeMessageVisibility` / `ChangeMessageVisibilityBatch`
-- :scroll: Long polling — the request returns immediately instead of waiting
 
 ## Not planned
 
@@ -194,6 +197,38 @@ aws sqs delete-message --queue-url "$QUEUE" --receipt-handle "<handle>"
 A received message is invisible to other consumers until its visibility timeout runs
 out — 30 seconds by default, or whatever `--visibility-timeout` says. Delete it to
 finish; leave it and it comes back, which is what makes delivery at-least-once.
+
+## Waiting for work
+
+`--wait-time-seconds` holds the request open rather than answering empty straight away,
+so a consumer loop is not a busy poll:
+
+```sh
+aws sqs receive-message --queue-url "$QUEUE" --wait-time-seconds 20
+```
+
+It returns the moment a message is sent, not when the wait runs out, because the send
+wakes the waiting consumer directly. If nothing arrives the answer is empty, which is
+normal and not an error. Twenty seconds is the maximum, as in SQS.
+
+A queue can make this the default for its consumers, so they need not pass the flag:
+
+```sh
+aws sqs create-queue --queue-name jobs \
+  --attributes ReceiveMessageWaitTimeSeconds=20
+```
+
+An explicit `--wait-time-seconds` overrides it, and `--wait-time-seconds 0` turns
+waiting off for one request.
+
+Two things do *not* yet wake a waiting consumer, because they happen when a clock runs
+out rather than when a client does something: a `DelaySeconds` delay elapsing, and a
+visibility timeout lapsing so a message becomes redeliverable. Both are noticed on the
+consumer's next receive.
+
+Shutting the server down releases waiting consumers immediately with an empty response,
+rather than holding the shutdown open for up to twenty seconds or dropping their
+connections.
 
 To see how many times that has happened, ask for the system attributes:
 

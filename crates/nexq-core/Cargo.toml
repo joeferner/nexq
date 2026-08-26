@@ -12,12 +12,21 @@ async-trait = { workspace = true }
 figment = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+# `sync` for the long-poll waiter registry, `time` for its deadline.
+tokio = { workspace = true, features = ["sync", "time"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
 # `figment::Jail` — a sandboxed cwd and env for the config tests.
 figment = { workspace = true, features = ["test"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `test-util` for a paused clock, so a test can observe the 20-second receive cap
+# without taking 20 seconds to do it.
+tokio = { workspace = true, features = [
+  "macros",
+  "rt-multi-thread",
+  "test-util",
+  "time",
+] }
 
 [lints]
 workspace = true

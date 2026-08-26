@@ -16,11 +16,13 @@ use crate::store::{Result, Store, StoreError};
 
 /// A store that works, backed by a map.
 ///
-/// Messages are handled first-in-first-out, with no attention to priority and no
-/// visibility bookkeeping beyond what a claim needs. That is enough for engine tests,
-/// which care about what the engine does with a store's answers, not about ordering —
-/// ordering is a backend behavior, and `nexq-store-conformance` is what will hold real
-/// backends to it.
+/// Messages are handled first-in-first-out, with no attention to priority: ordering is a
+/// backend behavior, and `nexq-store-conformance` is what holds real backends to it.
+///
+/// It *does* honour a delay, because whether a message is claimable at all is something
+/// the engine reasons about — the long-poll loop decides whether to keep waiting on the
+/// answer — so a double that handed out delayed messages would make those tests agree
+/// with a broken engine.
 #[derive(Debug, Default)]
 pub struct FakeStore {
     queues: Mutex<HashMap<QueueName, Queue>>,
@@ -33,6 +35,9 @@ struct Claimable {
     queue: QueueName,
     message: Message,
     claim: Option<ReceiptHandle>,
+
+    /// When this becomes claimable. In the future means it is still waiting out a delay.
+    visible_at: SystemTime,
 }
 
 impl FakeStore {
@@ -90,16 +95,22 @@ impl Store for FakeStore {
         &self,
         queue: &QueueName,
         message: Message,
-        _delay: Option<Duration>,
+        delay: Option<Duration>,
     ) -> Result<()> {
-        if !self.queues.lock().expect("lock").contains_key(queue) {
-            return Err(StoreError::QueueNotFound(queue.clone()));
-        }
+        let delay = {
+            let queues = self.queues.lock().expect("lock");
+            let Some(held) = queues.get(queue) else {
+                return Err(StoreError::QueueNotFound(queue.clone()));
+            };
+
+            delay.unwrap_or(held.attributes.delay)
+        };
 
         self.messages.lock().expect("lock").push(Claimable {
             queue: queue.clone(),
             message,
             claim: None,
+            visible_at: SystemTime::now() + delay,
         });
         Ok(())
     }
@@ -113,15 +124,15 @@ impl Store for FakeStore {
             return Err(StoreError::QueueNotFound(queue.clone()));
         }
 
+        let now = SystemTime::now();
         let mut messages = self.messages.lock().expect("lock");
         let Some(claimable) = messages
             .iter_mut()
-            .find(|held| &held.queue == queue && held.claim.is_none())
+            .find(|held| &held.queue == queue && held.claim.is_none() && held.visible_at <= now)
         else {
             return Ok(None);
         };
 
-        let now = SystemTime::now();
         let receipt = ReceiptHandle::new();
         claimable.claim = Some(receipt.clone());
         claimable.message.receive_count += 1;

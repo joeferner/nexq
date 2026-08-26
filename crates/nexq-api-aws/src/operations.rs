@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery};
+use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
 use nexq_core::model::{Priority, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 
@@ -164,13 +164,14 @@ impl Operations {
 
     /// `ReceiveMessage`.
     ///
-    /// Returns whatever is claimable right now, up to `MaxNumberOfMessages`.
-    /// `WaitTimeSeconds` is validated and then ignored: holding the request open until
-    /// a message arrives is long polling, which is not built yet, so a client asking to
-    /// wait gets an immediate empty answer and will poll again.
+    /// Returns up to `MaxNumberOfMessages`, waiting up to `WaitTimeSeconds` for the
+    /// first one — long polling, which the engine owns. Omitting `WaitTimeSeconds`
+    /// falls back to the queue's `ReceiveMessageWaitTimeSeconds`, so a queue can make
+    /// long polling the default for its consumers.
     ///
     /// System attributes come back only when asked for — see
-    /// [`crate::system_attributes`] for which ones exist and how they are selected.
+    /// [`crate::system_attributes`] for which ones exist and how they are selected —
+    /// and message attributes likewise, via [`crate::message_attributes`].
     async fn receive_message(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let queue = self.queue_from_url(input)?;
         let wanted =
@@ -180,21 +181,25 @@ impl Operations {
             "VisibilityTimeout",
             attributes::VISIBILITY_TIMEOUT_MAX,
         )?;
-        let _ = optional_duration(input, "WaitTimeSeconds", attributes::RECEIVE_WAIT_TIME_MAX)?;
+        let wait = optional_duration(input, "WaitTimeSeconds", attributes::RECEIVE_WAIT_TIME_MAX)?;
 
         // Read before anything is claimed, so a request naming an attribute NexQ cannot
-        // report fails without having made a message invisible for nothing.
+        // report fails without having made a message invisible for nothing — and, with
+        // a wait in play, without having held the request open first.
         let requested = Requested::from_input(input)?;
         let selection = Selection::from_input(input)?;
 
-        let mut claimed = Vec::new();
-        for _ in 0..wanted {
-            match self.engine.claim_next(&queue, visibility_timeout).await? {
-                Some(message) => claimed.push(message),
-                // Nothing more available; a short answer is normal for SQS.
-                None => break,
-            }
-        }
+        let claimed = self
+            .engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: wanted as usize,
+                    visibility_timeout,
+                    wait,
+                },
+            )
+            .await?;
 
         // SQS omits `Messages` entirely rather than sending an empty list, and
         // `aws sqs receive-message` prints nothing at all in that case.
@@ -928,6 +933,42 @@ mod tests {
         .await
         .expect("receive");
         assert_eq!(empty, json!({}));
+    }
+
+    #[tokio::test]
+    async fn wait_time_seconds_holds_the_request_open_until_a_message_arrives() {
+        // `WaitTimeSeconds` used to be validated and then dropped on the floor. This
+        // asserts the wiring rather than the semantics — which the engine's own tests
+        // cover — by requiring a message that only exists *after* the receive began: an
+        // ignored wait would return empty immediately and fail here.
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let (received, sent) = tokio::join!(
+            call(
+                &operations,
+                Operation::ReceiveMessage,
+                json!({ "QueueUrl": url, "WaitTimeSeconds": 20 }),
+            ),
+            async {
+                // Long enough that the receive is genuinely waiting rather than still
+                // on its first look at the queue.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                call(
+                    &operations,
+                    Operation::SendMessage,
+                    json!({ "QueueUrl": url, "MessageBody": "arrived late" }),
+                )
+                .await
+            }
+        );
+        sent.expect("send");
+
+        let received = received.expect("receive");
+        assert_eq!(
+            received["Messages"][0]["Body"], "arrived late",
+            "the wait should have been woken by the send: {received}"
+        );
     }
 
     #[tokio::test]

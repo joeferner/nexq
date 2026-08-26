@@ -11,21 +11,29 @@
 //! - server-owned fields, so a client cannot dictate a queue's creation time
 //! - semantics a single storage call cannot express, like idempotent creation
 //! - one error type describing outcomes a caller can act on
+//! - waiting for a message to arrive, which no single storage call can express
 //!
-//! Only queue lifecycle so far. One store is held for now; per-queue backend selection
-//! arrives with the config that describes it, and belongs here since routing a queue to
-//! its backend is exactly this layer's job.
+//! That last one is why the engine holds a [`Waiters`] registry as well as a store: long
+//! polling is about holding a request open until an enqueue happens, so it belongs
+//! wherever both the enqueue and the waiting consumer can be seen at once.
+//!
+//! One store is held for now; per-queue backend selection arrives with the config that
+//! describes it, and belongs here since routing a queue to its backend is exactly this
+//! layer's job.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
+use tokio::time::{Instant, timeout};
 
 use crate::model::{
     ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, Priority, Queue, QueueAttributes,
     QueueName, ReceiptHandle,
 };
 use crate::store::{Store, StoreError};
+use crate::waiters::Waiters;
 
 /// The result of an engine operation.
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -50,6 +58,32 @@ pub struct QueueQuery {
 
     /// Resume after this name — the cursor from a previous page.
     pub after: Option<QueueName>,
+}
+
+/// Longest a receive will wait for a message, matching SQS's cap on `WaitTimeSeconds`.
+///
+/// Applied here as well as in a facade so a caller cannot hold a request open
+/// indefinitely by asking for a longer wait than the protocol allows.
+pub const MAX_RECEIVE_WAIT: Duration = Duration::from_secs(20);
+
+/// Most messages one receive will return, matching SQS's `MaxNumberOfMessages` cap.
+pub const MAX_MESSAGES_PER_RECEIVE: usize = 10;
+
+/// What a consumer is asking for.
+#[derive(Debug, Clone, Default)]
+pub struct ReceiveRequest {
+    /// How many messages to return at most, capped at [`MAX_MESSAGES_PER_RECEIVE`]. A
+    /// receive may return fewer, including none.
+    pub max_messages: usize,
+
+    /// How long a returned message stays invisible to other consumers. `None` means the
+    /// queue's configured default.
+    pub visibility_timeout: Option<Duration>,
+
+    /// How long to wait for a message when the queue has none — long polling. `None`
+    /// means the queue's configured `receive_wait_time`, and zero means do not wait.
+    /// Capped at [`MAX_RECEIVE_WAIT`].
+    pub wait: Option<Duration>,
 }
 
 /// One page of queues.
@@ -111,11 +145,46 @@ impl From<StoreError> for EngineError {
 #[derive(Debug)]
 pub struct Engine {
     store: Arc<dyn Store>,
+
+    /// Consumers waiting for a message, so an enqueue can wake one instead of leaving
+    /// it to poll. In process, which is why a queue's traffic belongs on one node.
+    waiters: Waiters,
+
+    /// Set once the process is going away, after which nothing waits. See
+    /// [`Engine::begin_draining`].
+    draining: AtomicBool,
 }
 
 impl Engine {
     pub fn new(store: Arc<dyn Store>) -> Self {
-        Self { store }
+        Self {
+            store,
+            waiters: Waiters::new(),
+            draining: AtomicBool::new(false),
+        }
+    }
+
+    /// Stop long polls from waiting, because the process is shutting down.
+    ///
+    /// Without this a graceful shutdown would take as long as the longest wait in
+    /// flight, since a consumer parked for twenty seconds is an in-flight request and a
+    /// server that waits for those would wait for that. Waiters are released to return
+    /// their normal empty answer, which is a thing consumers already handle, rather than
+    /// having their connections dropped from under them.
+    ///
+    /// Only *waiting* stops. Requests still run, so a receive during the drain behaves
+    /// like a plain poll and anything already claimable still comes back.
+    ///
+    /// One way, and deliberately: a draining engine is one whose process is going away,
+    /// so there is nothing to undo. Calling it twice is harmless.
+    pub fn begin_draining(&self) {
+        self.draining.store(true, Ordering::SeqCst);
+        self.waiters.notify_everything();
+    }
+
+    /// Whether waiting has been switched off.
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
     }
 
     /// Create a queue, returning it as stored.
@@ -179,7 +248,15 @@ impl Engine {
     /// Deleting a queue that is not there is an error rather than a no-op: a client
     /// that deletes an unknown name has misunderstood something, and SQS reports it.
     pub async fn delete_queue(&self, name: &QueueName) -> Result<()> {
-        Ok(self.store.delete_queue(name).await?)
+        self.store.delete_queue(name).await?;
+
+        // Anyone long-polling this queue should find out now rather than wait out a
+        // timeout on a queue that no longer exists. Woken before the entry goes, since
+        // forgetting it first would leave them with nothing to wake them.
+        self.waiters.notify_all(name);
+        self.waiters.forget(name);
+
+        Ok(())
     }
 
     /// One page of queues, in name order.
@@ -251,7 +328,128 @@ impl Engine {
 
         self.store.enqueue(queue, message.clone(), delay).await?;
 
+        // One message, so one waiter. Done unconditionally rather than only for a
+        // message that is visible immediately: a delayed one wakes a consumer that finds
+        // nothing and goes back to waiting, which costs one claim, while working out
+        // whether it *would* be visible costs a read of the queue on every send. What
+        // this does not do is wake anyone when a delay elapses or a claim expires —
+        // those need a timer, not an event, and until there is one a consumer learns
+        // about them on its next receive.
+        self.waiters.notify_one(queue);
+
         Ok(message)
+    }
+
+    /// Claim up to `request.max_messages` messages, waiting for the first if asked to.
+    ///
+    /// This is long polling, and it is the reason the engine holds a waiter registry.
+    /// The wait applies only to the *first* message: once something is available the
+    /// rest of the batch is whatever else can be claimed right now, so a consumer
+    /// asking for ten is not held open until ten exist. That is SQS's behaviour, and it
+    /// is the useful one — a batch that waits to fill trades latency for nothing.
+    ///
+    /// A wait of zero, or a queue configured with none, makes this a plain poll.
+    /// Returning empty is a normal answer either way.
+    pub async fn receive(
+        &self,
+        queue: &QueueName,
+        request: &ReceiveRequest,
+    ) -> Result<Vec<ClaimedMessage>> {
+        let wanted = request.max_messages.clamp(1, MAX_MESSAGES_PER_RECEIVE);
+
+        let Some(first) = self.claim_waiting(queue, request).await? else {
+            return Ok(Vec::new());
+        };
+
+        let mut claimed = Vec::with_capacity(wanted);
+        claimed.push(first);
+
+        while claimed.len() < wanted {
+            match self.claim_next(queue, request.visibility_timeout).await? {
+                Some(message) => claimed.push(message),
+                // Nothing more right now, which is a normal short batch.
+                None => break,
+            }
+        }
+
+        Ok(claimed)
+    }
+
+    /// The first message of a receive, waiting for one to arrive if the queue is empty.
+    ///
+    /// The ordering here is what makes the wait reliable, and it is not incidental: the
+    /// waiter is armed *before* the queue is looked at, so a message enqueued between
+    /// the look and the wait wakes it rather than being missed. Every later iteration
+    /// re-arms before re-checking for the same reason.
+    async fn claim_waiting(
+        &self,
+        queue: &QueueName,
+        request: &ReceiveRequest,
+    ) -> Result<Option<ClaimedMessage>> {
+        let notify = self.waiters.register(queue);
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        if let Some(message) = self.claim_next(queue, request.visibility_timeout).await? {
+            return Ok(Some(message));
+        }
+
+        // Checked before the queue is read for its wait, so a drain costs nothing.
+        if self.is_draining() {
+            return Ok(None);
+        }
+
+        // Only worth resolving now: a receive that found a message never pays to read
+        // the queue's configured wait.
+        let wait = self.resolve_wait(queue, request).await?;
+        if wait.is_zero() {
+            return Ok(None);
+        }
+
+        let deadline = Instant::now() + wait;
+
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+
+            // The waiter armed above covers anything enqueued since the last check, so
+            // this cannot sleep through a message that is already there.
+            if timeout(remaining, notified.as_mut()).await.is_err() {
+                return Ok(None);
+            }
+
+            // Re-armed before looking, so a message arriving during the look is not lost.
+            notified.set(notify.notified());
+            notified.as_mut().enable();
+
+            // The wake may have been a drain rather than a message. Checked after
+            // looking would work too, but there is no reason to touch the store.
+            if self.is_draining() {
+                return Ok(None);
+            }
+
+            // Deciding which message only now is the point: what a woken consumer gets
+            // is whatever ranks first at this instant, not whatever ranked first when it
+            // started waiting.
+            if let Some(message) = self.claim_next(queue, request.visibility_timeout).await? {
+                return Ok(Some(message));
+            }
+
+            // Another consumer got there first. Keep waiting out the deadline.
+        }
+    }
+
+    /// How long a receive should wait, honouring the queue's default and SQS's cap.
+    async fn resolve_wait(&self, queue: &QueueName, request: &ReceiveRequest) -> Result<Duration> {
+        let wait = match request.wait {
+            Some(wait) => wait,
+            None => self.get_queue(queue).await?.attributes.receive_wait_time,
+        };
+
+        Ok(wait.min(MAX_RECEIVE_WAIT))
     }
 
     /// Claim the next message for a consumer, or `None` if the queue has nothing
@@ -871,6 +1069,607 @@ mod tests {
             .await
             .expect_err("already acked");
         assert!(matches!(error, EngineError::InvalidReceipt), "{error:?}");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Long polling
+    // ---------------------------------------------------------------------------
+
+    /// Long enough that a missed wake shows up as a failure rather than a slow pass.
+    const A_SHORT_WAIT: Duration = Duration::from_millis(200);
+
+    /// Far longer than any of these tests should actually take, so a test that waits
+    /// this long has found a real bug rather than a slow machine.
+    const LONGER_THAN_NEEDED: Duration = Duration::from_secs(10);
+
+    fn waiting(wait: Duration) -> ReceiveRequest {
+        ReceiveRequest {
+            max_messages: 1,
+            visibility_timeout: None,
+            wait: Some(wait),
+        }
+    }
+
+    /// An engine with an empty queue named `jobs`.
+    async fn engine_with_queue() -> (Arc<Engine>, QueueName) {
+        let engine = Arc::new(engine());
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create queue");
+
+        (engine, queue)
+    }
+
+    #[tokio::test]
+    async fn a_receive_that_is_not_asked_to_wait_returns_at_once() {
+        let (engine, queue) = engine_with_queue().await;
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &waiting(Duration::ZERO))
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty());
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "a zero wait must not wait: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_receive_returns_a_message_that_is_already_there_without_waiting() {
+        let (engine, queue) = engine_with_queue().await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &waiting(LONGER_THAN_NEEDED))
+            .await
+            .expect("receive");
+
+        assert_eq!(claimed.len(), 1);
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "a message already waiting must not be waited for: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_waiting_receive_wakes_when_a_message_arrives() {
+        // The point of the whole feature: no polling, and no waiting out the timeout.
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumer = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let queue = queue.clone();
+            async move { engine.receive(&queue, &waiting(LONGER_THAN_NEEDED)).await }
+        });
+
+        // Long enough that the consumer is genuinely blocked in the wait rather than
+        // still on its first look at the queue.
+        tokio::time::sleep(A_SHORT_WAIT).await;
+        let started = Instant::now();
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        let claimed = consumer.await.expect("consumer task").expect("receive");
+
+        assert_eq!(
+            claimed.len(),
+            1,
+            "the enqueue should have woken the consumer"
+        );
+        assert_eq!(claimed[0].message.body, "hello");
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "the wake should be prompt, not a poll: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_waiting_receive_gives_up_at_its_deadline() {
+        let (engine, queue) = engine_with_queue().await;
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &waiting(A_SHORT_WAIT))
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty(), "empty is the answer, not an error");
+        assert!(
+            started.elapsed() >= A_SHORT_WAIT,
+            "it must actually have waited: took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            started.elapsed() < LONGER_THAN_NEEDED,
+            "and stopped waiting: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wake_does_not_hand_over_a_message_that_is_not_claimable_yet() {
+        // A waiter is woken by the enqueue, but the message is delayed, so there is
+        // nothing to take. It must re-check and keep waiting rather than deliver the
+        // message that caused its wake — which is what "re-evaluated at wake time"
+        // means, and what an implementation handing the notification a payload would
+        // get wrong.
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumer = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let queue = queue.clone();
+            async move { engine.receive(&queue, &waiting(A_SHORT_WAIT)).await }
+        });
+
+        engine
+            .enqueue(
+                &queue,
+                "later".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                Some(LONGER_THAN_NEEDED),
+            )
+            .await
+            .expect("enqueue");
+
+        let claimed = consumer.await.expect("consumer task").expect("receive");
+
+        assert!(
+            claimed.is_empty(),
+            "a delayed message is not claimable, however it woke someone"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_message_goes_to_exactly_one_of_several_waiters() {
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumers: Vec<_> = (0..3)
+            .map(|_| {
+                let engine = Arc::clone(&engine);
+                let queue = queue.clone();
+                tokio::spawn(async move { engine.receive(&queue, &waiting(A_SHORT_WAIT)).await })
+            })
+            .collect();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        let mut served = 0;
+        for consumer in consumers {
+            let claimed = consumer.await.expect("consumer task").expect("receive");
+            served += claimed.len();
+        }
+
+        assert_eq!(
+            served, 1,
+            "the others must wait out their deadline rather than be handed a duplicate"
+        );
+    }
+
+    #[tokio::test]
+    async fn several_waiters_share_out_several_messages() {
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumers: Vec<_> = (0..3)
+            .map(|_| {
+                let engine = Arc::clone(&engine);
+                let queue = queue.clone();
+                tokio::spawn(
+                    async move { engine.receive(&queue, &waiting(LONGER_THAN_NEEDED)).await },
+                )
+            })
+            .collect();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        for body in ["one", "two", "three"] {
+            engine
+                .enqueue(
+                    &queue,
+                    body.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+
+        let mut bodies = Vec::new();
+        for consumer in consumers {
+            let claimed = consumer.await.expect("consumer task").expect("receive");
+            bodies.extend(claimed.into_iter().map(|claimed| claimed.message.body));
+        }
+        bodies.sort();
+
+        assert_eq!(
+            bodies,
+            ["one", "three", "two"],
+            "every message delivered exactly once, no consumer left waiting"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_receive_waits_for_the_first_message_but_not_for_a_full_batch() {
+        // SQS's behaviour, and the useful one: three messages are there, ten were asked
+        // for, and the answer is three rather than a wait for seven more.
+        let (engine, queue) = engine_with_queue().await;
+        for body in ["one", "two", "three"] {
+            engine
+                .enqueue(
+                    &queue,
+                    body.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: 10,
+                    wait: Some(LONGER_THAN_NEEDED),
+                    ..ReceiveRequest::default()
+                },
+            )
+            .await
+            .expect("receive");
+
+        assert_eq!(claimed.len(), 3);
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "a short batch is an answer, not a reason to wait: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_queues_own_wait_applies_when_a_request_does_not_ask() {
+        // `ReceiveMessageWaitTimeSeconds` as a queue attribute, which is how a queue
+        // makes long polling the default for its consumers.
+        let engine = Arc::new(engine());
+        let queue = name("jobs");
+        engine
+            .create_queue(
+                queue.clone(),
+                QueueAttributes {
+                    receive_wait_time: A_SHORT_WAIT,
+                    ..QueueAttributes::default()
+                },
+            )
+            .await
+            .expect("create queue");
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: 1,
+                    visibility_timeout: None,
+                    wait: None,
+                },
+            )
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty());
+        assert!(
+            started.elapsed() >= A_SHORT_WAIT,
+            "the queue's own wait should have applied: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_queue_with_no_configured_wait_does_not_wait() {
+        // The default, so an unconfigured queue behaves like a plain poll.
+        let (engine, queue) = engine_with_queue().await;
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &ReceiveRequest::default())
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty());
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_wait_beyond_the_cap_is_clamped() {
+        // On a paused clock, so the cap can be observed without the test taking as long
+        // as the cap itself. Asking for an hour must not hold a request open for one.
+        let (engine, queue) = engine_with_queue().await;
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &waiting(Duration::from_secs(3600)))
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty());
+        assert!(
+            started.elapsed() < MAX_RECEIVE_WAIT + Duration::from_secs(1),
+            "waited {:?}, which is past the {MAX_RECEIVE_WAIT:?} cap",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_queues_configured_wait_is_capped_too() {
+        // The cap belongs to the engine, so a queue configured past it is clamped as
+        // well — otherwise config would be a way around the protocol's limit.
+        let engine = Arc::new(engine());
+        let queue = name("jobs");
+        engine
+            .create_queue(
+                queue.clone(),
+                QueueAttributes {
+                    receive_wait_time: Duration::from_secs(3600),
+                    ..QueueAttributes::default()
+                },
+            )
+            .await
+            .expect("create queue");
+        let started = Instant::now();
+
+        engine
+            .receive(&queue, &ReceiveRequest::default())
+            .await
+            .expect("receive");
+
+        assert!(
+            started.elapsed() < MAX_RECEIVE_WAIT + Duration::from_secs(1),
+            "waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_queue_releases_the_consumers_waiting_on_it() {
+        // Otherwise a consumer sits for its full timeout on a queue that is gone.
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumer = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let queue = queue.clone();
+            async move { engine.receive(&queue, &waiting(LONGER_THAN_NEEDED)).await }
+        });
+
+        tokio::time::sleep(A_SHORT_WAIT).await;
+        let started = Instant::now();
+        engine.delete_queue(&queue).await.expect("delete");
+
+        let error = consumer
+            .await
+            .expect("consumer task")
+            .expect_err("the queue is gone");
+
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+        assert!(
+            started.elapsed() < LONGER_THAN_NEEDED,
+            "it should have been released, not timed out: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_size_outside_the_range_is_clamped_rather_than_refused() {
+        let (engine, queue) = engine_with_queue().await;
+        for index in 0..12 {
+            engine
+                .enqueue(
+                    &queue,
+                    format!("m{index}"),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+
+        // Zero is not a request anyone can satisfy, so it means one.
+        let one = engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: 0,
+                    ..ReceiveRequest::default()
+                },
+            )
+            .await
+            .expect("receive");
+        assert_eq!(one.len(), 1);
+
+        let capped = engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: usize::MAX,
+                    ..ReceiveRequest::default()
+                },
+            )
+            .await
+            .expect("receive");
+        assert_eq!(capped.len(), MAX_MESSAGES_PER_RECEIVE);
+    }
+
+    #[tokio::test]
+    async fn waiting_on_a_queue_that_does_not_exist_is_an_error_not_a_wait() {
+        let engine = engine();
+        let started = Instant::now();
+
+        let error = engine
+            .receive(&name("nope"), &waiting(LONGER_THAN_NEEDED))
+            .await
+            .expect_err("no such queue");
+
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "a missing queue is known immediately: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn draining_releases_the_consumers_that_are_waiting() {
+        // What makes shutdown prompt: a consumer parked for a long wait is an in-flight
+        // request, so without this every shutdown would take as long as the longest one.
+        let (engine, queue) = engine_with_queue().await;
+
+        let consumers: Vec<_> = (0..3)
+            .map(|_| {
+                let engine = Arc::clone(&engine);
+                let queue = queue.clone();
+                tokio::spawn(
+                    async move { engine.receive(&queue, &waiting(LONGER_THAN_NEEDED)).await },
+                )
+            })
+            .collect();
+
+        tokio::time::sleep(A_SHORT_WAIT).await;
+        let started = Instant::now();
+        engine.begin_draining();
+
+        for consumer in consumers {
+            let claimed = consumer.await.expect("consumer task").expect("receive");
+
+            assert!(
+                claimed.is_empty(),
+                "an empty answer, which consumers already handle"
+            );
+        }
+        assert!(
+            started.elapsed() < LONGER_THAN_NEEDED,
+            "every waiter should have been released at once: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_draining_engine_does_not_start_a_new_wait() {
+        // A request arriving mid-drain — on a connection that was already open — must
+        // not park for its full wait either.
+        let (engine, queue) = engine_with_queue().await;
+        engine.begin_draining();
+        let started = Instant::now();
+
+        let claimed = engine
+            .receive(&queue, &waiting(LONGER_THAN_NEEDED))
+            .await
+            .expect("receive");
+
+        assert!(claimed.is_empty());
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn draining_stops_waiting_but_still_serves() {
+        // A drain is not an outage: whatever is already claimable still comes back, so
+        // a consumer polling during shutdown gets its message rather than an empty
+        // answer or an error.
+        let (engine, queue) = engine_with_queue().await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        engine.begin_draining();
+
+        let claimed = engine
+            .receive(&queue, &waiting(LONGER_THAN_NEEDED))
+            .await
+            .expect("receive");
+
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].message.body, "hello");
+    }
+
+    #[tokio::test]
+    async fn draining_is_one_way_and_repeatable() {
+        let engine = engine();
+        assert!(!engine.is_draining());
+
+        engine.begin_draining();
+        engine.begin_draining();
+
+        assert!(engine.is_draining(), "and calling it twice is harmless");
+    }
+
+    #[tokio::test]
+    async fn no_waiter_entry_is_kept_for_a_queue_that_is_deleted() {
+        let (engine, queue) = engine_with_queue().await;
+
+        engine
+            .receive(&queue, &ReceiveRequest::default())
+            .await
+            .expect("receive");
+        assert_eq!(engine.waiters.tracked_queues(), 1);
+
+        engine.delete_queue(&queue).await.expect("delete");
+
+        assert_eq!(
+            engine.waiters.tracked_queues(),
+            0,
+            "the registry must not grow with every queue that ever existed"
+        );
     }
 
     #[tokio::test]

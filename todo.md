@@ -158,16 +158,43 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
       was requested. Verified end to end against the real `aws-cli`, with the digest
       cross-checked against an independent implementation of the encoding.
 
-## M4 — Long-polling receive
+## ✅ M4 — Long-polling receive
 
 The first piece of NexQ's own design to land, and the reason the primary holds
 in-process waiters instead of polling a backend.
 
-- [ ] In-process waiter registry per queue, woken by the enqueue path
-- [ ] `WaitTimeSeconds` honored, returning empty on timeout
-- [ ] Wake ordering re-evaluated at wake time rather than fixed at registration
-- [ ] **Gate: `receive-message --wait-time-seconds 20` blocks, then returns
-      immediately when a message is sent from another terminal**
+- [x] In-process waiter registry per queue, woken by the enqueue path —
+      `nexq-core::waiters`, one `Notify` per queue that has actually been waited on, and
+      the entry is dropped with the queue. A waiter is armed _before_ it looks at the
+      queue, which is what makes a lost wake impossible: anything enqueued from that
+      moment either finds the waiter registered or is seen by the look itself
+- [x] `WaitTimeSeconds` honored, returning empty on timeout. Omitting it falls back to
+      the queue's `ReceiveMessageWaitTimeSeconds`, which had been stored since M2 and
+      never used, so a queue can now make long polling its consumers' default. Capped at
+      20 seconds in the engine as well as the facade, so config cannot get around the
+      protocol's limit
+- [x] Wake ordering re-evaluated at wake time rather than fixed at registration — a
+      wake carries no payload, so a woken consumer re-runs the claim and gets whatever
+      ranks first _then_. Pinned by a test where the enqueue that causes the wake is a
+      delayed message: the waiter must find nothing and keep waiting rather than be
+      handed the message that woke it
+- [x] The wait applies to the first message only. Asking for ten when three exist
+      returns three rather than holding the request open for seven more, which is SQS's
+      behaviour and the useful one
+- [x] Shutdown releases waiters instead of waiting for them. Long polls are in-flight
+      requests, so graceful shutdown took **19.7 seconds** with one outstanding; the
+      engine is now told to stop waiting when shutdown starts, and it takes **0.01
+      seconds**. Waiters get their normal empty answer rather than a dropped connection
+- [x] Deleting a queue releases the consumers waiting on it, rather than leaving them
+      parked on a queue that no longer exists
+- [x] **Gate: `receive-message --wait-time-seconds 20` blocks, then returns
+      immediately when a message is sent from another terminal** — verified against the
+      real `aws-cli`: returned 4.03s after the receive began, on a send 3s in, rather
+      than waiting out the 20s
+
+What does _not_ wake a waiter yet, and is M5's timer rather than an event: a delay
+elapsing, and a visibility timeout lapsing. Both make a message claimable without an
+enqueue, so a consumer only learns about them on its next receive.
 
 ## M5 — Visibility timeout and redelivery
 

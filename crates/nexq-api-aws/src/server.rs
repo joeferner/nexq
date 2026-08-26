@@ -50,6 +50,10 @@ pub struct Server {
     listener: TcpListener,
     local_addr: SocketAddr,
     router: Router,
+
+    /// Held so [`Server::serve`] can release long polls when shutdown starts, rather
+    /// than waiting for each of them to reach its own deadline.
+    engine: Arc<Engine>,
 }
 
 impl Server {
@@ -84,9 +88,10 @@ impl Server {
             local_addr,
             router: router(Arc::new(Facade {
                 auth,
-                operations: Operations::new(engine, QueueUrls::new(config)),
+                operations: Operations::new(Arc::clone(&engine), QueueUrls::new(config)),
                 max_clock_skew: config.max_clock_skew(),
             })),
+            engine,
         })
     }
 
@@ -97,11 +102,24 @@ impl Server {
     }
 
     /// Serve until `shutdown` resolves, then let in-flight requests finish.
+    ///
+    /// A consumer long-polling for twenty seconds is an in-flight request, so waiting
+    /// for it would make every shutdown as slow as the longest wait outstanding. The
+    /// engine is told to stop waiting the moment shutdown starts, which turns those
+    /// requests into ordinary empty responses instead of a delay or a dropped
+    /// connection.
     pub async fn serve<S>(self, shutdown: S) -> io::Result<()>
     where
         S: Future<Output = ()> + Send + 'static,
     {
         info!(facade = "aws", address = %self.local_addr, "listening");
+
+        let engine = self.engine;
+        let shutdown = async move {
+            shutdown.await;
+            debug!(facade = "aws", "shutting down: releasing long polls");
+            engine.begin_draining();
+        };
 
         axum::serve(self.listener, self.router)
             .with_graceful_shutdown(shutdown)
@@ -552,6 +570,35 @@ mod tests {
             .expect("bind");
 
         assert_ne!(server.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn shutting_down_releases_long_polls_instead_of_waiting_for_them() {
+        // A consumer parked on a twenty-second wait is an in-flight request, so a
+        // server that simply waited for in-flight requests would take twenty seconds to
+        // stop. The link between the shutdown signal and the engine is what avoids that.
+        let engine = test_engine();
+        let server = Server::bind(&test_config(), test_auth(), Arc::clone(&engine))
+            .await
+            .expect("bind");
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let serving = tokio::spawn(server.serve(async move {
+            let _ = shutdown_rx.await;
+        }));
+        assert!(!engine.is_draining(), "not while it is serving");
+
+        shutdown_tx.send(()).expect("signal shutdown");
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .expect("serve should stop promptly")
+            .expect("serve task")
+            .expect("serve");
+
+        assert!(
+            engine.is_draining(),
+            "shutdown must tell the engine to stop waiting"
+        );
     }
 
     #[tokio::test]

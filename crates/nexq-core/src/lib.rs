@@ -6,6 +6,7 @@ pub mod config;
 pub mod engine;
 pub mod model;
 pub mod store;
+pub mod waiters;
 
 #[cfg(test)]
 mod test_support;
