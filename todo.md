@@ -86,7 +86,9 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 
 ## M2 — Queue lifecycle against the memory backend
 
-- [ ] Domain model: queue, message, receipt handle
+- [x] Domain model: queue, message, receipt handle — `QueueName` validates on
+      construction, `Message` and `ClaimedMessage` separate the durable item from a
+      time-limited claim
 - [ ] `Store` trait — settle the `dyn`-dispatch approach now, since it shapes every
       later backend, but keep the surface to what this milestone needs
 - [ ] Memory store in `nexq-core`

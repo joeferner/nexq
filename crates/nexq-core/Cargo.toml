@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 figment = { workspace = true }
 serde = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 # `figment::Jail` — a sandboxed cwd and env for the config tests.
