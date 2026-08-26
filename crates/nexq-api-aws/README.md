@@ -51,11 +51,22 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 
 ## Message operations
 
-- :scroll: `SendMessage` / `SendMessageBatch`
-- :scroll: `ReceiveMessage`, including `WaitTimeSeconds` long polling
-- :scroll: `DeleteMessage` / `DeleteMessageBatch`
+- :ballot_box_with_check: `SendMessage` — body and `DelaySeconds`. `MessageAttributes`,
+  `MessageGroupId`, and `MessageDeduplicationId` are refused rather than dropped, so a
+  client is never told a message was stored with data that was thrown away
+- :ballot_box_with_check: `ReceiveMessage` — `MaxNumberOfMessages` and a per-request
+  `VisibilityTimeout`. `WaitTimeSeconds` is validated and then ignored, so a client
+  asking to long-poll gets an immediate empty answer and polls again. Message system
+  attributes such as `ApproximateReceiveCount` are not returned yet
+- :white_check_mark: `DeleteMessage`, with `ReceiptHandleIsInvalid` on a spent handle
+- :white_check_mark: `MD5OfMessageBody` on send and `MD5OfBody` on receive — SDKs
+  verify these, so they are correctness, not decoration
+- :white_check_mark: Visibility timeouts and redelivery — an expired claim makes the
+  message claimable again under a new receipt handle, which invalidates the old one
+- :scroll: `SendMessageBatch` / `DeleteMessageBatch`
 - :scroll: `ChangeMessageVisibility` / `ChangeMessageVisibilityBatch`
-- :scroll: Message attributes, and the `MD5OfMessageBody` some SDKs verify
+- :scroll: Long polling — the request returns immediately instead of waiting
+- :scroll: Message attributes, and the `MD5OfMessageAttributes` that goes with them
 
 ## Not planned
 
@@ -150,6 +161,24 @@ aws sqs get-queue-url --queue-name jobs
 aws sqs delete-queue --queue-url http://localhost:8080/000000000000/jobs
 ```
 
+Sending and receiving:
+
+```sh
+QUEUE=$(aws sqs create-queue --queue-name jobs --output text)
+
+aws sqs send-message --queue-url "$QUEUE" --message-body "hello world"
+# { "MD5OfMessageBody": "5eb63bbb...", "MessageId": "5683a209-..." }
+
+aws sqs receive-message --queue-url "$QUEUE" --max-number-of-messages 10
+# { "Messages": [ { "MessageId": ..., "ReceiptHandle": ..., "Body": "hello world" } ] }
+
+aws sqs delete-message --queue-url "$QUEUE" --receipt-handle "<handle>"
+```
+
+A received message is invisible to other consumers until its visibility timeout runs
+out — 30 seconds by default, or whatever `--visibility-timeout` says. Delete it to
+finish; leave it and it comes back, which is what makes delivery at-least-once.
+
 `list-queues` printing nothing means there are no queues — the same as real SQS, which
 omits the field rather than returning an empty list.
 
@@ -180,6 +209,7 @@ different one belongs to another deployment.
 | `InvalidAddress` | The `QueueUrl` is malformed or names a different account id |
 | `QueueDoesNotExist` | No queue by that name |
 | `QueueNameExists` | A queue of that name exists with different attributes |
+| `ReceiptHandleIsInvalid` | The handle was never issued, is already used, or its claim expired and the message went to another consumer |
 | `InvalidAttributeName` | An attribute this facade does not support, such as `FifoQueue` |
 | `MissingAction` | No `X-Amz-Target`, so probably an older Query-protocol client |
 | `NotImplemented` | A real SQS operation that is not built yet |

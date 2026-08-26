@@ -11,6 +11,7 @@ authors.workspace = true
 axum = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
+md-5 = { workspace = true }
 nexq-core = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

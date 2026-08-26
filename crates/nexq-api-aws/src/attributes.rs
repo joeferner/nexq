@@ -15,17 +15,27 @@ use serde_json::{Map, Value};
 
 use crate::error::ApiError;
 
-/// How long a claimed message stays invisible. SQS allows 0 to 12 hours.
+/// How long a claimed message stays invisible.
 const VISIBILITY_TIMEOUT: &str = "VisibilityTimeout";
-const VISIBILITY_TIMEOUT_MAX: u64 = 12 * 60 * 60;
 
-/// How long a sent message waits before becoming visible. SQS allows 0 to 15 minutes.
+/// How long a sent message waits before becoming visible.
 const DELAY_SECONDS: &str = "DelaySeconds";
-const DELAY_SECONDS_MAX: u64 = 15 * 60;
 
-/// Default long-poll duration for a receive. SQS allows 0 to 20 seconds.
+/// Default long-poll duration for a receive.
 const RECEIVE_WAIT_TIME: &str = "ReceiveMessageWaitTimeSeconds";
-const RECEIVE_WAIT_TIME_MAX: u64 = 20;
+
+/// Longest visibility timeout SQS accepts: 12 hours.
+///
+/// Shared with the per-request overrides on `ReceiveMessage`, which are bounded the
+/// same way — one limit, so a value accepted as a queue default is also accepted as an
+/// override.
+pub const VISIBILITY_TIMEOUT_MAX: u64 = 12 * 60 * 60;
+
+/// Longest delay SQS accepts: 15 minutes.
+pub const DELAY_SECONDS_MAX: u64 = 15 * 60;
+
+/// Longest long-poll wait SQS accepts: 20 seconds.
+pub const RECEIVE_WAIT_TIME_MAX: u64 = 20;
 
 /// Read a `CreateQueue`-style attribute map.
 ///

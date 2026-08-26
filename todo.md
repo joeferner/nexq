@@ -119,12 +119,22 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 
 - [x] `enqueue`, `claim_next`, `ack` in the engine and memory store, including
       priority ordering, per-queue delay, and a new receipt handle on each redelivery
-- [ ] `SendMessage`, `ReceiveMessage`, `DeleteMessage`
-- [ ] `MD5OfMessageBody` in send/receive responses — some SDKs verify this checksum
-      and will error out if it is absent or wrong
-- [ ] Opaque receipt handles, and `ReceiptHandleIsInvalid` on a stale one
-- [ ] `MaxNumberOfMessages`, and the SQS response-shape rules for an empty receive
-- [ ] **Gate: send a message, receive it, delete it, confirm it does not come back**
+- [x] `SendMessage`, `ReceiveMessage`, `DeleteMessage`, including per-message
+      `DelaySeconds` and a per-receive `VisibilityTimeout`
+- [x] `MD5OfMessageBody` in send/receive responses — some SDKs verify this checksum
+      and will error out if it is absent or wrong. Note the field is `MD5OfMessageBody`
+      on send but `MD5OfBody` on receive; botocore checked both against a live server
+- [x] Opaque receipt handles, and `ReceiptHandleIsInvalid` on a stale one
+- [x] `MaxNumberOfMessages`, and the SQS response-shape rules for an empty receive
+      (`Messages` omitted, not an empty array)
+- [x] **Gate: send a message, receive it, delete it, confirm it does not come back** —
+      verified against the real `aws-cli`
+- [ ] Message system attributes on receive: `AttributeNames`/
+      `MessageSystemAttributeNames` are ignored, so `ApproximateReceiveCount` and
+      `SentTimestamp` are never returned even when asked for
+- [ ] `MessageAttributes` on send and receive, with their own MD5. Currently refused
+      rather than silently dropped, so no data is lost — but a client that needs them
+      cannot use this facade
 
 ## M4 — Long-polling receive
 
@@ -139,11 +149,20 @@ in-process waiters instead of polling a backend.
 
 ## M5 — Visibility timeout and redelivery
 
-- [ ] Lease/visibility timeout on claim, with an in-process expiry timer
-- [ ] Redelivery on expiry, and `ApproximateReceiveCount`
+Mostly landed early, since a claim that cannot expire would hand the same message to
+two consumers — the part still missing is the timer, not the expiry.
+
+- [x] Visibility timeout on claim, honoured on the next claim attempt
+- [x] Redelivery on expiry, under a new receipt handle that invalidates the old one
+- [x] `VisibilityTimeout` as a queue attribute and a per-receive override
+- [x] **Gate: receive without deleting, wait out the timeout, receive it again** —
+      verified against the real `aws-cli` with `--visibility-timeout 1`
+- [ ] An in-process expiry timer. Expiry is currently noticed only when someone next
+      tries to claim, which is enough for correctness but cannot wake a long-poller
+      waiting on a message whose claim just lapsed
+- [ ] `ApproximateReceiveCount` surfaced to clients — it is counted, but receive does
+      not return message attributes yet
 - [ ] `ChangeMessageVisibility`
-- [ ] `VisibilityTimeout` as a queue attribute and a per-receive override
-- [ ] **Gate: receive without deleting, wait out the timeout, receive it again**
 
 ## M6 — The rest of what the CLI commonly exercises
 

@@ -22,7 +22,9 @@
 //! wants a configurable tolerance given air-gapped clocks.
 
 use axum::http::{HeaderMap, Method, Uri, header};
-use hmac::{Hmac, Mac};
+// `KeyInit` provides `new_from_slice`; since hmac 0.13 it has to be imported
+// explicitly rather than arriving with `Mac`.
+use hmac::{Hmac, KeyInit, Mac};
 use nexq_core::{AuthConfig, Credential};
 use sha2::{Digest, Sha256};
 use tracing::debug;
