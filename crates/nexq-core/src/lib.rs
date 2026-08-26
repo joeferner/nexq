@@ -3,10 +3,15 @@
 //! Every other crate depends on this one; this one depends on none of them.
 
 pub mod config;
+pub mod engine;
 pub mod model;
 pub mod store;
 
+#[cfg(test)]
+mod test_support;
+
 pub use config::{AuthConfig, AwsApiConfig, Config, Credential, Secret};
+pub use engine::{Engine, EngineError};
 pub use model::{
     ClaimedMessage, InvalidQueueName, Message, MessageId, Priority, Queue, QueueAttributes,
     QueueName, ReceiptHandle,

@@ -95,7 +95,8 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] Memory store in `nexq-store-memory`, its own crate alongside the other backends
 - [ ] `nexq-store-conformance` suite covering the operations implemented so far,
       running green against the memory store
-- [ ] Core engine operations: create, delete, list
+- [x] Core engine operations: create, get, delete, list — with idempotent creation
+      decided here, so every facade inherits it
 - [ ] Queue URL construction from the configured public base URL — the CLI sends every
       subsequent request to whatever URL `CreateQueue`/`GetQueueUrl` returns, so a
       wrong host here breaks the client silently

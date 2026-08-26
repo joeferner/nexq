@@ -90,69 +90,10 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use super::*;
-
-    /// A stand-in store, just enough to prove the trait is usable behind `dyn` and to
-    /// pin the error cases.
-    ///
-    /// Not a backend: the real in-memory one lives in `nexq-store-memory`, which
-    /// depends on this crate and so cannot be used from these tests. This exists so
-    /// the engine has something to be tested against without that cycle, and stays
-    /// deliberately dumb — `nexq-store-conformance` is what holds real backends to
-    /// their behavior.
-    #[derive(Debug, Default)]
-    struct FakeStore {
-        queues: Mutex<HashMap<QueueName, Queue>>,
-    }
-
-    #[async_trait]
-    impl Store for FakeStore {
-        fn backend_name(&self) -> &'static str {
-            "fake"
-        }
-
-        async fn create_queue(&self, queue: Queue) -> Result<()> {
-            let mut queues = self.queues.lock().expect("lock");
-
-            if queues.contains_key(&queue.name) {
-                return Err(StoreError::QueueAlreadyExists(queue.name));
-            }
-
-            queues.insert(queue.name.clone(), queue);
-            Ok(())
-        }
-
-        async fn get_queue(&self, name: &QueueName) -> Result<Queue> {
-            self.queues
-                .lock()
-                .expect("lock")
-                .get(name)
-                .cloned()
-                .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
-        }
-
-        async fn delete_queue(&self, name: &QueueName) -> Result<()> {
-            self.queues
-                .lock()
-                .expect("lock")
-                .remove(name)
-                .map(|_| ())
-                .ok_or_else(|| StoreError::QueueNotFound(name.clone()))
-        }
-
-        async fn list_queues(&self) -> Result<Vec<Queue>> {
-            Ok(self
-                .queues
-                .lock()
-                .expect("lock")
-                .values()
-                .cloned()
-                .collect())
-        }
-    }
+    use crate::test_support::FakeStore;
 
     fn queue(name: &str) -> Queue {
         Queue::new(QueueName::new(name).expect("valid name"))
