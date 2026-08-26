@@ -190,3 +190,26 @@ fn the_document_is_served_from_under_the_api_prefix() {
     );
     assert!(OPENAPI_PATH.ends_with(".json"));
 }
+
+/// The committed `openapi.json` beside this crate is what the code generates.
+///
+/// This is the check that makes the contract reviewable. A route or a type changing is
+/// visible in a Rust diff, but what it does to the *published API* is not — and every
+/// generated client changes with it. Committing the document turns that into a line in the
+/// pull request; this test is what stops the committed copy going stale.
+///
+/// `make pre-commit` also runs this as its own `openapi-check` step, over the same
+/// [`nexq_api_rest::check_openapi`], so the failure is named rather than being one test
+/// among hundreds. Kept here as well because `cargo test` is what most people run.
+///
+/// `include_str!` rather than reading at runtime so cargo treats the file as an input and
+/// rebuilds when it changes, and so a missing file is a build failure rather than a test
+/// that quietly compares against nothing.
+#[test]
+fn the_committed_document_is_the_generated_one() {
+    const COMMITTED: &str = include_str!("../openapi.json");
+
+    if let Err(report) = nexq_api_rest::check_openapi(COMMITTED) {
+        panic!("{report}");
+    }
+}

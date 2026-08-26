@@ -2,7 +2,9 @@
 //!
 //! - `acceptance-cli`  — drive a running NexQ server with the real `aws` CLI
 //! - `acceptance-node` — drive one with the AWS SDK for JavaScript, a different client
-//! - `openapi`         — dump the OpenAPI spec from `nexq-api-rest`'s router
+//! - `openapi`         — write `nexq-api-rest`'s OpenAPI spec to its committed
+//!   `openapi.json`, so a change to the published contract shows up in a diff
+//! - `openapi-check`   — verify that file matches the code without writing it
 //! - `codegen`         — generate the Rust client and the web UI client from that spec
 //! - `ui`              — build the embedded SPA
 //!
@@ -13,6 +15,7 @@
 mod acceptance_cli;
 mod acceptance_node;
 mod harness;
+mod openapi;
 
 use std::process::ExitCode;
 
@@ -22,6 +25,8 @@ fn main() -> ExitCode {
     let result = match task.as_deref() {
         Some("acceptance-cli") => acceptance_cli::run(),
         Some("acceptance-node") => acceptance_node::run(),
+        Some("openapi") => openapi::run(false),
+        Some("openapi-check") => openapi::run(true),
         Some(unknown) => Err(format!("unknown task {unknown:?}\n\n{USAGE}")),
         None => Err(format!("no task given\n\n{USAGE}")),
     };
@@ -41,8 +46,9 @@ usage: cargo xtask <task>
 tasks:
   acceptance-cli    start a NexQ server and drive it with the real aws CLI
   acceptance-node   the same, with the AWS SDK for JavaScript
+  openapi           write nexq-api-rest's OpenAPI document to openapi.json
+  openapi-check     verify that committed document matches the code, changing nothing
 
 not built yet:
-  openapi           dump the OpenAPI spec from nexq-api-rest's router
   codegen           generate the Rust and web UI clients from that spec
   ui                build the embedded SPA";

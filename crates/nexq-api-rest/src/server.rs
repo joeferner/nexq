@@ -229,16 +229,76 @@ fn api_metadata(api: TransformOpenApi) -> TransformOpenApi {
         .security_requirement(SECURITY_SCHEME)
 }
 
-/// The OpenAPI document as JSON — what is served, and what a committed copy would hold.
+/// The OpenAPI document as JSON — what is served, and what `openapi.json` holds.
 ///
-/// Pretty-printed so that a diff against the committed copy is readable line by line
-/// rather than being one very long line that changed somewhere.
+/// Pretty-printed so a diff against the committed copy is readable line by line rather
+/// than one very long line that changed somewhere, and **newline-terminated** so the two
+/// are byte-identical: the file is a text file and wants the newline, and matching it here
+/// means `curl <server>/api/v1/openapi.json | diff - openapi.json` is a valid check rather
+/// than one that always reports a difference at the end.
 pub fn openapi_json() -> String {
-    serde_json::to_string_pretty(&openapi())
+    to_json(&openapi())
+}
+
+/// Render a document the one way this facade renders documents.
+///
+/// Shared by [`openapi_json`] and [`router`] so the bytes served and the bytes compared
+/// against the committed file come from the same code. Two call sites serializing
+/// independently could differ in a setting and produce a mismatch with no cause to find.
+fn to_json(api: &OpenApi) -> String {
+    let mut json = serde_json::to_string_pretty(api)
         // An OpenAPI document is plain data with string keys throughout, so this can only
         // fail if `aide` produced something that is not representable as JSON — a bug
         // there, not a condition an operator can be in.
-        .expect("an OpenAPI document always serializes")
+        .expect("an OpenAPI document always serializes");
+    json.push('\n');
+
+    json
+}
+
+/// Compare a committed copy of the document against what the code generates.
+///
+/// `Err` carries a report meant for a human: where the two first differ, and what to run.
+/// Shared so the `openapi-check` task and
+/// `the_committed_document_is_the_generated_one` report the same thing — two
+/// implementations of "how do these differ" would drift, and a check that explains itself
+/// differently depending on how you ran it is a check people learn to distrust.
+pub fn check_openapi(committed: &str) -> Result<(), String> {
+    let generated = openapi_json();
+    if committed == generated {
+        return Ok(());
+    }
+
+    let mut report = String::from(
+        "the committed openapi.json is out of date — run `make openapi` (or \
+         `cargo xtask openapi`) and review the diff, since it is a change to the published \
+         contract.\n\n",
+    );
+
+    // The first differing line, rather than both documents in full: printing ten kilobytes
+    // of JSON twice and leaving the reader to spot the change is the moment a useful
+    // failure becomes a wall of text.
+    for (number, (left, right)) in committed.lines().zip(generated.lines()).enumerate() {
+        if left != right {
+            report.push_str(&format!(
+                "first difference at line {}:\n  committed: {left}\n  generated: {right}\n",
+                number + 1
+            ));
+            break;
+        }
+    }
+
+    let (committed_lines, generated_lines) = (committed.lines().count(), generated.lines().count());
+    if committed_lines != generated_lines {
+        report.push_str(&format!(
+            "committed is {committed_lines} lines, generated is {generated_lines}\n"
+        ));
+    } else if report.ends_with("\n\n") {
+        // Same length, same lines, still not equal: the difference is trailing bytes.
+        report.push_str("the lines all agree; the documents differ in trailing whitespace\n");
+    }
+
+    Err(report)
 }
 
 /// The OpenAPI document describing this facade.
@@ -269,9 +329,11 @@ pub fn router(facade: FacadeState) -> Router {
 
     let mut api = OpenApi::default();
     let routes = api_routes().finish_api_with(&mut api, api_metadata);
-    let spec = Bytes::from(
-        serde_json::to_vec_pretty(&api).expect("an OpenAPI document always serializes"),
-    );
+
+    // The document this router just built, rendered by the same function `openapi_json`
+    // uses — not a second generation of it, which would do the work twice for a result
+    // that has to be identical anyway.
+    let spec = Bytes::from(to_json(&api));
 
     routes
         // Applied to the API routes only, so it runs *after* routing: a request to a

@@ -46,16 +46,29 @@ clippy: ## Lint every crate and target
 doc: ## Build the API docs
 	$(CARGO) doc --workspace --no-deps --all-features --locked
 
+openapi: ## Regenerate crates/nexq-api-rest/openapi.json from the REST router
+	$(CARGO) xtask openapi
+
+openapi-check: ## Fail if the committed openapi.json no longer matches the code
+	$(CARGO) xtask openapi-check
+
 acceptance-cli: ## Drive a real server with the real aws CLI (needs the aws CLI installed)
 	$(CARGO) xtask acceptance-cli
 
 acceptance-node: ## Same, with the AWS SDK for JavaScript (needs Node.js installed)
 	$(CARGO) xtask acceptance-node
 
-# Deliberately not depended on by pre-commit: it starts a server and waits out real
-# long-poll timeouts, so it takes about a minute of wall clock. CI runs it as its own
-# job, and `make acceptance-cli` runs it here.
-pre-commit: fmt-check clippy build test doc ## Run every check CI runs
+# What is in here, and what is deliberately not:
+#
+# `openapi-check` is in, before `test`, so a change to the published contract arrives as
+# its own named failure rather than as one test among hundreds. The same comparison also
+# runs inside `cargo test`; that duplication is on purpose, since `cargo test` is what
+# most people run and the check should not depend on remembering this target.
+#
+# The acceptance suites are out. Each starts a server and waits out real long-poll
+# timeouts, so they take about a minute of wall clock apiece. CI runs them as their own
+# jobs, and `make acceptance-cli` / `make acceptance-node` run them here.
+pre-commit: fmt-check clippy build openapi-check test doc ## Run every check CI runs
 	@echo "pre-commit: all checks passed"
 
 clean: ## Remove build artifacts

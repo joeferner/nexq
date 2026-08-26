@@ -47,6 +47,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-targets --locked
+      # Before the suite, so a stale openapi.json is reported as itself rather than as one
+      # failing test. `cargo test` checks it too — see the Makefile on why both.
+      - run: cargo xtask openapi-check
       - run: cargo test --workspace --all-features --locked
 
   docs:

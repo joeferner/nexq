@@ -1,0 +1,252 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NexQ",
+    "description": "NexQ's native API: the complete operation set, including the extensions the SQS-compatible facade cannot express. This document is generated from the server's own routing table and is the source every client is generated from.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/queues/{queue}/messages/receive": {
+      "post": {
+        "summary": "Receive messages from a queue",
+        "description": "Claims up to `max_messages` messages, making them invisible to other consumers until the claim lapses or they are deleted. Waits for the first message when `wait_time_seconds` is set — long polling — and returns an empty list rather than an error when there is nothing to hand out.",
+        "operationId": "receiveMessages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "What a consumer may ask for. Every field is optional; an empty body is a plain poll of\n one message under the queue's own defaults.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiveBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Zero or more claimed messages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The queue name or one of the parameters is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The token is `<key_id>.<secret>` for a credential in the server's registry. Presented in full on every request, so it should travel over TLS."
+      }
+    },
+    "schemas": {
+      "ErrorBody": {
+        "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "What went wrong.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              }
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "ErrorDetail": {
+        "description": "The failure itself.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "description": "A stable, machine-readable identifier for this kind of failure. Safe to branch on.",
+            "type": "string"
+          },
+          "message": {
+            "description": "A human-readable explanation. May change between releases; do not parse it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "QueuePath": {
+        "description": "The queue a request is about.\n\n A struct rather than `Path<String>` because that is what lets the parameter be\n *documented*: from a bare `String` aide learns a path parameter exists but not what it\n is called, and generates an operation with no parameters at all. The field name is the\n parameter name.",
+        "type": "object",
+        "properties": {
+          "queue": {
+            "description": "Name of the queue.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue"
+        ]
+      },
+      "ReceiveBody": {
+        "description": "What a consumer may ask for. Every field is optional; an empty body is a plain poll of\n one message under the queue's own defaults.",
+        "type": "object",
+        "properties": {
+          "max_messages": {
+            "description": "How many messages to return at most. Fewer may come back, including none.\n\n Defaults to one when omitted. A value outside the range is refused rather than\n clamped, so asking for more than the maximum is an error and not a short answer.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "default": null,
+            "maximum": 10,
+            "minimum": 1
+          },
+          "visibility_timeout_seconds": {
+            "description": "How long the returned messages stay invisible to other consumers.\n\n Omitted means the queue's own configured timeout.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "minimum": 0
+          },
+          "wait_time_seconds": {
+            "description": "How long to wait for a message when the queue has none — long polling.\n\n Omitted means the queue's own configured wait, which is a different thing from\n `0`: zero asks for a plain poll that returns immediately.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "maximum": 20,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReceiveResponse": {
+        "description": "The answer to a receive.",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "Claimed messages, **empty rather than absent** when there are none.\n\n SQS omits the field entirely in that case, which is a quirk clients have to be\n written around; a native API has no reason to repeat it. An empty list is a normal\n answer, not an error, including when a long poll times out.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivedMessage"
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      },
+      "ReceivedMessage": {
+        "description": "One message, and the claim it came with.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "claim_expires_in_seconds": {
+            "description": "How long this claim has left.\n\n A duration rather than an absolute expiry time on purpose: a consumer needs to\n know how long it has, and answering that with a timestamp makes the answer depend\n on the client's clock agreeing with the server's. Saturates at zero rather than\n going negative if the claim lapsed while the response was being written.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "priority": {
+            "description": "Higher is served first. Messages sent through the SQS facade all carry the\n default, since that protocol cannot express a priority.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "receipt_handle": {
+            "description": "The token to present to delete this message or change its visibility. Refers to\n *this claim*, not to the message: a redelivery comes with a new one.",
+            "type": "string"
+          },
+          "receive_count": {
+            "description": "How many times this message has been delivered, counting this delivery.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "receipt_handle",
+          "body",
+          "priority",
+          "receive_count",
+          "claim_expires_in_seconds"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

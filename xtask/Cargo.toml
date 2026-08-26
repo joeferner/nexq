@@ -9,8 +9,11 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+# Linked in so `xtask openapi` can ask the facade for its document rather than
+# reimplementing the generation, which would be a second thing able to be wrong.
+nexq-api-rest = { workspace = true }
 # Reading `cargo build`'s JSON output to find the server binary, and parsing what the
-# `aws` CLI prints. Will also depend on nexq-api-rest to dump the OpenAPI spec.
+# `aws` CLI prints.
 serde_json = { workspace = true }
 
 [lints]

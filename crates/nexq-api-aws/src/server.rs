@@ -270,6 +270,20 @@ mod tests {
     use super::*;
     use crate::sigv4::{ALGORITHM, Authorization, CredentialScope};
 
+    /// How long a test waits on the server before calling it hung.
+    ///
+    /// Generous on purpose. Nothing here measures how *fast* anything is — these deadlines
+    /// exist to turn a hang into a failure, which a hang reaches whatever the bound. A tight
+    /// one instead fails when the machine is busy running the rest of the suite in parallel,
+    /// which is a failure about the machine rather than about the code.
+    ///
+    /// Raised from five seconds after two of these tests failed together in a full
+    /// `make pre-commit` and then passed in twelve consecutive runs. That was not proven to
+    /// be the cause — the failure's own message was lost — but a five-second wall-clock
+    /// assertion nothing needs is the plausible candidate, and widening it costs no
+    /// assertion strength.
+    const HUNG: Duration = Duration::from_secs(30);
+
     const KEY_ID: &str = "AKIATESTKEY";
     const SECRET: &str = "test-secret";
     const AMZ_DATE: &str = "20260826T005924Z";
@@ -916,7 +930,7 @@ mod tests {
         );
 
         shutdown_tx.send(()).expect("signal shutdown");
-        tokio::time::timeout(Duration::from_secs(5), serving)
+        tokio::time::timeout(HUNG, serving)
             .await
             .expect("serve should stop")
             .expect("serve task")
@@ -990,7 +1004,7 @@ mod tests {
                     Some(response)
                 };
 
-                tokio::time::timeout(Duration::from_secs(5), exchange)
+                tokio::time::timeout(HUNG, exchange)
                     .await
                     .ok()
                     .flatten()
@@ -1042,7 +1056,7 @@ mod tests {
         );
 
         shutdown_tx.send(()).expect("signal shutdown");
-        tokio::time::timeout(Duration::from_secs(5), serving)
+        tokio::time::timeout(HUNG, serving)
             .await
             .expect("serve should stop")
             .expect("serve task")
@@ -1088,7 +1102,7 @@ mod tests {
         );
 
         shutdown_tx.send(()).expect("signal shutdown");
-        tokio::time::timeout(Duration::from_secs(5), serving)
+        tokio::time::timeout(HUNG, serving)
             .await
             .expect("serve should stop")
             .expect("serve task")
@@ -1112,7 +1126,7 @@ mod tests {
         assert!(!engine.is_draining(), "not while it is serving");
 
         shutdown_tx.send(()).expect("signal shutdown");
-        tokio::time::timeout(Duration::from_secs(5), serving)
+        tokio::time::timeout(HUNG, serving)
             .await
             .expect("serve should stop promptly")
             .expect("serve task")
@@ -1157,7 +1171,7 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 403"), "{response}");
 
         shutdown_tx.send(()).expect("signal shutdown");
-        tokio::time::timeout(Duration::from_secs(5), serving)
+        tokio::time::timeout(HUNG, serving)
             .await
             .expect("serve should stop once shutdown is signalled")
             .expect("serve task")

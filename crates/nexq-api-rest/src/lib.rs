@@ -17,4 +17,6 @@ pub mod messages;
 pub mod server;
 
 pub use error::{ApiError, ErrorBody};
-pub use server::{API_PREFIX, DOCS_PATH, OPENAPI_PATH, Server, openapi, openapi_json};
+pub use server::{
+    API_PREFIX, DOCS_PATH, OPENAPI_PATH, Server, check_openapi, openapi, openapi_json,
+};

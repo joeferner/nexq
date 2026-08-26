@@ -226,9 +226,50 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       context, and removing that reset leaves every test green, because one route means one
       set of types and re-extracting them yields identical components. Kept as insurance
       with the comment saying so, rather than claimed as covered.
-- [ ] The generated spec is **committed**, and a test fails when the committed copy and
-      the generated one differ. Without that, the contract can change in a way no diff
-      shows, and every generated client changes with it silently
+- [x] The generated spec is **committed** at `crates/nexq-api-rest/openapi.json`, and
+      `the_committed_document_is_the_generated_one` fails when it and the code disagree.
+      Without it the contract can change in a way no diff shows, and every generated client
+      changes with it silently — the Rust change is visible in review, what it does to the
+      published API is not.
+
+      Beside the crate that generates it rather than at the workspace root: it belongs to
+      the REST facade, and a generated artifact at the top of the tree reads like something
+      you are meant to edit.
+
+      Regenerated with `make openapi` / `cargo xtask openapi`, which the failure message
+      names. The task links the facade in and asks it for the document rather than
+      reimplementing generation, so there is no second thing able to be wrong; it reports
+      when the file was already current, and says to review the diff when it was not.
+
+      `include_str!` rather than a runtime read, so cargo treats the file as a build input
+      and a missing one is a build failure instead of a test comparing against nothing. The
+      failure locates the change rather than printing ten kilobytes of JSON twice:
+
+      ```
+      openapi.json is out of date — run `make openapi` … since it is a change to the
+      published contract.
+
+      first difference at line 18:
+        committed:             "description": "Name of the qeueu.",
+        generated:             "description": "Name of the queue.",
+      ```
+
+      The served bytes and the file are **byte-identical**, which took two small decisions:
+      `openapi_json` is newline-terminated, and `router` renders the document it just built
+      through the same function rather than serializing separately. So
+      `curl <server>/api/v1/openapi.json | diff - crates/nexq-api-rest/openapi.json` is a
+      real check — verified against a running server — instead of one that always reports a
+      difference at the end.
+
+      Both directions verified against mutations: a hand edit to the committed file, and a
+      code change nobody regenerated after.
+
+      In `make pre-commit` as its own `openapi-check` step, before `test`, so a contract
+      change arrives as a named failure rather than as one test among hundreds — and in CI
+      the same way. The comparison therefore runs twice, which is deliberate: `cargo test`
+      is what most people run, and the check should not depend on remembering a target.
+      Both callers share one `check_openapi`, so they cannot explain a difference
+      differently.
 - [ ] Resource-shaped routes, not a transliteration of SQS. Queue *name* in the path
       rather than a queue URL in a parameter — the URL-as-identifier is an AWS artifact
       that exists because SQS has accounts and regions to encode. Paging keeps the M2
