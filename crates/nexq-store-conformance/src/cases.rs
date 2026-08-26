@@ -222,6 +222,17 @@ pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
                 .await
                 .err(),
         ),
+        (
+            "change_visibility",
+            store
+                .change_visibility(
+                    &missing,
+                    &nexq_core::model::ReceiptHandle::new(),
+                    Duration::from_secs(30),
+                )
+                .await
+                .err(),
+        ),
     ];
 
     for (operation, error) in errors {
@@ -581,6 +592,198 @@ pub async fn an_expired_claim_is_redelivered_under_a_new_handle(store: Arc<dyn S
         second.message.first_received_at, first.message.first_received_at,
         "the first delivery time must not be overwritten"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Changing a claim's visibility
+// ---------------------------------------------------------------------------
+
+/// Extending a claim keeps the message out of other consumers' hands.
+///
+/// The reason the operation exists: a consumer whose work outlasts its claim would
+/// otherwise have the message handed to someone else while it is still working on it.
+pub async fn extending_a_claim_holds_off_redelivery(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, Some(SHORT_CLAIM))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    // Extended well past the point the original claim would have lapsed.
+    store
+        .change_visibility(&queue_name, &claimed.receipt, Duration::from_secs(60))
+        .await
+        .expect("extend");
+
+    tokio::time::sleep(AFTER_SHORT_CLAIM).await;
+
+    assert!(
+        store
+            .claim_next(&queue_name, None)
+            .await
+            .expect("claim")
+            .is_none(),
+        "the original claim would have lapsed by now, but it was extended"
+    );
+
+    // And the handle still works, since extending changes when the claim ends rather
+    // than whose it is.
+    store
+        .ack(&queue_name, &claimed.receipt)
+        .await
+        .expect("the handle should still be the current one");
+}
+
+/// A zero timeout hands the message straight back.
+///
+/// How a consumer that cannot do the work returns it, instead of holding it until the
+/// claim lapses while the queue waits on work nobody is doing.
+pub async fn a_zero_visibility_returns_the_message_at_once(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, Some(Duration::from_secs(60)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    store
+        .change_visibility(&queue_name, &claimed.receipt, Duration::ZERO)
+        .await
+        .expect("hand it back");
+
+    // No sleep: it must be claimable now, not after the original minute.
+    let again = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("handed back, so claimable at once");
+
+    assert_eq!(again.message.body, "hello");
+    assert_eq!(
+        again.message.id, claimed.message.id,
+        "the same message, not a copy"
+    );
+    assert_ne!(
+        again.receipt, claimed.receipt,
+        "a redelivery comes with a new handle, as any other does"
+    );
+}
+
+/// Shortening a claim brings redelivery forward.
+///
+/// The mirror of extending, and the same call: the timeout is counted from now, so a
+/// smaller value than what is left means the claim ends sooner.
+pub async fn shortening_a_claim_brings_redelivery_forward(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, Some(Duration::from_secs(60)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    store
+        .change_visibility(&queue_name, &claimed.receipt, SHORT_CLAIM)
+        .await
+        .expect("shorten");
+    tokio::time::sleep(AFTER_SHORT_CLAIM).await;
+
+    assert!(
+        store
+            .claim_next(&queue_name, None)
+            .await
+            .expect("claim")
+            .is_some(),
+        "the shortened claim should have lapsed, despite the original minute"
+    );
+}
+
+/// A handle whose claim has ended names nothing to change.
+pub async fn changing_visibility_with_a_spent_handle_is_refused(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let claimed = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("a message");
+    store.ack(&queue_name, &claimed.receipt).await.expect("ack");
+
+    let error = store
+        .change_visibility(&queue_name, &claimed.receipt, Duration::from_secs(30))
+        .await
+        .expect_err("the message is gone");
+    assert!(
+        matches!(error, StoreError::InvalidReceipt),
+        "expected InvalidReceipt, got {error:?}"
+    );
+
+    let error = store
+        .change_visibility(
+            &queue_name,
+            &nexq_core::model::ReceiptHandle::new(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect_err("that handle was never issued");
+    assert!(
+        matches!(error, StoreError::InvalidReceipt),
+        "expected InvalidReceipt, got {error:?}"
+    );
+}
+
+/// A handle from a lapsed claim cannot change visibility either.
+///
+/// Otherwise a consumer whose claim expired could reach in and hide a message another
+/// consumer is now working on.
+pub async fn a_handle_from_a_lapsed_claim_cannot_change_visibility(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+    let lapsed = store
+        .claim_next(&queue_name, Some(SHORT_CLAIM))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    tokio::time::sleep(AFTER_SHORT_CLAIM).await;
+    let current = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("redelivered");
+
+    let error = store
+        .change_visibility(&queue_name, &lapsed.receipt, Duration::ZERO)
+        .await
+        .expect_err("the lapsed handle is spent");
+    assert!(
+        matches!(error, StoreError::InvalidReceipt),
+        "expected InvalidReceipt, got {error:?}"
+    );
+
+    // The current holder is unaffected, which is what was being protected.
+    store
+        .ack(&queue_name, &current.receipt)
+        .await
+        .expect("the current claim should be untouched");
 }
 
 /// A handle from a claim that lapsed must not delete the message someone else now

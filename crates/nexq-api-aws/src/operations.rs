@@ -45,6 +45,7 @@ impl Operations {
             Operation::SendMessage => self.send_message(&input).await,
             Operation::ReceiveMessage => self.receive_message(&input).await,
             Operation::DeleteMessage => self.delete_message(&input).await,
+            Operation::ChangeMessageVisibility => self.change_message_visibility(&input).await,
             not_built_yet => Err(ApiError::not_implemented(not_built_yet)),
         }
     }
@@ -255,6 +256,31 @@ impl Operations {
         Ok(json!({}))
     }
 
+    /// `ChangeMessageVisibility` — how long a consumer's claim has left, reset.
+    ///
+    /// Counted from now rather than from the receive, so it extends a claim that needs
+    /// longer and shortens one that does not. `VisibilityTimeout: 0` is the useful edge:
+    /// it puts the message back at once, which is how a consumer that cannot do the work
+    /// hands it back instead of holding it until the claim lapses.
+    async fn change_message_visibility(
+        &self,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
+        let queue = self.queue_from_url(input)?;
+        let receipt = ReceiptHandle::from_backend(required_string(input, "ReceiptHandle")?);
+        let visibility_timeout = required_duration(
+            input,
+            "VisibilityTimeout",
+            attributes::VISIBILITY_TIMEOUT_MAX,
+        )?;
+
+        self.engine
+            .change_visibility(&queue, &receipt, visibility_timeout)
+            .await?;
+
+        Ok(json!({}))
+    }
+
     /// The queue a request is about, from the `QueueUrl` it carries.
     fn queue_from_url(&self, input: &Map<String, Value>) -> Result<QueueName, ApiError> {
         let url = required_string(input, "QueueUrl")?;
@@ -323,6 +349,19 @@ fn optional_duration(
     }
 
     Ok(Some(Duration::from_secs(seconds)))
+}
+
+/// A required whole number of seconds, bounded as SQS bounds it.
+///
+/// Distinct from [`optional_duration`] because absent is a client error here rather than
+/// a default: an operation whose whole purpose is to set a timeout has nothing to do
+/// without one, and silently picking a value would be worse than saying so.
+fn required_duration(
+    input: &Map<String, Value>,
+    field: &str,
+    max_seconds: u64,
+) -> Result<Duration, ApiError> {
+    optional_duration(input, field, max_seconds)?.ok_or_else(|| ApiError::missing_parameter(field))
 }
 
 /// An optional count, between 1 and `max`.
@@ -1478,6 +1517,156 @@ mod tests {
             received["Messages"][0]["Body"], "hello",
             "still there, still visible"
         );
+    }
+
+    /// Send one message and receive it, returning its receipt handle.
+    async fn claimed_handle(operations: &Operations, url: &Value) -> Value {
+        call(
+            operations,
+            Operation::SendMessage,
+            json!({ "QueueUrl": url, "MessageBody": "hello" }),
+        )
+        .await
+        .expect("send");
+
+        call(
+            operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("receive")["Messages"][0]["ReceiptHandle"]
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn changing_visibility_to_zero_hands_a_message_straight_back() {
+        // The message was claimed for twelve hours, so getting it again at once is only
+        // possible because the hand-back worked.
+        let operations = operations();
+        let url = queue(&operations).await;
+        let handle = claimed_handle(&operations, &url).await;
+
+        let output = call(
+            &operations,
+            Operation::ChangeMessageVisibility,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle, "VisibilityTimeout": 0 }),
+        )
+        .await
+        .expect("change visibility");
+        assert_eq!(output, json!({}), "SQS answers with an empty body");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+
+        assert_eq!(received["Messages"][0]["Body"], "hello");
+        assert_ne!(
+            received["Messages"][0]["ReceiptHandle"], handle,
+            "a redelivery comes with a new handle"
+        );
+    }
+
+    #[tokio::test]
+    async fn extending_a_claim_keeps_the_message_held() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        let handle = claimed_handle(&operations, &url).await;
+
+        call(
+            &operations,
+            Operation::ChangeMessageVisibility,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle, "VisibilityTimeout": 43_200 }),
+        )
+        .await
+        .expect("extend");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert_eq!(received, json!({}), "still held by the first consumer");
+
+        // And the handle still works, since extending changes when the claim ends
+        // rather than whose it is.
+        call(
+            &operations,
+            Operation::DeleteMessage,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle }),
+        )
+        .await
+        .expect("the extended claim's handle should still delete");
+    }
+
+    #[tokio::test]
+    async fn changing_visibility_with_a_spent_handle_is_refused() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        let handle = claimed_handle(&operations, &url).await;
+        call(
+            &operations,
+            Operation::DeleteMessage,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle.clone() }),
+        )
+        .await
+        .expect("delete");
+
+        let error = call(
+            &operations,
+            Operation::ChangeMessageVisibility,
+            json!({ "QueueUrl": url, "ReceiptHandle": handle, "VisibilityTimeout": 0 }),
+        )
+        .await
+        .expect_err("the message is gone");
+
+        assert_eq!(error.code(), "ReceiptHandleIsInvalid");
+    }
+
+    #[tokio::test]
+    async fn changing_visibility_needs_a_timeout_to_change_it_to() {
+        // Absent is a client error rather than a default: an operation whose only job is
+        // to set a timeout has nothing to do without one.
+        let operations = operations();
+        let url = queue(&operations).await;
+        let handle = claimed_handle(&operations, &url).await;
+
+        for (input, expected) in [
+            (
+                json!({ "QueueUrl": url, "ReceiptHandle": handle }),
+                "MissingParameter",
+            ),
+            (
+                json!({ "QueueUrl": url, "ReceiptHandle": handle,
+                        "VisibilityTimeout": 43_201 }),
+                "InvalidParameterValue",
+            ),
+            (
+                json!({ "QueueUrl": url, "ReceiptHandle": handle,
+                        "VisibilityTimeout": "soon" }),
+                "InvalidParameterValue",
+            ),
+            (
+                json!({ "QueueUrl": url, "VisibilityTimeout": 30 }),
+                "MissingParameter",
+            ),
+        ] {
+            let error = call(
+                &operations,
+                Operation::ChangeMessageVisibility,
+                input.clone(),
+            )
+            .await
+            .expect_err(&input.to_string());
+
+            assert_eq!(error.code(), expected, "{input}");
+        }
     }
 
     #[tokio::test]

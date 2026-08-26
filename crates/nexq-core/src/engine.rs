@@ -475,6 +475,37 @@ impl Engine {
     pub async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()> {
         Ok(self.store.ack(queue, receipt).await?)
     }
+
+    /// Reset how long a claim has left, counted from now.
+    ///
+    /// Two jobs in one operation, which is SQS's shape rather than a choice made here.
+    /// A consumer that needs longer than it asked for extends its claim instead of
+    /// letting the message be handed to someone else mid-work. A consumer that cannot
+    /// do the work sets zero, which puts the message back immediately rather than
+    /// leaving the queue to wait out a timeout for work nobody is doing.
+    ///
+    /// That second case is a client action making a message claimable, so it wakes a
+    /// waiting consumer exactly as an enqueue does — a message handed back is available
+    /// now, and nobody should sit through a long poll next to it.
+    pub async fn change_visibility(
+        &self,
+        queue: &QueueName,
+        receipt: &ReceiptHandle,
+        visibility_timeout: Duration,
+    ) -> Result<()> {
+        self.store
+            .change_visibility(queue, receipt, visibility_timeout)
+            .await?;
+
+        // Only when the message is claimable *now*. A non-zero timeout leaves it
+        // invisible, and waking a consumer to find that out would be a wasted trip to
+        // the store — unlike an enqueue, where the effective delay is not known here.
+        if visibility_timeout.is_zero() {
+            self.waiters.notify_one(queue);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1559,6 +1590,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handing_a_message_back_wakes_a_waiting_consumer() {
+        // A consumer that cannot do the work sets its visibility to zero. That makes a
+        // message claimable by a client action, exactly as an enqueue does, so a
+        // consumer waiting next to it should not sit through a long poll.
+        let (engine, queue) = engine_with_queue().await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+        let holder = engine
+            .claim_next(&queue, Some(Duration::from_secs(3600)))
+            .await
+            .expect("claim")
+            .expect("a message");
+
+        let consumer = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let queue = queue.clone();
+            async move { engine.receive(&queue, &waiting(LONGER_THAN_NEEDED)).await }
+        });
+
+        tokio::time::sleep(A_SHORT_WAIT).await;
+        let started = Instant::now();
+        engine
+            .change_visibility(&queue, &holder.receipt, Duration::ZERO)
+            .await
+            .expect("hand it back");
+
+        let claimed = consumer.await.expect("consumer task").expect("receive");
+
+        assert_eq!(claimed.len(), 1, "the hand-back should have woken it");
+        assert_eq!(claimed[0].message.body, "hello");
+        assert!(
+            started.elapsed() < A_SHORT_WAIT,
+            "and promptly, not after the hour the holder had asked for: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn extending_a_claim_does_not_wake_anyone() {
+        // The counterpart: a non-zero timeout leaves the message invisible, so waking a
+        // consumer would only send it to the store to find nothing.
+        let (engine, queue) = engine_with_queue().await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+        let holder = engine
+            .claim_next(&queue, Some(Duration::from_secs(3600)))
+            .await
+            .expect("claim")
+            .expect("a message");
+
+        let consumer = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let queue = queue.clone();
+            async move { engine.receive(&queue, &waiting(A_SHORT_WAIT)).await }
+        });
+
+        engine
+            .change_visibility(&queue, &holder.receipt, Duration::from_secs(7200))
+            .await
+            .expect("extend");
+
+        let claimed = consumer.await.expect("consumer task").expect("receive");
+
+        assert!(
+            claimed.is_empty(),
+            "the message is still held, so there was nothing to wake up for"
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_visibility_needs_a_live_claim() {
+        let (engine, queue) = engine_with_queue().await;
+        engine
+            .enqueue(
+                &queue,
+                "hello".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+        let claimed = engine
+            .claim_next(&queue, None)
+            .await
+            .expect("claim")
+            .expect("a message");
+        engine.ack(&queue, &claimed.receipt).await.expect("ack");
+
+        let error = engine
+            .change_visibility(&queue, &claimed.receipt, Duration::ZERO)
+            .await
+            .expect_err("the claim is over");
+
+        assert!(matches!(error, EngineError::InvalidReceipt), "{error:?}");
+    }
+
+    #[tokio::test]
     async fn draining_releases_the_consumers_that_are_waiting() {
         // What makes shutdown prompt: a consumer parked for a long wait is an in-flight
         // request, so without this every shutdown would take as long as the longest one.
@@ -1758,6 +1903,17 @@ mod tests {
 
         async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> StoreResult<()> {
             self.inner.ack(queue, receipt).await
+        }
+
+        async fn change_visibility(
+            &self,
+            queue: &QueueName,
+            receipt: &ReceiptHandle,
+            visibility_timeout: Duration,
+        ) -> StoreResult<()> {
+            self.inner
+                .change_visibility(queue, receipt, visibility_timeout)
+                .await
         }
     }
 

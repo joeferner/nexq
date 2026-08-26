@@ -196,23 +196,34 @@ What does _not_ wake a waiter yet, and is M5's timer rather than an event: a del
 elapsing, and a visibility timeout lapsing. Both make a message claimable without an
 enqueue, so a consumer only learns about them on its next receive.
 
-## M5 — Visibility timeout and redelivery
+## ✅ M5 — Visibility timeout and redelivery
 
 Mostly landed early, since a claim that cannot expire would hand the same message to
-two consumers — the part still missing is the timer, not the expiry.
+two consumers. Expiry is noticed when someone next tries to claim, which is where it
+belongs — see Future for why that is not a timer.
 
 - [x] Visibility timeout on claim, honoured on the next claim attempt
 - [x] Redelivery on expiry, under a new receipt handle that invalidates the old one
 - [x] `VisibilityTimeout` as a queue attribute and a per-receive override
 - [x] **Gate: receive without deleting, wait out the timeout, receive it again** —
       verified against the real `aws-cli` with `--visibility-timeout 1`
-- [ ] An in-process expiry timer. Expiry is currently noticed only when someone next
-      tries to claim, which is enough for correctness but cannot wake a long-poller
-      waiting on a message whose claim just lapsed
 - [x] `ApproximateReceiveCount` surfaced to clients, counting the delivery in progress
       so a first receive reports `1`. `ApproximateFirstReceiveTimestamp` came with it,
       and stays pinned to the first delivery rather than the latest
-- [ ] `ChangeMessageVisibility`
+- [x] `ChangeMessageVisibility`, counted from now rather than from the receive, so the
+      one call both extends a claim that needs longer and shortens one that does not.
+      The handle stays valid, since this changes when a claim ends and not whose it is.
+
+      `VisibilityTimeout: 0` hands the message straight back, which is the useful edge —
+      a consumer that cannot do the work returns it instead of holding it until the claim
+      lapses. That is a client action making a message claimable, so it **wakes a waiting
+      consumer** exactly as an enqueue does; a non-zero timeout deliberately does not,
+      since the message stays invisible and waking anyone would just send them to the
+      store for nothing. Verified against the real `aws-cli`: a long poller got a
+      handed-back message in 3.8s rather than timing out at 20.
+
+      `MessageNotInflight` is not distinguished from `ReceiptHandleIsInvalid` — a receipt
+      handle only exists while a claim does, so the two are the same condition here.
 
 ## M6 — The rest of what the CLI commonly exercises
 
@@ -249,6 +260,35 @@ two consumers — the part still missing is the timer, not the expiry.
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason
   per-principal keys are the recommended default now rather than later.
+- Bound a long poll's sleep by the store's next visibility time. A message becoming
+  claimable _without_ an enqueue — a delay elapsing, or a claim lapsing — wakes nobody,
+  so a waiting consumer can find out up to one wait period late. Measured against the
+  real `aws-cli`: a 2-second delay took **9.8s** to reach a consumer polling for 8, and
+  a lapsed claim took 9.7s.
+
+  Deliberately not urgent, because the gap closes itself in the cases that matter. It
+  is tail latency and never starvation — the consumer's own poll loop is the retry, and
+  the second poll returned in under a second both times. It only bites on an _idle_
+  queue: with any other traffic the enqueues wake the consumer, it re-checks, and a
+  3-second delay was picked up at 3.7s. And half of it is the failure path, since a
+  lapsed claim means a consumer already crashed or hung, next to which 20 seconds is
+  noise.
+
+  Also deliberately **not a timer**, which is what this item used to say. A timer would
+  have to fire at every `claim_expires_at`, and in the happy path the consumer acks long
+  before that — so almost every one of those timers would wake a consumer that finds
+  nothing. Its cost would scale with _messages_ while its benefit scales with _waiting
+  consumers on idle queues_, which is backwards. The cheap version is one
+  `Store::next_visible_at` query per long poll that finds the queue empty, sleeping
+  `min(deadline, next visible)`: nothing on the hot path, O(1) per waiting consumer
+  rather than per message, and it needs one new `Store` method — `MIN(visible_at)`,
+  indexable in SQL — plus a conformance case.
+
+- `DelaySeconds` precision on a low-volume queue. The feature works, but a delayed
+  message is picked up when a waiting consumer next looks rather than when its delay
+  elapses, per the item above. Worth watching rather than ignoring: delayed retry with
+  backoff is a common pattern, and it is the one case where somebody would actually
+  notice work landing seconds late. Fixed by the same change; needs nothing of its own.
 
 ---
 

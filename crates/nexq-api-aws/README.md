@@ -84,8 +84,11 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   the wait runs out, woken by the enqueue rather than by a poll. A delay elapsing or a
   visibility timeout lapsing does not wake a waiter yet, since those need a timer rather
   than an event; a consumer sees them on its next receive
+- :white_check_mark: `ChangeMessageVisibility` — counted from now, so it extends a claim
+  that needs longer and shortens one that does not. A timeout of `0` hands the message
+  back at once, and wakes a consumer that is long-polling for it
 - :scroll: `SendMessageBatch` / `DeleteMessageBatch`
-- :scroll: `ChangeMessageVisibility` / `ChangeMessageVisibilityBatch`
+- :scroll: `ChangeMessageVisibilityBatch`
 
 ## Not planned
 
@@ -197,6 +200,24 @@ aws sqs delete-message --queue-url "$QUEUE" --receipt-handle "<handle>"
 A received message is invisible to other consumers until its visibility timeout runs
 out — 30 seconds by default, or whatever `--visibility-timeout` says. Delete it to
 finish; leave it and it comes back, which is what makes delivery at-least-once.
+
+If the work turns out to take longer than the claim, or cannot be done at all, change
+the claim rather than waiting for it to lapse:
+
+```sh
+# Needs longer: extend the claim. The receipt handle stays valid.
+aws sqs change-message-visibility --queue-url "$QUEUE" \
+  --receipt-handle "<handle>" --visibility-timeout 300
+
+# Cannot do it: hand the message straight back for someone else.
+aws sqs change-message-visibility --queue-url "$QUEUE" \
+  --receipt-handle "<handle>" --visibility-timeout 0
+```
+
+The timeout is counted from now rather than from when the message was received, so the
+same call shortens a claim as well as extending one. Handing a message back with `0`
+makes it claimable immediately and wakes a consumer that is long-polling for it, so work
+returned by one consumer reaches the next without waiting.
 
 ## Waiting for work
 

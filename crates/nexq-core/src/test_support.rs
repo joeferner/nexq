@@ -19,10 +19,11 @@ use crate::store::{Result, Store, StoreError};
 /// Messages are handled first-in-first-out, with no attention to priority: ordering is a
 /// backend behavior, and `nexq-store-conformance` is what holds real backends to it.
 ///
-/// It *does* honour a delay, because whether a message is claimable at all is something
-/// the engine reasons about — the long-poll loop decides whether to keep waiting on the
-/// answer — so a double that handed out delayed messages would make those tests agree
-/// with a broken engine.
+/// It *does* track visibility properly — delays, claim expiry, and hand-backs — because
+/// whether a message is claimable is something the engine reasons about rather than just
+/// passes along: the long-poll loop decides whether to keep waiting based on the answer.
+/// A double that was loose about it would make those tests agree with a broken engine,
+/// which has already happened twice while building this.
 #[derive(Debug, Default)]
 pub struct FakeStore {
     queues: Mutex<HashMap<QueueName, Queue>>,
@@ -124,24 +125,41 @@ impl Store for FakeStore {
             return Err(StoreError::QueueNotFound(queue.clone()));
         }
 
+        let timeout = {
+            let queues = self.queues.lock().expect("lock");
+            let Some(held) = queues.get(queue) else {
+                return Err(StoreError::QueueNotFound(queue.clone()));
+            };
+
+            visibility_timeout.unwrap_or(held.attributes.visibility_timeout)
+        };
+
         let now = SystemTime::now();
         let mut messages = self.messages.lock().expect("lock");
+
+        // Visibility alone decides what is claimable — *not* whether a handle is
+        // recorded. A message whose claim has lapsed, or whose holder handed it back,
+        // still has its old handle on it and must be claimable all the same.
         let Some(claimable) = messages
             .iter_mut()
-            .find(|held| &held.queue == queue && held.claim.is_none() && held.visible_at <= now)
+            .find(|held| &held.queue == queue && held.visible_at <= now)
         else {
             return Ok(None);
         };
 
         let receipt = ReceiptHandle::new();
-        claimable.claim = Some(receipt.clone());
+        let claim_expires_at = now + timeout;
+
         claimable.message.receive_count += 1;
         claimable.message.first_received_at.get_or_insert(now);
+        // A new handle each delivery, which is what invalidates the previous holder's.
+        claimable.claim = Some(receipt.clone());
+        claimable.visible_at = claim_expires_at;
 
         Ok(Some(ClaimedMessage {
             message: claimable.message.clone(),
             receipt,
-            claim_expires_at: now + visibility_timeout.unwrap_or(Duration::from_secs(30)),
+            claim_expires_at,
         }))
     }
 
@@ -156,6 +174,25 @@ impl Store for FakeStore {
         };
 
         messages.remove(index);
+        Ok(())
+    }
+
+    async fn change_visibility(
+        &self,
+        queue: &QueueName,
+        receipt: &ReceiptHandle,
+        visibility_timeout: Duration,
+    ) -> Result<()> {
+        let mut messages = self.messages.lock().expect("lock");
+
+        let Some(held) = messages
+            .iter_mut()
+            .find(|held| &held.queue == queue && held.claim.as_ref() == Some(receipt))
+        else {
+            return Err(StoreError::InvalidReceipt);
+        };
+
+        held.visible_at = SystemTime::now() + visibility_timeout;
         Ok(())
     }
 }
@@ -213,6 +250,15 @@ impl Store for BrokenStore {
     }
 
     async fn ack(&self, _queue: &QueueName, _receipt: &ReceiptHandle) -> Result<()> {
+        Err(Self::failure())
+    }
+
+    async fn change_visibility(
+        &self,
+        _queue: &QueueName,
+        _receipt: &ReceiptHandle,
+        _visibility_timeout: Duration,
+    ) -> Result<()> {
         Err(Self::failure())
     }
 }

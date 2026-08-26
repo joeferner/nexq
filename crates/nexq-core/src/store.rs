@@ -134,6 +134,23 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     /// that is still current — so a consumer whose claim expired and was redelivered to
     /// someone else cannot delete the other consumer's message.
     async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()>;
+
+    /// Reset how long a claim has left to run.
+    ///
+    /// `visibility_timeout` is measured from *now*, not from when the message was
+    /// claimed, so this both extends a claim that needs longer and shortens one that
+    /// does not. Zero makes the message claimable immediately, which is how a consumer
+    /// hands work back instead of sitting on it until the claim lapses.
+    ///
+    /// The handle stays valid: this changes when the claim ends, not whose it is. Fails
+    /// with [`StoreError::InvalidReceipt`] on the same terms as
+    /// [`Store::ack`] — a handle whose claim has already ended names nothing to change.
+    async fn change_visibility(
+        &self,
+        queue: &QueueName,
+        receipt: &ReceiptHandle,
+        visibility_timeout: Duration,
+    ) -> Result<()>;
 }
 
 #[cfg(test)]

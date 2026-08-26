@@ -87,6 +87,17 @@ macro_rules! conformance_tests {
             $new_store,
             an_expired_claim_is_redelivered_under_a_new_handle
         );
+        $crate::conformance_case!($new_store, extending_a_claim_holds_off_redelivery);
+        $crate::conformance_case!($new_store, a_zero_visibility_returns_the_message_at_once);
+        $crate::conformance_case!($new_store, shortening_a_claim_brings_redelivery_forward);
+        $crate::conformance_case!(
+            $new_store,
+            changing_visibility_with_a_spent_handle_is_refused
+        );
+        $crate::conformance_case!(
+            $new_store,
+            a_handle_from_a_lapsed_claim_cannot_change_visibility
+        );
         $crate::conformance_case!($new_store, a_handle_from_a_lapsed_claim_cannot_ack);
         $crate::conformance_case!($new_store, acking_removes_the_message_for_good);
         $crate::conformance_case!($new_store, acking_the_same_claim_twice_is_refused);

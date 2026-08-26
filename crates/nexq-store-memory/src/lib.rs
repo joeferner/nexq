@@ -241,6 +241,34 @@ impl Store for MemoryStore {
         held.messages.remove(index);
         Ok(())
     }
+
+    async fn change_visibility(
+        &self,
+        queue: &QueueName,
+        receipt: &ReceiptHandle,
+        visibility_timeout: Duration,
+    ) -> Result<()> {
+        let now = SystemTime::now();
+        let mut queues = self.write()?;
+        let held = queues
+            .get_mut(queue)
+            .ok_or_else(|| StoreError::QueueNotFound(queue.clone()))?;
+
+        let Some(stored) = held
+            .messages
+            .iter_mut()
+            .find(|stored| stored.claim.as_ref() == Some(receipt))
+        else {
+            return Err(StoreError::InvalidReceipt);
+        };
+
+        // From now rather than from the original claim, so this shortens as well as
+        // extends. The handle is left in place: the claim's owner has not changed, only
+        // how long it lasts.
+        stored.visible_at = visible_after(now, visibility_timeout);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
