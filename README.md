@@ -15,5 +15,6 @@ NexQ is a queue server supporting multiple protocols and multiple storage engine
 
 ## Storage
 
+- :scroll: [Memory](crates/nexq-store-memory/README.md)
 - :scroll: [Search](crates/nexq-store-search/README.md)
 - :scroll: [SQL](crates/nexq-store-sql/README.md)

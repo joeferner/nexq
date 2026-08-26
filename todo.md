@@ -89,9 +89,10 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] Domain model: queue, message, receipt handle — `QueueName` validates on
       construction, `Message` and `ClaimedMessage` separate the durable item from a
       time-limited claim
-- [ ] `Store` trait — settle the `dyn`-dispatch approach now, since it shapes every
-      later backend, but keep the surface to what this milestone needs
-- [ ] Memory store in `nexq-core`
+- [x] `Store` trait, behind `dyn` via `async-trait`, covering queue lifecycle only —
+      create, get, delete, list — plus a `StoreError` that separates "no such queue"
+      from "the backend broke"
+- [ ] Memory store in `nexq-store-memory`, its own crate alongside the other backends
 - [ ] `nexq-store-conformance` suite covering the operations implemented so far,
       running green against the memory store
 - [ ] Core engine operations: create, delete, list
@@ -157,6 +158,15 @@ in-process waiters instead of polling a backend.
 - [ ] Add SSL support to servers
 - [ ] Add SSL to clients
 
+# Future
+
+- FIFO Queues
+- AWS Query/XML protocol
+- Per-principal authorization — the registry authenticates *who* a caller is, but
+  every authenticated principal can do everything. Rules like "this consumer may
+  receive from `jobs` but not purge it" need a permissions model, and are the reason
+  per-principal keys are the recommended default now rather than later.
+
 ---
 
 ## After this milestone
@@ -174,9 +184,26 @@ has been exercised for real:
 7. OpenSearch/Elasticsearch backends
 8. Web UI, then the KEDA external scaler
 
+## Decisions made
+
+- **`Store` trait dispatch: `dyn`.** Backends are behind `dyn Store` rather than a
+  generic parameter or an enum, so a queue can name its backend at runtime and the
+  server does not need one type per combination. Costs a vtable call and boxed futures
+  per operation, which is nothing next to the storage round trip it wraps.
+- **Credentials: the registry holds many, and the recommended posture is one per
+  principal.** `[[auth.credentials]]` is already a list, so this is a documentation
+  and defaults question, not an architecture one. Per-principal keys mean a single
+  consumer's key can be revoked without touching everyone else's, and the principal
+  name already logged on every request identifies who actually made it. NexQ does not
+  yet act on *who* a principal is — see the authorization item under Future.
+- **Web UI: Angular with [Optimus UI](https://optimus.openng.org/installation)**
+  (`ng add @openng/optimus-ui`), which needs Angular v21+ (v22 for Optimus v2) and
+  RxJS 7.8.1+. Its component set — forms, tables, panels, charts — covers what the
+  queue/cluster inspection and DLQ management views need, so the UI work is layout
+  and API wiring rather than component building. Does not affect the backend: the SPA
+  is generated from the OpenAPI spec and served as embedded static assets.
+
 ## Decisions still open
 
-- `Store` trait dispatch strategy — needed in M2
-- Whether the Query/XML protocol gets supported alongside AWS JSON 1.0, and when
-- One key per principal vs. one shared key per deployment
-- Frontend framework for the eventual web UI
+- Nothing blocking. Next real fork is per-principal authorization (below), and it is
+  not needed for any milestone through M7.

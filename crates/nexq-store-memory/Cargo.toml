@@ -1,0 +1,22 @@
+[package]
+name = "nexq-store-memory"
+description = "In-memory storage backend for NexQ"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+nexq-core = { workspace = true }
+
+[dev-dependencies]
+# The suite that holds every backend to the same behavior. No dependency cycle:
+# this crate and the suite both depend on nexq-core, and neither depends on the other
+# outside of tests.
+nexq-store-conformance = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

@@ -4,9 +4,11 @@
 
 pub mod config;
 pub mod model;
+pub mod store;
 
 pub use config::{AuthConfig, AwsApiConfig, Config, Credential, Secret};
 pub use model::{
     ClaimedMessage, InvalidQueueName, Message, MessageId, Priority, Queue, QueueAttributes,
     QueueName, ReceiptHandle,
 };
+pub use store::{Store, StoreError};

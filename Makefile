@@ -11,14 +11,11 @@ RUSTDOCFLAGS ?= -D warnings
 export RUSTFLAGS
 export RUSTDOCFLAGS
 
-# Optional backends that can be compiled out of nexq-server.
-BACKENDS := postgres sqlite opensearch elasticsearch
-
 # Local config for `make server`. Gitignored, since it holds a real secret.
 CONFIG ?= $(CURDIR)/nexq.toml
 
 .DEFAULT_GOAL := help
-.PHONY: help build server test fmt fmt-check clippy doc slim-builds pre-commit clean
+.PHONY: help build server test fmt fmt-check clippy doc pre-commit clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -49,15 +46,7 @@ clippy: ## Lint every crate and target
 doc: ## Build the API docs
 	$(CARGO) doc --workspace --no-deps --all-features --locked
 
-slim-builds: ## Check nexq-server still builds with each backend compiled out
-	$(CARGO) check -p nexq-server --no-default-features --locked
-	@for feature in $(BACKENDS); do \
-		echo "$(CARGO) check -p nexq-server --features $$feature"; \
-		$(CARGO) check -p nexq-server --no-default-features \
-			--features $$feature --locked || exit 1; \
-	done
-
-pre-commit: fmt-check clippy build test doc slim-builds ## Run every check CI runs
+pre-commit: fmt-check clippy build test doc ## Run every check CI runs
 	@echo "pre-commit: all checks passed"
 
 clean: ## Remove build artifacts

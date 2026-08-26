@@ -4,7 +4,7 @@
 //! Each facade owns its own listener, so this is a supervisor rather than a host — it
 //! binds nothing itself. A facade that is disabled in config is never even bound.
 //!
-//! Backends can be compiled out for slim builds via this crate's features.
+//! Every backend and facade is linked in, and config alone decides what runs.
 
 use std::error::Error;
 use std::process::ExitCode;

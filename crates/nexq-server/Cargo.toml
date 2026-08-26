@@ -11,22 +11,21 @@ authors.workspace = true
 name = "nexq-server"
 path = "src/main.rs"
 
-[features]
-default = ["postgres", "sqlite", "opensearch", "elasticsearch"]
-postgres = ["nexq-store-sql/postgres"]
-sqlite = ["nexq-store-sql/sqlite"]
-opensearch = ["nexq-store-search/opensearch"]
-elasticsearch = ["nexq-store-search/elasticsearch"]
-
 [dependencies]
 nexq-core = { workspace = true }
+nexq-store-memory = { workspace = true }
 nexq-store-sql = { workspace = true }
 nexq-store-search = { workspace = true }
 nexq-api-rest = { workspace = true }
 nexq-api-aws = { workspace = true }
 nexq-metrics = { workspace = true }
 nexq-keda = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "sync",
+] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 

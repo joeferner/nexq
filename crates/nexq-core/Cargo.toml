@@ -8,13 +8,16 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 figment = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 # `figment::Jail` — a sandboxed cwd and env for the config tests.
 figment = { workspace = true, features = ["test"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

@@ -14,6 +14,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use thiserror::Error;
 use uuid::Uuid;
 
 /// Longest queue name accepted. From SQS, so that a name valid here is valid there.
@@ -37,13 +38,19 @@ pub const DEFAULT_VISIBILITY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct QueueName(String);
 
 /// Why a queue name was rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidQueueName {
+    #[error("a queue name must not be empty")]
     Empty,
-    TooLong {
-        len: usize,
-    },
+
+    #[error("a queue name must be at most {MAX_QUEUE_NAME_LEN} characters, got {len}")]
+    TooLong { len: usize },
+
     /// Held as a `char` so the message can point at the offending character.
+    #[error(
+        "a queue name may only contain letters, digits, hyphens, and underscores, \
+         but contains {0:?}"
+    )]
     InvalidCharacter(char),
 }
 
@@ -176,25 +183,6 @@ impl FromStr for QueueName {
         Self::new(name)
     }
 }
-
-impl fmt::Display for InvalidQueueName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "a queue name must not be empty"),
-            Self::TooLong { len } => write!(
-                f,
-                "a queue name must be at most {MAX_QUEUE_NAME_LEN} characters, got {len}"
-            ),
-            Self::InvalidCharacter(character) => write!(
-                f,
-                "a queue name may only contain letters, digits, hyphens, and \
-                 underscores, but contains {character:?}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for InvalidQueueName {}
 
 impl Queue {
     /// A queue with default attributes, created now.

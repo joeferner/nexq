@@ -7,11 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
-[features]
-default = ["opensearch", "elasticsearch"]
-opensearch = []
-elasticsearch = []
-
 [dependencies]
 nexq-core = { workspace = true }
 

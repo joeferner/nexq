@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/nexq-core",
+    "crates/nexq-store-memory",
     "crates/nexq-store-sql",
     "crates/nexq-store-search",
     "crates/nexq-store-conformance",
@@ -28,6 +29,7 @@ authors = ["Joe Ferner"]
 # standalone binary for air-gapped environments.
 [workspace.dependencies]
 nexq-core = { path = "crates/nexq-core" }
+nexq-store-memory = { path = "crates/nexq-store-memory" }
 nexq-store-sql = { path = "crates/nexq-store-sql" }
 nexq-store-search = { path = "crates/nexq-store-search" }
 nexq-store-conformance = { path = "crates/nexq-store-conformance" }
@@ -42,6 +44,7 @@ nexq-client = { path = "crates/nexq-client" }
 # entries are the intended choices, uncommented as the crate that needs one is
 # actually built.
 #
+async-trait = "0.1.92"
 axum = "0.8.9"
 figment = { version = "0.10.19", features = ["toml", "env"] }
 hex = "0.4.3"
@@ -49,6 +52,7 @@ hmac = "0.12.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.148"
 sha2 = "0.10.9"
+thiserror = "2.0.20"
 tokio = "1.53.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
