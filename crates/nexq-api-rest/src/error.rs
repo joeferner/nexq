@@ -13,11 +13,14 @@
 //! are part of the contract: a client may branch on `code`, so one must not be renamed
 //! without that being a breaking change. `message` is for a human and may change freely.
 
+use aide::generate::GenContext;
+use aide::openapi::{Operation, Response as ApiResponse};
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use nexq_core::engine::EngineError;
 use nexq_core::model::InvalidQueueName;
+use schemars::JsonSchema;
 use serde::Serialize;
 use tracing::error;
 
@@ -29,19 +32,28 @@ pub struct ApiError {
     message: String,
 }
 
-/// The JSON body of a refused request.
+/// The body of every failed request.
 ///
 /// Nested under `error` rather than flattened so that a successful response and a failed
 /// one can never be told apart only by which fields happen to be present.
-#[derive(Debug, Serialize)]
-struct ErrorBody<'a> {
-    error: ErrorDetail<'a>,
+// Owned rather than borrowed because this is a published schema: a lifetime here would be
+// a lifetime in every type derived from it, and the one allocation it costs is on the error
+// path. Kept out of the doc comment deliberately — since `aide` publishes these, a doc
+// comment is API documentation and rationale for maintainers belongs in a plain comment.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ErrorBody {
+    /// What went wrong.
+    pub error: ErrorDetail,
 }
 
-#[derive(Debug, Serialize)]
-struct ErrorDetail<'a> {
-    code: &'a str,
-    message: &'a str,
+/// The failure itself.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ErrorDetail {
+    /// A stable, machine-readable identifier for this kind of failure. Safe to branch on.
+    pub code: String,
+
+    /// A human-readable explanation. May change between releases; do not parse it.
+    pub message: String,
 }
 
 impl ApiError {
@@ -142,16 +154,45 @@ impl From<EngineError> for ApiError {
     }
 }
 
+impl ApiError {
+    /// This error as the body a client receives.
+    pub fn to_body(&self) -> ErrorBody {
+        ErrorBody {
+            error: ErrorDetail {
+                code: self.code.to_owned(),
+                message: self.message.clone(),
+            },
+        }
+    }
+}
+
+/// Teaches aide what a failed request looks like, so **every** documented operation
+/// carries this envelope rather than each one describing its own failures.
+///
+/// A single default response rather than one per status code: any operation can fail in
+/// several ways, and the body is the same shape for all of them. Where the specific
+/// statuses are worth naming, the operation says so itself — see
+/// [`crate::messages::receive_docs`].
+impl aide::OperationOutput for ApiError {
+    type Inner = ErrorBody;
+
+    fn operation_response(ctx: &mut GenContext, operation: &mut Operation) -> Option<ApiResponse> {
+        <Json<ErrorBody> as aide::OperationOutput>::operation_response(ctx, operation)
+    }
+
+    fn inferred_responses(
+        ctx: &mut GenContext,
+        operation: &mut Operation,
+    ) -> Vec<(Option<u16>, ApiResponse)> {
+        Self::operation_response(ctx, operation)
+            .map(|response| vec![(None, response)])
+            .unwrap_or_default()
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = Json(ErrorBody {
-            error: ErrorDetail {
-                code: self.code,
-                message: &self.message,
-            },
-        });
-
-        let mut response = (self.status, body).into_response();
+        let mut response = (self.status, Json(self.to_body())).into_response();
 
         // RFC 9110 requires this on a 401, and without it a client cannot tell which
         // scheme to present. Only the scheme: a realm would suggest scopes exist, and

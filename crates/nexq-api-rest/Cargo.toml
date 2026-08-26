@@ -8,9 +8,11 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+aide = { workspace = true }
 axum = { workspace = true }
 nexq-core = { workspace = true }
 rustls = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tls-listener = { workspace = true }

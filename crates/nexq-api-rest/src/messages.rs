@@ -16,36 +16,60 @@
 
 use std::time::{Duration, SystemTime};
 
+use aide::transform::TransformOperation;
 use axum::Json;
 use axum::extract::{Path, State};
 use nexq_core::QueueName;
 use nexq_core::engine::{MAX_MESSAGES_PER_RECEIVE, MAX_RECEIVE_WAIT, ReceiveRequest};
 use nexq_core::model::ClaimedMessage;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::error::ApiError;
+use crate::error::{ApiError, ErrorBody};
 use crate::server::FacadeState;
+
+/// The queue a request is about.
+///
+/// A struct rather than `Path<String>` because that is what lets the parameter be
+/// *documented*: from a bare `String` aide learns a path parameter exists but not what it
+/// is called, and generates an operation with no parameters at all. The field name is the
+/// parameter name.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QueuePath {
+    /// Name of the queue.
+    pub queue: String,
+}
 
 /// What a consumer may ask for. Every field is optional; an empty body is a plain poll of
 /// one message under the queue's own defaults.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct ReceiveBody {
-    /// How many messages to return at most, up to [`MAX_MESSAGES_PER_RECEIVE`].
+    /// How many messages to return at most. Fewer may come back, including none.
+    ///
+    /// Defaults to one when omitted. A value outside the range is refused rather than
+    /// clamped, so asking for more than the maximum is an error and not a short answer.
+    // The literal bounds are what a client can validate against, so they are in the
+    // schema rather than only in prose; `the_documented_limits_match_the_engine` keeps
+    // them equal to the engine's own constants.
+    #[schemars(range(min = 1, max = 10))]
     pub max_messages: Option<usize>,
 
-    /// How long the returned messages stay invisible to other consumers. Omitted means
-    /// the queue's configured default.
+    /// How long the returned messages stay invisible to other consumers.
+    ///
+    /// Omitted means the queue's own configured timeout.
     pub visibility_timeout_seconds: Option<u64>,
 
-    /// How long to wait for a message when the queue has none, up to
-    /// [`MAX_RECEIVE_WAIT`]. Omitted means the queue's configured default, and `0` makes
-    /// this a plain poll.
+    /// How long to wait for a message when the queue has none — long polling.
+    ///
+    /// Omitted means the queue's own configured wait, which is a different thing from
+    /// `0`: zero asks for a plain poll that returns immediately.
+    #[schemars(range(min = 0, max = 20))]
     pub wait_time_seconds: Option<u64>,
 }
 
 /// The answer to a receive.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ReceiveResponse {
     /// Claimed messages, **empty rather than absent** when there are none.
     ///
@@ -56,7 +80,7 @@ pub struct ReceiveResponse {
 }
 
 /// One message, and the claim it came with.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ReceivedMessage {
     pub id: String,
 
@@ -143,7 +167,7 @@ impl ReceiveBody {
 /// action rather than a `GET` on the message collection.
 pub async fn receive(
     State(facade): State<FacadeState>,
-    Path(queue): Path<String>,
+    Path(QueuePath { queue }): Path<QueuePath>,
     body: Option<Json<ReceiveBody>>,
 ) -> Result<Json<ReceiveResponse>, ApiError> {
     let queue = QueueName::new(queue)?;
@@ -154,6 +178,52 @@ pub async fn receive(
     Ok(Json(ReceiveResponse {
         messages: claimed.into_iter().map(ReceivedMessage::from).collect(),
     }))
+}
+
+/// What the spec says about [`receive`].
+///
+/// Only what cannot be derived from the types: aide already knows the path parameter, the
+/// request body, and both response shapes from the handler's signature, and `schemars`
+/// takes every field description from the doc comments above. What is added here is the
+/// prose a reader needs and the specific failures worth naming — [`ApiError`] documents
+/// itself as one default response, since any operation can fail several ways with the same
+/// body, so an operation that wants statuses spelled out says so.
+pub fn receive_docs(mut operation: TransformOperation) -> TransformOperation {
+    // aide infers `required: true` for the body of a handler taking `Option<Json<T>>` —
+    // its own `Option` input impl relaxes path and query parameters and carries a TODO
+    // for the body. Corrected here rather than left wrong: an empty `POST` is a valid
+    // request, and a generated client that believed otherwise would demand a body its
+    // caller does not have to supply.
+    if let Some(body) = operation
+        .inner_mut()
+        .request_body
+        .as_mut()
+        .and_then(|body| body.as_item_mut())
+    {
+        body.required = false;
+    }
+
+    operation
+        .id("receiveMessages")
+        .summary("Receive messages from a queue")
+        .description(
+            "Claims up to `max_messages` messages, making them invisible to other \
+             consumers until the claim lapses or they are deleted. Waits for the first \
+             message when `wait_time_seconds` is set — long polling — and returns an \
+             empty list rather than an error when there is nothing to hand out.",
+        )
+        .response_with::<200, Json<ReceiveResponse>, _>(|response| {
+            response.description("Zero or more claimed messages.")
+        })
+        .response_with::<400, Json<ErrorBody>, _>(|response| {
+            response.description("The queue name or one of the parameters is not valid.")
+        })
+        .response_with::<401, Json<ErrorBody>, _>(|response| {
+            response.description("The bearer token is missing or does not check out.")
+        })
+        .response_with::<404, Json<ErrorBody>, _>(|response| {
+            response.description("No queue by that name.")
+        })
 }
 
 #[cfg(test)]

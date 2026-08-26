@@ -148,10 +148,53 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       unlike SigV4 — where a signature covers one request and the secret never crosses the
       wire — anyone who can read the traffic can replay it. That is why `[rest_api.tls]`
       exists.
-- [ ] Axum + `aide`: `ApiRouter`, and `#[derive(JsonSchema)]` beside the existing
+- [x] Axum + `aide`: `ApiRouter`, and `#[derive(JsonSchema)]` beside the existing
       `Serialize`/`Deserialize`, so route registration *is* the documentation source. The
       alternative considered and rejected in Q18a was `utoipa`, whose per-handler
-      `#[utoipa::path(...)]` amounts to writing the OpenAPI structure by hand
+      `#[utoipa::path(...)]` amounts to writing the OpenAPI structure by hand.
+
+      aide 0.15.1, which generates against **`schemars` 0.9** — not the `1` this file's
+      placeholder guessed at. A `JsonSchema` from a different major version is a different
+      trait and would not satisfy aide's bounds, so the two are pinned together.
+
+      Served at `/api/v1/openapi.json`, pre-serialized once at router build time and handed
+      out as refcounted `Bytes`. Readable **without a token**, deliberately: it describes
+      the shape of the API and carries nothing deployment-specific — no queue names, no
+      data — and a client generator has to be able to fetch it.
+
+      Not the `scalar`/`redoc`/`swagger` features, which serve a documentation UI. Each
+      renders a page that pulls its JavaScript from a CDN, which is exactly what an
+      air-gapped deployment (Q21) cannot do. The spec itself is served instead.
+
+      **Doc comments now have two audiences**, which is the part worth remembering. They
+      are the published contract, so they are written for an API consumer and rationale for
+      maintainers goes in plain `//` comments. Three things had leaked before the tests for
+      them existed:
+
+      - `[`MAX_MESSAGES_PER_RECEIVE`]` reached the spec as literal rustdoc syntax.
+        `published_descriptions_are_not_written_for_rustdoc` now walks every description in
+        the document and refuses one containing `` [` ``.
+      - `Path<String>` produced an operation with **no parameters at all** — aide learns a
+        path parameter exists but not what it is called. A `QueuePath` struct fixes it, and
+        the field name is the parameter name.
+      - The request body was documented `required: true` although the handler takes
+        `Option<Json<..>>` and an empty `POST` is valid; aide's own `Option` input impl
+        carries a TODO for exactly this. `receive_docs` corrects it.
+
+      The limits are in the **schema**, not only in prose — `minimum`/`maximum` a generated
+      client can validate against. They have to be literals, since an attribute cannot read
+      a constant, so `the_documented_limits_match_the_engine` asserts they equal
+      `MAX_MESSAGES_PER_RECEIVE` and `MAX_RECEIVE_WAIT`.
+
+      Nine document tests, four verified against mutations: `Path<String>` back again, the
+      body marked required, the documented maximum drifted to 25, and `route` in place of
+      `api_route` — that last one is the important case, a route served but undocumented,
+      and it fails four tests at once.
+
+      One thing that is *not* proven: `openapi` resets aide's thread-local generation
+      context, and removing that reset leaves every test green, because one route means one
+      set of types and re-extracting them yields identical components. Kept as insurance
+      with the comment saying so, rather than claimed as covered.
 - [ ] The generated spec is **committed**, and a test fails when the committed copy and
       the generated one differ. Without that, the contract can change in a way no diff
       shows, and every generated client changes with it silently

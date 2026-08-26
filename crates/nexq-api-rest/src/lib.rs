@@ -15,5 +15,5 @@ pub mod error;
 pub mod messages;
 pub mod server;
 
-pub use error::ApiError;
-pub use server::Server;
+pub use error::{ApiError, ErrorBody};
+pub use server::{API_PREFIX, OPENAPI_PATH, Server, openapi, openapi_json};

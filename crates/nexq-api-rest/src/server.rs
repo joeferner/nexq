@@ -9,12 +9,18 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
+use aide::axum::ApiRouter;
+use aide::axum::routing::post_with;
+use aide::openapi::{OpenApi, SecurityScheme};
+use aide::transform::TransformOpenApi;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::header;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::get;
+use axum::{Extension, Router};
 use nexq_core::engine::Engine;
 use nexq_core::{AuthConfig, RestApiConfig};
 use rustls::ServerConfig;
@@ -161,12 +167,109 @@ impl Server {
 /// to collide with them.
 pub const API_PREFIX: &str = "/api/v1";
 
+/// Where the generated OpenAPI document is served.
+///
+/// Spelled out rather than built from [`API_PREFIX`] so it stays a `&'static str`; a test
+/// asserts the two agree, which is cheaper than the formatting it saves.
+pub const OPENAPI_PATH: &str = "/api/v1/openapi.json";
+
+/// The name the spec gives this facade's security scheme, referenced by every operation.
+const SECURITY_SCHEME: &str = "bearerAuth";
+
+/// The documented routes, before any state is attached.
+///
+/// An [`ApiRouter`] rather than an [`axum::Router`], which is the whole of what `aide`
+/// asks for: `api_route` records the operation while registering the handler, so the spec
+/// is generated from *this* — the real routing table — and cannot describe an endpoint that
+/// does not exist or miss one that does. Per Q18a, and the reason `utoipa` was not chosen:
+/// its per-handler attribute would have this list restated by hand next to each function.
+///
+/// State-free so that [`openapi`] can generate the spec without an engine or a listener.
+fn api_routes() -> ApiRouter<FacadeState> {
+    ApiRouter::new().nest(
+        // Nested rather than spelled into each path, so [`API_PREFIX`] is written once,
+        // a route cannot be added outside it by accident, and the spec's paths carry it.
+        API_PREFIX,
+        ApiRouter::new().api_route(
+            "/queues/{queue}/messages/receive",
+            post_with(messages::receive, messages::receive_docs),
+        ),
+    )
+}
+
+/// Describe the API as a whole — everything not derivable from an individual route.
+fn api_metadata(api: TransformOpenApi) -> TransformOpenApi {
+    api.title("NexQ")
+        .version(env!("CARGO_PKG_VERSION"))
+        .description(
+            "NexQ's native API: the complete operation set, including the extensions the \
+             SQS-compatible facade cannot express. This document is generated from the \
+             server's own routing table and is the source every client is generated from.",
+        )
+        .security_scheme(
+            SECURITY_SCHEME,
+            SecurityScheme::Http {
+                scheme: "bearer".into(),
+                bearer_format: None,
+                description: Some(
+                    "The token is `<key_id>.<secret>` for a credential in the server's \
+                     registry. Presented in full on every request, so it should travel \
+                     over TLS."
+                        .into(),
+                ),
+                extensions: Default::default(),
+            },
+        )
+        // Applied to every operation rather than named on each one, which matches the
+        // server: authentication is a layer over all of them, not a per-route choice.
+        .security_requirement(SECURITY_SCHEME)
+}
+
+/// The OpenAPI document as JSON — what is served, and what a committed copy would hold.
+///
+/// Pretty-printed so that a diff against the committed copy is readable line by line
+/// rather than being one very long line that changed somewhere.
+pub fn openapi_json() -> String {
+    serde_json::to_string_pretty(&openapi())
+        // An OpenAPI document is plain data with string keys throughout, so this can only
+        // fail if `aide` produced something that is not representable as JSON — a bug
+        // there, not a condition an operator can be in.
+        .expect("an OpenAPI document always serializes")
+}
+
+/// The OpenAPI document describing this facade.
+///
+/// Generated from the same `api_routes` the server serves, so it cannot drift from what is
+/// served — that routing table is the only definition either of them comes from.
+pub fn openapi() -> OpenApi {
+    // aide accumulates extracted schemas in a thread-local, so a second generation on the
+    // same thread builds on the first one's leftovers. Defensive rather than proven: with
+    // one route there is one set of types, so re-extracting produces the same components
+    // and removing this changes nothing today — breaking it on purpose left every test
+    // green. It is here for when that stops being true, since the failure it would cause —
+    // a document carrying schemas from an unrelated generation — is one the committed-spec
+    // check would report as a mystery diff.
+    aide::generate::reset_context();
+
+    let mut api = OpenApi::default();
+    let _ = api_routes().finish_api_with(&mut api, api_metadata);
+
+    api
+}
+
 /// The facade's routes.
 ///
 /// One operation so far — see [`crate::messages`] for why.
 pub fn router(facade: FacadeState) -> Router {
-    let api = Router::new()
-        .route("/queues/{queue}/messages/receive", post(messages::receive))
+    aide::generate::reset_context();
+
+    let mut api = OpenApi::default();
+    let routes = api_routes().finish_api_with(&mut api, api_metadata);
+    let spec = Bytes::from(
+        serde_json::to_vec_pretty(&api).expect("an OpenAPI document always serializes"),
+    );
+
+    routes
         // Applied to the API routes only, so it runs *after* routing: a request to a
         // path that does not exist is a 404 without its credentials being looked at.
         // Deliberate — the paths are published in the OpenAPI spec, so refusing to admit
@@ -175,16 +278,24 @@ pub fn router(facade: FacadeState) -> Router {
         .layer(middleware::from_fn_with_state(
             Arc::clone(&facade),
             require_token,
-        ));
-
-    Router::new()
-        // Nested rather than spelled into each path, so [`API_PREFIX`] is the only place
-        // the prefix is written and a route cannot be added outside it by accident.
-        .nest(API_PREFIX, api)
+        ))
+        .with_state(facade)
+        // Added after the auth layer, so the spec is readable without a token. It
+        // describes the shape of the API and carries nothing deployment-specific — no
+        // queue names, no data — and a client generator has to be able to fetch it.
+        .route(OPENAPI_PATH, get(serve_openapi))
+        .layer(Extension(spec))
         // Answers in this facade's own envelope rather than axum's empty body, so a
         // client parsing errors does not have to special-case a wrong URL.
         .fallback(async || ApiError::no_such_route())
-        .with_state(facade)
+}
+
+/// Serve the document generated when this router was built.
+///
+/// Pre-serialized rather than rendered per request: the spec cannot change while the
+/// process runs, and [`Bytes`] is refcounted so handing it out costs nothing.
+async fn serve_openapi(Extension(spec): Extension<Bytes>) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], spec).into_response()
 }
 
 /// Reject anything without a valid bearer token, before any handler runs.
@@ -449,6 +560,45 @@ mod tests {
         assert_eq!(
             json_of(response).await["error"]["code"],
             "invalid_queue_name"
+        );
+    }
+
+    /// Readable without a token, and by the same server that serves the routes it
+    /// describes — a spec fetched from somewhere else could describe something else.
+    #[tokio::test]
+    async fn the_spec_is_served_unauthenticated_from_the_running_router() {
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri(OPENAPI_PATH)
+            .body(Body::empty())
+            .expect("request");
+
+        let response = router(Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        }))
+        .oneshot(request)
+        .await
+        .expect("response");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a client generator has to be able to fetch this without credentials"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json")
+        );
+
+        let served = json_of(response).await;
+        assert_eq!(
+            served,
+            serde_json::from_str::<serde_json::Value>(&openapi_json()).expect("json"),
+            "the served document must be the generated one"
         );
     }
 

@@ -44,6 +44,14 @@ nexq-client = { path = "crates/nexq-client" }
 # entries are the intended choices, uncommented as the crate that needs one is
 # actually built.
 #
+# Generates the OpenAPI spec from the route and type definitions themselves, per plan
+# Q18a: `ApiRouter` wraps `axum::Router`, so registering a route *is* documenting it.
+# `axum-json` is a separate feature from `axum` and is what teaches aide about `Json<T>`.
+#
+# Deliberately *not* the `scalar`/`redoc`/`swagger` features, which serve a documentation
+# UI: each renders a page that pulls its JavaScript from a CDN, which is exactly what an
+# air-gapped deployment (plan Q21) cannot do. The spec itself is served instead.
+aide = { version = "0.15.1", features = ["axum", "axum-json"] }
 async-trait = "0.1.92"
 axum = "0.8.9"
 base64 = "0.23.1"
@@ -60,6 +68,9 @@ rustls = { version = "0.23.43", default-features = false, features = [
   "tls12",
 ] }
 rustls-pemfile = "2.2.0"
+# Pinned to what aide 0.15 generates against: a `JsonSchema` from a different major
+# version is a different trait, and would not satisfy aide's bounds.
+schemars = "0.9.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
@@ -86,19 +97,12 @@ uuid = { version = "1.25.0", features = ["v4"] }
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }
 
-# aide = { version = "0.15", features = ["axum", "scalar"] }
-# aide = { version = "0.15", features = ["axum", "scalar"] }
-# schemars = "1"
-# serde = { version = "1", features = ["derive"] }
-# serde_json = "1"
 # sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls"] }
 # reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # clap = { version = "4", features = ["derive"] }
 # figment = { version = "0.10", features = ["toml", "env"] }
 # tonic = "0.13"
 # prometheus-client = "0.24"
-# thiserror = "2"
-# tracing = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
