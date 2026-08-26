@@ -6,6 +6,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Bytes;
@@ -17,7 +18,7 @@ use nexq_core::engine::Engine;
 use nexq_core::{AuthConfig, AwsApiConfig};
 use serde_json::Value;
 use tokio::net::TcpListener;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::error::ApiError;
 use crate::operations::Operations;
@@ -31,6 +32,9 @@ use crate::sigv4::{self, SigningContext};
 pub struct Facade {
     auth: Arc<AuthConfig>,
     operations: Operations,
+
+    /// How stale a signed request may be. `None` accepts any timestamp.
+    max_clock_skew: Option<Duration>,
 }
 
 /// Shared rather than cloned per request: everything in it is read-only while serving.
@@ -65,12 +69,23 @@ impl Server {
         let listener = TcpListener::bind(config.bind_addr).await?;
         let local_addr = listener.local_addr()?;
 
+        if config.max_clock_skew().is_none() {
+            // Deliberate, but it means a captured request stays replayable forever, so
+            // it should not be a silent setting.
+            warn!(
+                facade = "aws",
+                "aws_api.max_clock_skew_secs is 0: signed requests are accepted \
+                 whatever their timestamp, so a captured request can be replayed"
+            );
+        }
+
         Ok(Self {
             listener,
             local_addr,
             router: router(Arc::new(Facade {
                 auth,
                 operations: Operations::new(engine, QueueUrls::new(config)),
+                max_clock_skew: config.max_clock_skew(),
             })),
         })
     }
@@ -139,7 +154,7 @@ async fn handle(
 /// Signature first: an unauthenticated caller learns nothing about which operations
 /// exist or whether its input parsed.
 async fn route(context: &SigningContext<'_>, facade: &Facade) -> Result<Value, ApiError> {
-    let principal = sigv4::verify(context, &facade.auth)?;
+    let principal = sigv4::verify(context, &facade.auth, facade.max_clock_skew)?;
 
     let target = context
         .headers
@@ -165,8 +180,6 @@ fn json_response(output: &Value) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use axum::body::Body;
     use axum::http::{HeaderValue, Request as HttpRequest, StatusCode};
     use http_body_util::BodyExt;
@@ -216,9 +229,16 @@ mod tests {
     }
 
     fn facade_with(auth: Arc<AuthConfig>) -> FacadeState {
+        // These cases sign with a fixed timestamp, so freshness is switched off; the
+        // window itself is covered in `sigv4`, plus one end-to-end case below.
+        facade_with_skew(auth, None)
+    }
+
+    fn facade_with_skew(auth: Arc<AuthConfig>, max_clock_skew: Option<Duration>) -> FacadeState {
         Arc::new(Facade {
             auth,
             operations: Operations::new(test_engine(), crate::test_support::test_queue_urls()),
+            max_clock_skew,
         })
     }
 
@@ -421,6 +441,34 @@ mod tests {
             body["__type"],
             "com.amazonaws.sqs#MissingAuthenticationToken"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stale_request_is_refused_end_to_end() {
+        // The fixed test timestamp is long past by the time this runs, so a real window
+        // must refuse it — this is the replay case, checked through the router.
+        let headers = sign(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            b"{}",
+            SECRET,
+        );
+        let response = router(facade_with_skew(
+            test_auth(),
+            Some(Duration::from_secs(900)),
+        ))
+        .oneshot(request_with(headers, "{}"))
+        .await
+        .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(body["__type"], "com.amazonaws.sqs#RequestTimeTooSkewed");
     }
 
     #[tokio::test]

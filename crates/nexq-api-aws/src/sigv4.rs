@@ -17,9 +17,12 @@
 //! the string, and NexQ has no regions of its own. The service must be `sqs`, matching
 //! what this facade serves.
 //!
-//! Not covered yet: the timestamp is used but not checked for freshness, so a captured
-//! request stays replayable. Adding a clock-skew window is the natural next step, and
-//! wants a configurable tolerance given air-gapped clocks.
+//! The timestamp is checked for freshness as well as signed, within a configurable
+//! window — that is what stops a captured request being replayed indefinitely. The
+//! window is configurable because an air-gapped deployment with no NTP can drift far
+//! enough to refuse honest clients, and an operator has to be able to widen it.
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, Method, Uri, header};
 // `KeyInit` provides `new_from_slice`; since hmac 0.13 it has to be imported
@@ -49,6 +52,104 @@ const AMZ_DATE_HEADER: &str = "x-amz-date";
 /// request — that is the rule, so a client may declare `UNSIGNED-PAYLOAD` here rather
 /// than hashing a body.
 const CONTENT_SHA256_HEADER: &str = "x-amz-content-sha256";
+
+/// Seconds in a day, for turning a civil date into an instant.
+const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
+
+/// Parse a SigV4 timestamp: `YYYYMMDDTHHMMSSZ`, always UTC.
+///
+/// Strict about the shape, because a timestamp that parses loosely could be read
+/// differently by the signer and the verifier, and the whole point is that both agree.
+fn parse_amz_date(value: &str) -> Option<SystemTime> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 16 || bytes[8] != b'T' || bytes[15] != b'Z' {
+        return None;
+    }
+
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let text = value.get(range)?;
+        if !text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        text.parse().ok()
+    };
+
+    let (year, month, day) = (number(0..4)?, number(4..6)?, number(6..8)?);
+    let (hour, minute, second) = (number(9..11)?, number(11..13)?, number(13..15)?);
+
+    if !(1..=12).contains(&month)
+        || day < 1
+        || day > days_in_month(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+
+    let seconds =
+        days_from_civil(year, month, day) * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second;
+
+    Some(if seconds >= 0 {
+        UNIX_EPOCH + Duration::from_secs(seconds.unsigned_abs())
+    } else {
+        UNIX_EPOCH - Duration::from_secs(seconds.unsigned_abs())
+    })
+}
+
+fn is_leap_year(year: i64) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+/// Days from 1970-01-01 to a civil date, by Howard Hinnant's `days_from_civil`.
+///
+/// Exact for the whole proleptic Gregorian calendar, which is why it is used here
+/// rather than an approximation with leap-year special cases bolted on.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    // March-based year, so a leap day lands at the end and needs no special case.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+
+    // 719468 shifts the epoch from 0000-03-01 to 1970-01-01.
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// Reject a timestamp too far from this server's clock in either direction.
+///
+/// Both directions matter: a timestamp far in the past is a replayed request, and one
+/// far in the future would otherwise stay replayable for as long as it takes the clock
+/// to catch up.
+fn check_skew(signed_at: SystemTime, now: SystemTime, tolerance: Duration) -> Result<(), ApiError> {
+    let drift = now
+        .duration_since(signed_at)
+        .or_else(|_| signed_at.duration_since(now))
+        .unwrap_or_default();
+
+    if drift > tolerance {
+        debug!(
+            drift_secs = drift.as_secs(),
+            tolerance_secs = tolerance.as_secs(),
+            "request timestamp is outside the accepted window"
+        );
+        return Err(ApiError::request_time_too_skewed(drift, tolerance));
+    }
+
+    Ok(())
+}
 
 /// Everything about a request that the signature covers.
 #[derive(Debug, Clone, Copy)]
@@ -150,9 +251,29 @@ impl Authorization {
 
 /// Verify a request's signature, returning the authenticated principal's name.
 ///
+/// `max_clock_skew` bounds how old a request may be; `None` accepts any timestamp,
+/// which leaves a captured request replayable forever.
+///
 /// Client-facing messages are deliberately the same ones real SQS sends and carry no
 /// detail about why a signature failed; the specifics go to the debug log instead.
-pub fn verify(context: &SigningContext<'_>, auth: &AuthConfig) -> Result<String, ApiError> {
+pub fn verify(
+    context: &SigningContext<'_>,
+    auth: &AuthConfig,
+    max_clock_skew: Option<Duration>,
+) -> Result<String, ApiError> {
+    verify_at(context, auth, max_clock_skew, SystemTime::now())
+}
+
+/// [`verify`] against a given notion of "now".
+///
+/// Split out so the skew window can be tested without waiting for real time to pass or
+/// depending on when the test happens to run.
+fn verify_at(
+    context: &SigningContext<'_>,
+    auth: &AuthConfig,
+    max_clock_skew: Option<Duration>,
+    now: SystemTime,
+) -> Result<String, ApiError> {
     let header = context
         .headers
         .get(header::AUTHORIZATION)
@@ -191,6 +312,15 @@ pub fn verify(context: &SigningContext<'_>, auth: &AuthConfig) -> Result<String,
             "credential scope date does not match x-amz-date"
         );
         return Err(ApiError::signature_does_not_match());
+    }
+
+    // Checked before the signature is recomputed: a stale request is refused whether or
+    // not it was signed correctly, and this costs no HMAC work.
+    if let Some(tolerance) = max_clock_skew {
+        let signed_at = parse_amz_date(amz_date)
+            .ok_or_else(|| ApiError::incomplete_signature("x-amz-date is not a valid timestamp"))?;
+
+        check_skew(signed_at, now, tolerance)?;
     }
 
     let expected = signature(context, &authorization, amz_date, credential)?;
@@ -378,7 +508,7 @@ mod tests {
     /// the signature botocore computed for it. Reproducing this signature is what
     /// proves the implementation agrees with real AWS tooling rather than only with
     /// itself.
-    mod captured {
+    pub(super) mod captured {
         pub const SECRET: &str = "change-me";
         pub const KEY_ID: &str = "AKIANEXQDEV";
         pub const AMZ_DATE: &str = "20260826T005924Z";
@@ -392,7 +522,7 @@ mod tests {
             "3ab471d595641719c34224df0512225be69ddb1d98d792feb3e09bc5f95c6a7f";
     }
 
-    fn captured_headers() -> HeaderMap {
+    pub(super) fn captured_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -421,6 +551,15 @@ mod tests {
             key_id: key_id.to_owned(),
             secret: Secret::new(secret),
         }
+    }
+
+    /// The captured request has a fixed timestamp, so cases about *signing* switch the
+    /// freshness check off. The window has its own cases, further down.
+    const SKEW_DISABLED: Option<Duration> = None;
+
+    /// When the captured request was signed, as an instant.
+    pub(super) fn captured_signing_time() -> SystemTime {
+        parse_amz_date(captured::AMZ_DATE).expect("the captured timestamp should parse")
     }
 
     fn auth_config(credential: Credential) -> AuthConfig {
@@ -467,6 +606,7 @@ mod tests {
         let principal = verify(
             &context,
             &auth_config(credential(captured::KEY_ID, captured::SECRET)),
+            SKEW_DISABLED,
         )
         .expect("verify");
 
@@ -487,6 +627,7 @@ mod tests {
         let error = verify(
             &context,
             &auth_config(credential(captured::KEY_ID, "not-the-secret")),
+            SKEW_DISABLED,
         )
         .expect_err("wrong secret");
 
@@ -507,6 +648,7 @@ mod tests {
         let error = verify(
             &context,
             &auth_config(credential("AKIASOMEONEELSE", captured::SECRET)),
+            SKEW_DISABLED,
         )
         .expect_err("unknown key");
 
@@ -528,6 +670,7 @@ mod tests {
         let error = verify(
             &context,
             &auth_config(credential(captured::KEY_ID, captured::SECRET)),
+            SKEW_DISABLED,
         )
         .expect_err("tampered body");
 
@@ -553,6 +696,7 @@ mod tests {
         let error = verify(
             &context,
             &auth_config(credential(captured::KEY_ID, captured::SECRET)),
+            SKEW_DISABLED,
         )
         .expect_err("tampered header");
 
@@ -573,6 +717,7 @@ mod tests {
         let error = verify(
             &context,
             &auth_config(credential(captured::KEY_ID, captured::SECRET)),
+            SKEW_DISABLED,
         )
         .expect_err("unsigned");
 
@@ -672,5 +817,311 @@ mod tests {
         });
 
         assert_eq!(hash, "UNSIGNED-PAYLOAD");
+    }
+}
+
+#[cfg(test)]
+mod clock_skew_tests {
+    use axum::http::HeaderValue;
+    use nexq_core::Secret;
+
+    use super::tests::{captured, captured_headers, captured_signing_time};
+    use super::*;
+
+    /// The window used by these cases, standing in for whatever config says.
+    const TOLERANCE: Duration = Duration::from_secs(15 * 60);
+
+    fn verify_captured_at(now: SystemTime) -> Result<String, ApiError> {
+        let headers = captured_headers();
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            body: captured::BODY,
+        };
+
+        verify_at(
+            &context,
+            &AuthConfig {
+                credentials: vec![Credential {
+                    name: "dev".to_owned(),
+                    key_id: captured::KEY_ID.to_owned(),
+                    secret: Secret::new(captured::SECRET),
+                }],
+            },
+            Some(TOLERANCE),
+            now,
+        )
+    }
+
+    #[test]
+    fn a_fresh_request_is_accepted() {
+        let signed_at = captured_signing_time();
+
+        for offset in [
+            Duration::ZERO,
+            Duration::from_secs(1),
+            Duration::from_secs(14 * 60),
+            TOLERANCE,
+        ] {
+            verify_captured_at(signed_at + offset)
+                .unwrap_or_else(|error| panic!("{offset:?} after signing: {error}"));
+        }
+    }
+
+    #[test]
+    fn a_stale_request_is_refused() {
+        // The replay case: a request captured off the wire and sent again later.
+        let error =
+            verify_captured_at(captured_signing_time() + TOLERANCE + Duration::from_secs(1))
+                .expect_err("outside the window");
+
+        assert_eq!(error.code(), "RequestTimeTooSkewed");
+    }
+
+    #[test]
+    fn a_request_from_the_future_is_refused() {
+        // Otherwise a request signed with a fast clock stays replayable until real time
+        // catches up with its timestamp.
+        let error =
+            verify_captured_at(captured_signing_time() - TOLERANCE - Duration::from_secs(1))
+                .expect_err("too far ahead");
+
+        assert_eq!(error.code(), "RequestTimeTooSkewed");
+    }
+
+    #[test]
+    fn the_refusal_says_how_far_off_the_clock_is() {
+        // The usual cause is a clock that needs setting, which a bare refusal does not
+        // help anyone work out.
+        let error = verify_captured_at(captured_signing_time() + Duration::from_secs(3600))
+            .expect_err("stale");
+
+        assert!(error.message().contains("3600"), "{}", error.message());
+        assert!(error.message().contains("900"), "{}", error.message());
+    }
+
+    #[test]
+    fn skew_is_checked_before_the_signature_is_recomputed() {
+        // A stale request is refused whether or not it was signed correctly, and
+        // without spending HMAC work on it.
+        let headers = captured_headers();
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            // Tampered, so the signature cannot possibly match either.
+            body: b"{\"tampered\":true}",
+        };
+
+        let error = verify_at(
+            &context,
+            &AuthConfig {
+                credentials: vec![Credential {
+                    name: "dev".to_owned(),
+                    key_id: captured::KEY_ID.to_owned(),
+                    secret: Secret::new(captured::SECRET),
+                }],
+            },
+            Some(TOLERANCE),
+            captured_signing_time() + Duration::from_secs(3600),
+        )
+        .expect_err("stale and tampered");
+
+        assert_eq!(error.code(), "RequestTimeTooSkewed");
+    }
+
+    #[test]
+    fn no_window_accepts_any_timestamp() {
+        // What `max_clock_skew_secs = 0` buys, and what it costs.
+        verify_captured_at_without_window(
+            captured_signing_time() + Duration::from_secs(86_400 * 365),
+        )
+        .expect("with no window, age does not matter");
+    }
+
+    fn verify_captured_at_without_window(now: SystemTime) -> Result<String, ApiError> {
+        let headers = captured_headers();
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            body: captured::BODY,
+        };
+
+        verify_at(
+            &context,
+            &AuthConfig {
+                credentials: vec![Credential {
+                    name: "dev".to_owned(),
+                    key_id: captured::KEY_ID.to_owned(),
+                    secret: Secret::new(captured::SECRET),
+                }],
+            },
+            None,
+            now,
+        )
+    }
+
+    #[test]
+    fn a_timestamp_that_contradicts_the_credential_scope_is_a_signature_mismatch() {
+        // Caught before the window is even consulted: the scope says one date and the
+        // header says another, so the two cannot both have been signed.
+        let mut headers = captured_headers();
+        headers.insert(AMZ_DATE_HEADER, HeaderValue::from_static("yesterday"));
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            body: captured::BODY,
+        };
+
+        let error = verify_at(
+            &context,
+            &AuthConfig {
+                credentials: vec![Credential {
+                    name: "dev".to_owned(),
+                    key_id: captured::KEY_ID.to_owned(),
+                    secret: Secret::new(captured::SECRET),
+                }],
+            },
+            Some(TOLERANCE),
+            SystemTime::now(),
+        )
+        .expect_err("date disagrees with the scope");
+
+        assert_eq!(error.code(), "SignatureDoesNotMatch");
+    }
+
+    #[test]
+    fn an_unparseable_timestamp_is_refused_when_a_window_is_set() {
+        // Agrees with the credential scope's date, so it gets as far as being parsed —
+        // and then cannot be, so there is no way to tell whether it is fresh.
+        let mut headers = captured_headers();
+        headers.insert(
+            AMZ_DATE_HEADER,
+            HeaderValue::from_static("20260826T0059XXZ"),
+        );
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            body: captured::BODY,
+        };
+
+        let error = verify_at(
+            &context,
+            &AuthConfig {
+                credentials: vec![Credential {
+                    name: "dev".to_owned(),
+                    key_id: captured::KEY_ID.to_owned(),
+                    secret: Secret::new(captured::SECRET),
+                }],
+            },
+            Some(TOLERANCE),
+            SystemTime::now(),
+        )
+        .expect_err("not a timestamp");
+
+        assert_eq!(error.code(), "IncompleteSignature");
+    }
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+
+    /// Epoch seconds for each timestamp, computed independently rather than by running
+    /// this code — otherwise the test only proves the parser agrees with itself.
+    const KNOWN: &[(&str, i64)] = &[
+        ("19700101T000000Z", 0),
+        ("20260826T005924Z", 1_787_705_964),
+        ("20000229T120000Z", 951_825_600), // leap day, leap century
+        ("21000301T000000Z", 4_107_542_400), // 2100 is not a leap year
+        ("19991231T235959Z", 946_684_799),
+        ("20240229T235959Z", 1_709_251_199),
+        ("19691231T235959Z", -1), // before the epoch
+    ];
+
+    #[test]
+    fn parses_timestamps_to_the_right_instant() {
+        for (text, epoch_seconds) in KNOWN {
+            let parsed = parse_amz_date(text).unwrap_or_else(|| panic!("{text} should parse"));
+
+            let expected = if *epoch_seconds >= 0 {
+                UNIX_EPOCH + Duration::from_secs(epoch_seconds.unsigned_abs())
+            } else {
+                UNIX_EPOCH - Duration::from_secs(epoch_seconds.unsigned_abs())
+            };
+            assert_eq!(parsed, expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn refuses_anything_that_is_not_the_sigv4_shape() {
+        for text in [
+            "",
+            "20260826",
+            "20260826T005924",      // no trailing Z
+            "20260826T005924z",     // lowercase
+            "2026-08-26T00:59:24Z", // RFC 3339 rather than the basic format
+            "20260826 005924Z",     // space instead of T
+            "20260826T005924Z ",    // trailing space
+            "+0260826T005924Z",     // sign where a digit belongs
+        ] {
+            assert!(parse_amz_date(text).is_none(), "{text:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn refuses_dates_that_do_not_exist() {
+        // Silently shifting Feb 30 to Mar 2 would mean signer and verifier disagree
+        // about which instant was signed.
+        for text in [
+            "20260230T000000Z", // February 30
+            "20260229T000000Z", // 2026 is not a leap year
+            "21000229T000000Z", // nor is 2100
+            "20260001T000000Z", // month zero
+            "20261301T000000Z", // month thirteen
+            "20260800T000000Z", // day zero
+            "20260832T000000Z", // day thirty-two
+            "20260826T240000Z", // hour twenty-four
+            "20260826T006000Z", // minute sixty
+            "20260826T005960Z", // second sixty
+        ] {
+            assert!(parse_amz_date(text).is_none(), "{text:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn accepts_the_boundaries_that_do_exist() {
+        for text in [
+            "20240229T000000Z", // leap day in a leap year
+            "20000229T000000Z", // leap day in a leap century
+            "20261231T235959Z", // last second of a year
+            "20260101T000000Z", // first second of a year
+        ] {
+            assert!(parse_amz_date(text).is_some(), "{text:?} should parse");
+        }
+    }
+
+    #[test]
+    fn drift_is_measured_in_both_directions() {
+        let tolerance = Duration::from_secs(60);
+        let now = UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+        check_skew(now, now, tolerance).expect("no drift");
+        check_skew(now - tolerance, now, tolerance).expect("exactly at the limit, behind");
+        check_skew(now + tolerance, now, tolerance).expect("exactly at the limit, ahead");
+
+        check_skew(now - tolerance - Duration::from_secs(1), now, tolerance)
+            .expect_err("too far behind");
+        check_skew(now + tolerance + Duration::from_secs(1), now, tolerance)
+            .expect_err("too far ahead");
     }
 }

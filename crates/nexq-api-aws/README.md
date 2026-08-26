@@ -29,8 +29,10 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   `MissingAuthenticationToken`, worded as SQS words them, revealing nothing about
   which half of a credential was wrong
 - :white_check_mark: Any region string, since signer and verifier only need to agree
-- :scroll: Rejecting stale signatures. The timestamp is signed but not checked for
-  freshness, so **a captured request can be replayed**
+- :white_check_mark: Stale signatures rejected with `RequestTimeTooSkewed`, within a
+  configurable window (`aws_api.max_clock_skew_secs`, 15 minutes by default, matching
+  AWS). Checked before the signature is recomputed, and in both directions, so a
+  timestamp from the future does not stay valid until the clock catches up
 - :scroll: Per-principal authorization. Every authenticated principal may do
   everything
 
@@ -211,6 +213,7 @@ different one belongs to another deployment.
 | `QueueNameExists` | A queue of that name exists with different attributes |
 | `ReceiptHandleIsInvalid` | The handle was never issued, is already used, or its claim expired and the message went to another consumer |
 | `InvalidAttributeName` | An attribute this facade does not support, such as `FifoQueue` |
+| `RequestTimeTooSkewed` | The client's clock is too far from the server's — the message says by how much |
 | `MissingAction` | No `X-Amz-Target`, so probably an older Query-protocol client |
 | `NotImplemented` | A real SQS operation that is not built yet |
 

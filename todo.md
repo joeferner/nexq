@@ -26,7 +26,7 @@ aws --profile nexq --endpoint-url http://localhost:8080 sqs delete-message --que
 
 ---
 
-## M1 — A signed request gets a valid response
+## ✅ M1 — A signed request gets a valid response
 
 Prove the protocol and auth path before writing any queue logic. `list-queues` on an
 empty server is the smallest request that exercises all of it.
@@ -45,9 +45,10 @@ empty server is the smallest request that exercises all of it.
       correctly — see `reproduces_a_signature_that_botocore_computed`.
 - [x] Reject with SQS's own error shapes: `InvalidClientTokenId`,
       `SignatureDoesNotMatch`, and the JSON protocol's `__type` envelope
-- [ ] Reject stale signatures with a clock-skew window. The timestamp is used in the
-      signature but never checked for freshness, so **a captured request replays
-      forever**. Wants a configurable tolerance, since air-gapped clocks drift.
+- [x] Reject stale signatures with a clock-skew window — `RequestTimeTooSkewed`, within
+      `aws_api.max_clock_skew_secs` (default 900, as AWS allows). Checked in both
+      directions and before the signature is recomputed. `0` disables it, which the
+      server warns about at startup, since that restores indefinite replayability.
 - [x] `ListQueues` returning an empty list — an empty object, since real SQS omits
       `QueueUrls` when there are none and `aws sqs list-queues` then prints nothing
 - [x] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
@@ -95,11 +96,11 @@ Notes worth pinning down here, since getting them wrong is silent and confusing:
 - [x] Memory store in `nexq-store-memory`, its own crate alongside the other backends
 - [x] `nexq-store-conformance` suite covering the operations implemented so far,
       running green against the memory store. 25 cases generated as individual
-      `#[tokio::test]`s by `conformance_tests!(new_store)`; verified to *fail* by
+      `#[tokio::test]`s by `conformance_tests!(new_store)`; verified to _fail_ by
       deliberately breaking five contract promises in the memory store
 - [x] Core engine operations: create, get, delete, list — with idempotent creation
       decided here, so every facade inherits it
-- [x] Queue URL construction *and parsing* from the configured public base URL — the
+- [x] Queue URL construction _and parsing_ from the configured public base URL — the
       CLI sends every subsequent request to whatever URL `CreateQueue`/`GetQueueUrl`
       returns, so both directions have to agree; `QueueUrls` owns the format and a
       round-trip test pins it
@@ -195,7 +196,7 @@ two consumers — the part still missing is the timer, not the expiry.
 
 - FIFO Queues
 - AWS Query/XML protocol
-- Per-principal authorization — the registry authenticates *who* a caller is, but
+- Per-principal authorization — the registry authenticates _who_ a caller is, but
   every authenticated principal can do everything. Rules like "this consumer may
   receive from `jobs` but not purge it" need a permissions model, and are the reason
   per-principal keys are the recommended default now rather than later.
@@ -228,7 +229,7 @@ has been exercised for real:
   and defaults question, not an architecture one. Per-principal keys mean a single
   consumer's key can be revoked without touching everyone else's, and the principal
   name already logged on every request identifies who actually made it. NexQ does not
-  yet act on *who* a principal is — see the authorization item under Future.
+  yet act on _who_ a principal is — see the authorization item under Future.
 - **Web UI: Angular with [Optimus UI](https://optimus.openng.org/installation)**
   (`ng add @openng/optimus-ui`), which needs Angular v21+ (v22 for Optimus v2) and
   RxJS 7.8.1+. Its component set — forms, tables, panels, charts — covers what the

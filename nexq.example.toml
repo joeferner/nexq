@@ -27,6 +27,14 @@ secret = "change-me"
 # bind_addr = "0.0.0.0:8080"
 # public_base_url = "http://localhost:8080"   # what queue URLs are built from
 # account_id = "000000000000"
+# max_clock_skew_secs = 900
+#
+# max_clock_skew_secs is how far a request's signed timestamp may be from this
+# server's clock, in either direction. It is what stops a captured request from being
+# replayed forever. Widen it if clients and server cannot agree on the time — an
+# air-gapped deployment with no NTP may need to. Setting it to 0 switches the check
+# off entirely, which makes captured requests replayable; the server logs a warning at
+# startup when it is.
 #
 # Queue URLs are "<public_base_url>/<account_id>/<queue-name>". NexQ has no accounts,
 # but real SQS URLs carry an id there and clients expect to find one, so account_id

@@ -37,6 +37,7 @@
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use figment::providers::{Env, Format, Toml};
 use figment::{Figment, Metadata, Profile, Provider};
@@ -145,6 +146,20 @@ pub struct AwsApiConfig {
         deserialize_with = "deserialize_account_id"
     )]
     pub account_id: String,
+
+    /// How far a request's signing timestamp may be from this server's clock before it
+    /// is refused, in seconds. Defaults to [`DEFAULT_MAX_CLOCK_SKEW_SECS`].
+    ///
+    /// This is what stops a captured request from being replayed forever: the signature
+    /// covers the timestamp, so an attacker cannot move it, and a window means an old
+    /// request eventually stops being accepted.
+    ///
+    /// **`0` disables the check**, which leaves captured requests replayable
+    /// indefinitely. That is a real trade an operator may have to make — an air-gapped
+    /// deployment with no NTP can drift far enough to refuse honest clients — but it
+    /// should be a deliberate choice, so the server says so at startup when it happens.
+    #[serde(default = "AwsApiConfig::default_max_clock_skew_secs")]
+    pub max_clock_skew_secs: u64,
 }
 
 /// A string that does not leak through `Debug`, `Display`, or serialization.
@@ -158,6 +173,10 @@ fn default_true() -> bool {
 
 /// Number of digits in an account id, matching AWS.
 const ACCOUNT_ID_DIGITS: usize = 12;
+
+/// Default clock-skew window: 15 minutes, matching what AWS allows for SigV4, so a
+/// client whose clock is good enough for real SQS is good enough here.
+pub const DEFAULT_MAX_CLOCK_SKEW_SECS: u64 = 15 * 60;
 
 /// Account id used when config does not name one.
 ///
@@ -323,6 +342,18 @@ impl AwsApiConfig {
         DEFAULT_ACCOUNT_ID.to_owned()
     }
 
+    fn default_max_clock_skew_secs() -> u64 {
+        DEFAULT_MAX_CLOCK_SKEW_SECS
+    }
+
+    /// The clock-skew window, or `None` if the check is switched off.
+    pub fn max_clock_skew(&self) -> Option<Duration> {
+        match self.max_clock_skew_secs {
+            0 => None,
+            seconds => Some(Duration::from_secs(seconds)),
+        }
+    }
+
     /// The configured base URL with any trailing slashes removed, so callers can
     /// join paths onto it without doubling the separator.
     pub fn base_url(&self) -> &str {
@@ -337,6 +368,7 @@ impl Default for AwsApiConfig {
             bind_addr: Self::default_bind_addr(),
             public_base_url: Self::default_public_base_url(),
             account_id: Self::default_account_id(),
+            max_clock_skew_secs: Self::default_max_clock_skew_secs(),
         }
     }
 }

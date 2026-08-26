@@ -168,6 +168,26 @@ impl ApiError {
         )
     }
 
+    /// The request's signing timestamp is too far from this server's clock.
+    ///
+    /// Says by how much, and what the allowance is: the usual cause is a clock that
+    /// needs setting, and a client cannot work that out from a bare refusal.
+    pub fn request_time_too_skewed(
+        drift: std::time::Duration,
+        tolerance: std::time::Duration,
+    ) -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "RequestTimeTooSkewed",
+            format!(
+                "The difference between the request time and the current time is too \
+                 large: {} seconds, and at most {} is allowed. Check this client's clock.",
+                drift.as_secs(),
+                tolerance.as_secs()
+            ),
+        )
+    }
+
     /// The receipt handle names no current claim — never issued, already used, or
     /// superseded because the claim expired and the message went to someone else.
     pub fn receipt_handle_is_invalid() -> Self {
