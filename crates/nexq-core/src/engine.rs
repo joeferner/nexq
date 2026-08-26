@@ -1181,6 +1181,15 @@ mod tests {
     /// this long has found a real bug rather than a slow machine.
     const LONGER_THAN_NEEDED: Duration = Duration::from_secs(10);
 
+    /// The bound for "this returned rather than waiting".
+    ///
+    /// Deliberately not [`A_SHORT_WAIT`], even though the operations it covers take
+    /// microseconds. These assertions only need to separate *returned* from *waited out a
+    /// deadline*, and every one of them sits against a deadline of
+    /// [`LONGER_THAN_NEEDED`] — so a second of headroom loses nothing and leaves far less
+    /// to go wrong on a machine that is busy doing something else.
+    const PROMPTLY: Duration = Duration::from_secs(1);
+
     fn waiting(wait: Duration) -> ReceiveRequest {
         ReceiveRequest {
             max_messages: 1,
@@ -1213,7 +1222,7 @@ mod tests {
 
         assert!(claimed.is_empty());
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "a zero wait must not wait: took {:?}",
             started.elapsed()
         );
@@ -1241,7 +1250,7 @@ mod tests {
 
         assert_eq!(claimed.len(), 1);
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "a message already waiting must not be waited for: took {:?}",
             started.elapsed()
         );
@@ -1282,7 +1291,7 @@ mod tests {
         );
         assert_eq!(claimed[0].message.body, "hello");
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "the wake should be prompt, not a poll: took {:?}",
             started.elapsed()
         );
@@ -1456,7 +1465,7 @@ mod tests {
 
         assert_eq!(claimed.len(), 3);
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "a short batch is an answer, not a reason to wait: took {:?}",
             started.elapsed()
         );
@@ -1512,11 +1521,7 @@ mod tests {
             .expect("receive");
 
         assert!(claimed.is_empty());
-        assert!(
-            started.elapsed() < A_SHORT_WAIT,
-            "took {:?}",
-            started.elapsed()
-        );
+        assert!(started.elapsed() < PROMPTLY, "took {:?}", started.elapsed());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1651,7 +1656,7 @@ mod tests {
 
         assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "a missing queue is known immediately: took {:?}",
             started.elapsed()
         );
@@ -1697,7 +1702,7 @@ mod tests {
         assert_eq!(claimed.len(), 1, "the hand-back should have woken it");
         assert_eq!(claimed[0].message.body, "hello");
         assert!(
-            started.elapsed() < A_SHORT_WAIT,
+            started.elapsed() < PROMPTLY,
             "and promptly, not after the hour the holder had asked for: took {:?}",
             started.elapsed()
         );
@@ -1820,11 +1825,7 @@ mod tests {
             .expect("receive");
 
         assert!(claimed.is_empty());
-        assert!(
-            started.elapsed() < A_SHORT_WAIT,
-            "took {:?}",
-            started.elapsed()
-        );
+        assert!(started.elapsed() < PROMPTLY, "took {:?}", started.elapsed());
     }
 
     #[tokio::test]
