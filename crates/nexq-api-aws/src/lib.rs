@@ -9,7 +9,9 @@ pub mod error;
 pub mod operations;
 pub mod protocol;
 pub mod server;
+pub mod sigv4;
 
 pub use error::ApiError;
 pub use protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER};
 pub use server::Server;
+pub use sigv4::SigningContext;

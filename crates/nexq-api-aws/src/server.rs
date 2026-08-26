@@ -5,20 +5,29 @@
 
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::http::{HeaderMap, header};
+use axum::extract::State;
+use axum::http::{HeaderMap, Method, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
-use nexq_core::AwsApiConfig;
+use nexq_core::{AuthConfig, AwsApiConfig};
 use serde_json::Value;
 use tokio::net::TcpListener;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::error::ApiError;
 use crate::operations;
 use crate::protocol::{JSON_CONTENT_TYPE, Operation, TARGET_HEADER, decode_input};
+use crate::sigv4::{self, SigningContext};
+
+/// What every request handler needs: the credentials to verify signatures against.
+///
+/// Shared rather than cloned per request, since the registry is read-only while
+/// serving.
+type FacadeState = Arc<AuthConfig>;
 
 /// A bound, not-yet-serving facade listener.
 ///
@@ -37,14 +46,17 @@ impl Server {
     ///
     /// Whether this facade should run at all is [`AwsApiConfig::enabled`], which the
     /// caller checks; reaching here means it is meant to serve.
-    pub async fn bind(config: &AwsApiConfig) -> io::Result<Self> {
+    ///
+    /// `auth` is the registry every request is verified against — shared with the other
+    /// facades, which present the same credentials differently.
+    pub async fn bind(config: &AwsApiConfig, auth: Arc<AuthConfig>) -> io::Result<Self> {
         let listener = TcpListener::bind(config.bind_addr).await?;
         let local_addr = listener.local_addr()?;
 
         Ok(Self {
             listener,
             local_addr,
-            router: router(),
+            router: router(auth),
         })
     }
 
@@ -60,13 +72,6 @@ impl Server {
         S: Future<Output = ()> + Send + 'static,
     {
         info!(facade = "aws", address = %self.local_addr, "listening");
-        // Loud on purpose, and removed once verification lands: right now anyone who
-        // can reach the port is served, signature or not.
-        warn!(
-            facade = "aws",
-            "requests are NOT authenticated: SigV4 signatures are accepted without \
-             being verified"
-        );
 
         axum::serve(self.listener, self.router)
             .with_graceful_shutdown(shutdown)
@@ -80,16 +85,25 @@ impl Server {
 /// `X-Amz-Target`, so there is one route rather than one per operation. Any method is
 /// accepted so that a misdirected request is answered by the protocol layer, with an
 /// error a client can read, rather than by a bare 405.
-///
-/// There is no authentication layer here yet: clients sign with SigV4 and the
-/// signature is accepted without being checked, so the credential registry is not
-/// consulted and an unsigned request is served just the same.
-pub fn router() -> Router {
-    Router::new().route("/", any(handle))
+pub fn router(auth: Arc<AuthConfig>) -> Router {
+    Router::new().route("/", any(handle)).with_state(auth)
 }
 
-async fn handle(headers: HeaderMap, body: Bytes) -> Response {
-    match route(&headers, &body).await {
+async fn handle(
+    State(auth): State<FacadeState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let context = SigningContext {
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        body: &body,
+    };
+
+    match route(&context, &auth).await {
         Ok(output) => json_response(&output),
         Err(error) => {
             // Not `message`: tracing renders a field by that name as the event body,
@@ -104,18 +118,25 @@ async fn handle(headers: HeaderMap, body: Bytes) -> Response {
     }
 }
 
-/// Decode a request far enough to know what it is asking for, then run it.
-async fn route(headers: &HeaderMap, body: &[u8]) -> Result<Value, ApiError> {
-    let target = headers
+/// Authenticate a request, then decode it far enough to know what it is asking for and
+/// run it.
+///
+/// Signature first: an unauthenticated caller learns nothing about which operations
+/// exist or whether its input parsed.
+async fn route(context: &SigningContext<'_>, auth: &AuthConfig) -> Result<Value, ApiError> {
+    let principal = sigv4::verify(context, auth)?;
+
+    let target = context
+        .headers
         .get(TARGET_HEADER)
         .ok_or_else(ApiError::missing_target)?
         .to_str()
         .map_err(|_| ApiError::unknown_operation("<non-ascii target>"))?;
 
     let operation = Operation::from_target(target)?;
-    let input = decode_input(body)?;
+    let input = decode_input(context.body)?;
 
-    debug!(%operation, "dispatching");
+    debug!(%operation, %principal, "dispatching");
     operations::dispatch(operation, input).await
 }
 
@@ -132,13 +153,21 @@ mod tests {
     use std::time::Duration;
 
     use axum::body::Body;
-    use axum::http::{Request as HttpRequest, StatusCode};
+    use axum::http::{HeaderValue, Request as HttpRequest, StatusCode};
     use http_body_util::BodyExt;
+    use nexq_core::{Credential, Secret};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tower::ServiceExt;
 
     use super::*;
+    use crate::sigv4::{ALGORITHM, Authorization, CredentialScope};
+
+    const KEY_ID: &str = "AKIATESTKEY";
+    const SECRET: &str = "test-secret";
+    const AMZ_DATE: &str = "20260826T005924Z";
+    const SCOPE_DATE: &str = "20260826";
+    const REGION: &str = "us-east-1";
 
     /// Bind to port 0 so tests never collide with a real deployment or each other.
     fn test_config() -> AwsApiConfig {
@@ -148,15 +177,99 @@ mod tests {
         }
     }
 
-    /// Send a request through the router, returning the status and decoded body.
-    async fn send(target: Option<&str>, body: &'static str) -> (StatusCode, Value) {
-        let mut request = HttpRequest::builder().method("POST").uri("/");
-        if let Some(target) = target {
-            request = request.header(TARGET_HEADER, target);
+    fn credential(secret: &str) -> Credential {
+        Credential {
+            name: "dev".to_owned(),
+            key_id: KEY_ID.to_owned(),
+            secret: Secret::new(secret),
         }
+    }
 
-        let response = router()
-            .oneshot(request.body(Body::from(body)).expect("request"))
+    fn test_auth() -> Arc<AuthConfig> {
+        Arc::new(AuthConfig {
+            credentials: vec![credential(SECRET)],
+        })
+    }
+
+    /// Sign a set of headers the way botocore does, returning them with an
+    /// `Authorization` header added.
+    fn sign(headers: HeaderMap, body: &[u8], signing_secret: &str) -> HeaderMap {
+        let mut headers = headers;
+        let mut names: Vec<String> = headers
+            .keys()
+            .map(|name| name.as_str().to_owned())
+            .collect();
+        names.sort();
+
+        let authorization = Authorization {
+            key_id: KEY_ID.to_owned(),
+            scope: CredentialScope {
+                date: SCOPE_DATE.to_owned(),
+                region: REGION.to_owned(),
+                service: crate::sigv4::SERVICE.to_owned(),
+            },
+            signed_headers: names.clone(),
+            signature: String::new(),
+        };
+
+        let uri: Uri = "/".parse().expect("uri");
+        let context = SigningContext {
+            method: &Method::POST,
+            uri: &uri,
+            headers: &headers,
+            body,
+        };
+        let signature = crate::sigv4::sign(
+            &context,
+            &authorization,
+            AMZ_DATE,
+            &credential(signing_secret),
+        )
+        .expect("sign");
+
+        let value = format!(
+            "{ALGORITHM} Credential={KEY_ID}/{SCOPE_DATE}/{REGION}/{}/aws4_request, \
+             SignedHeaders={}, Signature={signature}",
+            crate::sigv4::SERVICE,
+            names.join(";")
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&value).expect("authorization value"),
+        );
+
+        headers
+    }
+
+    /// The headers `aws-cli` sends, minus the signature.
+    fn unsigned_headers(target: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("nexq.test"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static(JSON_CONTENT_TYPE),
+        );
+        headers.insert("x-amz-date", HeaderValue::from_static(AMZ_DATE));
+        if let Some(target) = target {
+            headers.insert(
+                TARGET_HEADER,
+                HeaderValue::from_str(target).expect("target"),
+            );
+        }
+        headers
+    }
+
+    fn request_with(headers: HeaderMap, body: &str) -> HttpRequest<Body> {
+        let mut request = HttpRequest::builder().method("POST").uri("/");
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+        request.body(Body::from(body.to_owned())).expect("request")
+    }
+
+    async fn send_request(request: HttpRequest<Body>) -> (StatusCode, Value) {
+        let response = router(test_auth())
+            .oneshot(request)
             .await
             .expect("response");
 
@@ -171,9 +284,116 @@ mod tests {
         (status, serde_json::from_slice(&bytes).expect("json body"))
     }
 
+    /// A correctly signed request.
+    async fn send_signed(target: Option<&str>, body: &str) -> (StatusCode, Value) {
+        let headers = sign(unsigned_headers(target), body.as_bytes(), SECRET);
+        send_request(request_with(headers, body)).await
+    }
+
+    #[tokio::test]
+    async fn list_queues_succeeds_and_reports_no_queues() {
+        let (status, body) = send_signed(Some("AmazonSQS.ListQueues"), "{}").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn an_unsigned_request_is_rejected() {
+        let (status, body) = send_request(request_with(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            "{}",
+        ))
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            body["__type"],
+            "com.amazonaws.sqs#MissingAuthenticationToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_signed_with_the_wrong_secret_is_rejected() {
+        let headers = sign(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            b"{}",
+            "not-the-secret",
+        );
+        let (status, body) = send_request(request_with(headers, "{}")).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#SignatureDoesNotMatch");
+    }
+
+    #[tokio::test]
+    async fn a_body_swapped_after_signing_is_rejected() {
+        // Sign one body, send another: the payload hash is part of the signature.
+        let headers = sign(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            b"{}",
+            SECRET,
+        );
+        let (status, body) =
+            send_request(request_with(headers, r#"{"QueueNamePrefix":"x"}"#)).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#SignatureDoesNotMatch");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_key_id_is_rejected_without_revealing_which_part_was_wrong() {
+        let headers = sign(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            b"{}",
+            SECRET,
+        );
+        let auth = Arc::new(AuthConfig {
+            credentials: vec![Credential {
+                name: "someone-else".to_owned(),
+                key_id: "AKIASOMEONEELSE".to_owned(),
+                secret: Secret::new(SECRET),
+            }],
+        });
+
+        let response = router(auth)
+            .oneshot(request_with(headers, "{}"))
+            .await
+            .expect("response");
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).expect("json");
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#InvalidClientTokenId");
+        assert_eq!(
+            body["message"], "The security token included in the request is invalid.",
+            "the message must not say whether the key or the secret was the problem"
+        );
+    }
+
+    #[tokio::test]
+    async fn authentication_happens_before_routing() {
+        // An unsigned request for a nonexistent operation reports the signature
+        // problem, so an anonymous caller cannot probe which operations exist.
+        let (status, body) =
+            send_request(request_with(unsigned_headers(Some("AmazonSQS.Nope")), "{}")).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            body["__type"],
+            "com.amazonaws.sqs#MissingAuthenticationToken"
+        );
+    }
+
     #[tokio::test]
     async fn a_known_operation_without_a_handler_routes_but_is_not_implemented() {
-        let (status, body) = send(Some("AmazonSQS.SendMessage"), "{}").await;
+        let (status, body) = send_signed(Some("AmazonSQS.SendMessage"), "{}").await;
 
         // Recognised, but not built yet — which is not the same as unknown.
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
@@ -188,24 +408,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_queues_succeeds_and_reports_no_queues() {
-        let (status, body) = send(Some("AmazonSQS.ListQueues"), "{}").await;
+    async fn an_unknown_operation_is_a_client_error() {
+        let (status, body) = send_signed(Some("AmazonSQS.Nope"), "{}").await;
 
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, serde_json::json!({}));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["__type"],
+            "com.amazonaws.sqs#UnknownOperationException"
+        );
     }
 
     #[tokio::test]
-    async fn a_successful_response_is_aws_json() {
-        let response = router()
-            .oneshot(
-                HttpRequest::builder()
-                    .method("POST")
-                    .uri("/")
-                    .header(TARGET_HEADER, "AmazonSQS.ListQueues")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
+    async fn a_request_without_a_target_reports_the_query_protocol_gap() {
+        let body = "Action=ListQueues&Version=2012-11-05";
+        let (status, response) = send_signed(None, body).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(response["__type"], "com.amazonaws.sqs#MissingAction");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_body_is_rejected_before_the_operation_runs() {
+        let (status, body) = send_signed(Some("AmazonSQS.CreateQueue"), "{not json}").await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["__type"], "com.amazonaws.sqs#SerializationException");
+    }
+
+    #[tokio::test]
+    async fn an_empty_body_still_routes() {
+        // Parameterless operations may send nothing rather than `{}`.
+        let (status, _) = send_signed(Some("AmazonSQS.ListQueues"), "").await;
+
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn responses_are_aws_json() {
+        let headers = sign(
+            unsigned_headers(Some("AmazonSQS.ListQueues")),
+            b"{}",
+            SECRET,
+        );
+        let response = router(test_auth())
+            .oneshot(request_with(headers, "{}"))
             .await
             .expect("response");
 
@@ -220,83 +466,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unsigned_request_is_served_for_now() {
-        // No Authorization header at all. This asserts current behavior, not intent —
-        // it must flip to a rejection when SigV4 verification lands.
-        let (status, _) = send(Some("AmazonSQS.ListQueues"), "{}").await;
-
-        assert_eq!(status, StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn an_unknown_operation_is_a_client_error() {
-        let (status, body) = send(Some("AmazonSQS.Nope"), "{}").await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            body["__type"],
-            "com.amazonaws.sqs#UnknownOperationException"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_request_without_a_target_reports_the_query_protocol_gap() {
-        let (status, body) = send(None, "Action=ListQueues&Version=2012-11-05").await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["__type"], "com.amazonaws.sqs#MissingAction");
-    }
-
-    #[tokio::test]
-    async fn a_malformed_body_is_rejected_before_the_operation_runs() {
-        let (status, body) = send(Some("AmazonSQS.CreateQueue"), "{not json}").await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["__type"], "com.amazonaws.sqs#SerializationException");
-    }
-
-    #[tokio::test]
-    async fn an_empty_body_still_routes() {
-        // Parameterless operations may send nothing rather than `{}`.
-        let (status, _) = send(Some("AmazonSQS.ListQueues"), "").await;
-
-        assert_eq!(status, StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn errors_are_returned_as_aws_json() {
-        let response = router()
-            .oneshot(
-                HttpRequest::builder()
-                    .method("POST")
-                    .uri("/")
-                    .header(TARGET_HEADER, "AmazonSQS.Nope")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .expect("content type"),
-            JSON_CONTENT_TYPE
-        );
-    }
-
-    #[tokio::test]
     async fn binding_port_zero_reports_the_real_port() {
-        let server = Server::bind(&test_config()).await.expect("bind");
+        let server = Server::bind(&test_config(), test_auth())
+            .await
+            .expect("bind");
 
         assert_ne!(server.local_addr().port(), 0);
     }
 
     #[tokio::test]
     async fn serves_over_tcp_then_shuts_down_gracefully() {
-        let server = Server::bind(&test_config()).await.expect("bind");
+        let server = Server::bind(&test_config(), test_auth())
+            .await
+            .expect("bind");
         let address = server.local_addr();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -321,7 +503,8 @@ mod tests {
             .read_to_string(&mut response)
             .await
             .expect("read response");
-        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        // Unsigned over the wire, so this exercises the reject path end to end.
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
 
         shutdown_tx.send(()).expect("signal shutdown");
         tokio::time::timeout(Duration::from_secs(5), serving)

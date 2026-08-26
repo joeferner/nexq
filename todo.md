@@ -39,18 +39,22 @@ empty server is the smallest request that exercises all of it.
       from `aws --debug sqs list-queues` against the running facade, see below
 - [x] Request routing off `X-Amz-Target`, with JSON body decode — operations are a
       typed enum, so "not built yet" and "no such operation" are distinct answers
-- [ ] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
-      against the client's signature. **Currently signatures are accepted without
-      being checked** — an unsigned request, or one signed with the wrong secret, is
-      served. The server logs a warning at startup saying so; both must stop being
-      true here, and `an_unsigned_request_is_served_for_now` flips to a rejection.
-- [ ] Reject with SQS's own error shapes: `InvalidClientTokenId`,
+- [x] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
+      against the client's signature. Verified against a real botocore signature
+      captured from `aws --debug`, so correctness does not rest on reading the spec
+      correctly — see `reproduces_a_signature_that_botocore_computed`.
+- [x] Reject with SQS's own error shapes: `InvalidClientTokenId`,
       `SignatureDoesNotMatch`, and the JSON protocol's `__type` envelope
+- [ ] Reject stale signatures with a clock-skew window. The timestamp is used in the
+      signature but never checked for freshness, so **a captured request replays
+      forever**. Wants a configurable tolerance, since air-gapped clocks drift.
 - [x] `ListQueues` returning an empty list — an empty object, since real SQS omits
       `QueueUrls` when there are none and `aws sqs list-queues` then prints nothing
-- [ ] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
-      with a bad secret** — first half done (exit 0, no output, against the real
-      `aws-cli`); the bad-secret half waits on SigV4 verification above
+- [x] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
+      with a bad secret.** Against the real `aws-cli` 2.36.30: correct credentials
+      exit 0 with no output; a wrong secret reports `SignatureDoesNotMatch`; an
+      unknown key id reports `InvalidClientTokenId`; an unsigned request gets
+      `403 MissingAuthenticationToken`. Any region string works, as designed.
 
 What `aws-cli` 2.36.30 sends for `sqs list-queues`, captured against the facade:
 
@@ -149,6 +153,7 @@ in-process waiters instead of polling a backend.
 # M8 - SSL
 
 - [ ] Add SSL support to servers
+- [ ] Add SSL to clients
 
 ---
 

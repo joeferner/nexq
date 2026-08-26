@@ -8,6 +8,7 @@
 
 use std::error::Error;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use nexq_core::Config;
 use tokio::signal;
@@ -34,6 +35,10 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), BoxError> {
     let config = Config::load()?;
 
+    // One credential registry, shared by every facade — each presents the same
+    // principals in whatever way its protocol expects.
+    let auth = Arc::new(config.auth.clone());
+
     // Broadcasts "stop" to every facade at once, so one signal drains them all.
     let (shutdown_tx, _) = watch::channel(false);
     let mut facades = JoinSet::new();
@@ -41,7 +46,7 @@ async fn run() -> Result<(), BoxError> {
     if config.aws_api.enabled {
         // Bind before spawning, so a port conflict fails startup rather than
         // surfacing later from inside a task.
-        let server = nexq_api_aws::Server::bind(&config.aws_api).await?;
+        let server = nexq_api_aws::Server::bind(&config.aws_api, Arc::clone(&auth)).await?;
         facades.spawn(server.serve(shutdown_on(shutdown_tx.subscribe())));
     }
 

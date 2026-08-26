@@ -66,6 +66,50 @@ impl ApiError {
         )
     }
 
+    /// The request carried no `Authorization` header at all.
+    pub fn missing_authentication_token() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "MissingAuthenticationToken",
+            "Request is missing Authentication Token",
+        )
+    }
+
+    /// The `Authorization` header is present but cannot be understood. The detail is
+    /// safe to return: it describes the header's own structure, not the secret.
+    pub fn incomplete_signature(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "IncompleteSignature",
+            detail.into(),
+        )
+    }
+
+    /// The access key id is not in the credential registry.
+    ///
+    /// Same wording as real SQS, and deliberately identical for every unknown key so
+    /// it cannot be used to probe which ids exist.
+    pub fn invalid_client_token_id() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "InvalidClientTokenId",
+            "The security token included in the request is invalid.",
+        )
+    }
+
+    /// The signature did not match the one recomputed here.
+    ///
+    /// Carries no detail about why: what differed is a signal worth withholding, and
+    /// the specifics are logged instead.
+    pub fn signature_does_not_match() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "SignatureDoesNotMatch",
+            "The request signature we calculated does not match the signature you \
+             provided. Check your AWS Secret Access Key and signing method.",
+        )
+    }
+
     /// A real operation that is not built yet. Temporary, and not an AWS error code —
     /// it should disappear as the operations land.
     pub fn not_implemented(operation: impl std::fmt::Display) -> Self {
