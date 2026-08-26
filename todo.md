@@ -33,11 +33,10 @@ empty server is the smallest request that exercises all of it.
 
 - [x] Config: per-facade listener sections plus a shared credential registry, as a
       TOML file with `NEXQ_*__*` environment overrides
-- [ ] Axum server in `nexq-server`, mounting the SQS facade at the root
-- [ ] Identify the wire protocol the installed `aws-cli` v2 actually sends — AWS JSON
-      1.0 (`Content-Type: application/x-amz-json-1.0`, `X-Amz-Target: AmazonSQS.<Op>`),
-      not the older Query/XML protocol. Capture a real request before writing the
-      parser rather than working from memory.
+- [x] Axum server in `nexq-api-aws`, owning its own listener, with graceful shutdown;
+      `nexq-server` binds and runs it only when `aws_api.enabled`
+- [x] Identify the wire protocol the installed `aws-cli` v2 actually sends — captured
+      from `aws --debug sqs list-queues` against the running facade, see below
 - [ ] Request routing off `X-Amz-Target`, with JSON body decode
 - [ ] SigV4 verification: canonical request reconstruction, HMAC recompute, compare
       against the client's signature
@@ -47,10 +46,31 @@ empty server is the smallest request that exercises all of it.
 - [ ] **Gate: `aws --endpoint-url ... sqs list-queues` succeeds, and fails correctly
       with a bad secret**
 
+What `aws-cli` 2.36.30 sends for `sqs list-queues`, captured against the facade:
+
+```
+POST / HTTP/1.1
+X-Amz-Target: AmazonSQS.ListQueues
+Content-Type: application/x-amz-json-1.0
+x-amzn-query-mode: true
+X-Amz-Date: 20260826T005924Z
+Authorization: AWS4-HMAC-SHA256 Credential=AKIANEXQDEV/20260826/us-east-1/sqs/aws4_request,
+  SignedHeaders=content-type;host;x-amz-date;x-amz-target;x-amzn-query-mode, Signature=...
+
+{}
+```
+
 Notes worth pinning down here, since getting them wrong is silent and confusing:
 
-- SigV4 only needs signer and verifier to agree on the region string; it need not be a
-  real AWS region.
+- `x-amzn-query-mode: true` is sent on every request and is part of the signed
+  headers. It asks for Query-protocol-shaped errors over the JSON protocol, so error
+  responses have to account for it rather than assuming plain JSON error shapes.
+- The credential scope names the service as `sqs`, and the region is whatever the
+  client is configured with — SigV4 only needs signer and verifier to agree on it, so
+  it need not be a real AWS region.
+- The CLI surfaces a non-AWS error body verbatim: a plain 501 came back as
+  `An error occurred (501) when calling the ListQueues operation: <body>`. Useful for
+  debugging now, and a reminder that error shapes are what the CLI reports on.
 - The Query/XML protocol still matters for older SDKs, but is deliberately deferred
   until the JSON path works.
 
@@ -119,6 +139,10 @@ in-process waiters instead of polling a backend.
 - [ ] Repeat the run against at least one AWS SDK in another language, since SDK
       behavior differs from the CLI's in checksum validation and retries
 - [ ] `README.md`: the `aws configure` + `--endpoint-url` setup, end to end
+
+# M8 - SSL
+
+- [ ] Add SSL support to servers
 
 ---
 

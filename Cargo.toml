@@ -42,11 +42,18 @@ nexq-client = { path = "crates/nexq-client" }
 # entries are the intended choices, uncommented as the crate that needs one is
 # actually built.
 #
+axum = "0.8.9"
 figment = { version = "0.10.19", features = ["toml", "env"] }
 serde = { version = "1.0.229", features = ["derive"] }
+tokio = "1.53.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
-# tokio = { version = "1", features = ["full"] }
-# axum = "0.8"
+# Test-only.
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
+
+# aide = { version = "0.15", features = ["axum", "scalar"] }
 # aide = { version = "0.15", features = ["axum", "scalar"] }
 # schemars = "1"
 # serde = { version = "1", features = ["derive"] }

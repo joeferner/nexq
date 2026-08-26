@@ -8,7 +8,15 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axum = { workspace = true }
 nexq-core = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+tower = { workspace = true }
 
 [lints]
 workspace = true

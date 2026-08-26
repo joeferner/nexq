@@ -26,6 +26,9 @@ nexq-api-rest = { workspace = true }
 nexq-api-aws = { workspace = true }
 nexq-metrics = { workspace = true }
 nexq-keda = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

@@ -581,17 +581,26 @@ mod tests {
     }
 
     /// Keeps the shipped example from drifting out of sync with these types.
+    ///
+    /// Runs inside a jail even though it reads a fixed path: [`Jail`] sets environment
+    /// variables process-wide and holds a global lock while it does, so a test that
+    /// loads config outside one races the `NEXQ_*` overrides the jailed tests set.
+    /// `clear_env` then keeps the example — not the ambient environment — the only input.
     #[test]
     fn the_example_config_is_valid() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexq.example.toml");
-        let config = Config::load_from(path).expect("nexq.example.toml must stay loadable");
+        Jail::expect_with(|jail| {
+            jail.clear_env();
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexq.example.toml");
+            let config = Config::load_from(path).expect("nexq.example.toml must stay loadable");
 
-        assert_eq!(config.auth.credentials.len(), 1);
-        assert!(config.aws_api.enabled);
-        assert_eq!(
-            config.aws_api.queue_url("jobs"),
-            "http://localhost:8080/000000000000/jobs"
-        );
+            assert_eq!(config.auth.credentials.len(), 1);
+            assert!(config.aws_api.enabled);
+            assert_eq!(
+                config.aws_api.queue_url("jobs"),
+                "http://localhost:8080/000000000000/jobs"
+            );
+            Ok(())
+        });
     }
 
     #[test]
