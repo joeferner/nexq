@@ -67,7 +67,11 @@ fn the_document_describes_the_route_that_is_actually_served() {
         [
             "/api/v1/queues",
             "/api/v1/queues/{queue}",
+            "/api/v1/queues/{queue}/messages",
+            "/api/v1/queues/{queue}/messages/delete",
             "/api/v1/queues/{queue}/messages/receive",
+            "/api/v1/queues/{queue}/messages/visibility",
+            "/api/v1/queues/{queue}/messages/{receipt_handle}",
         ]
     );
 

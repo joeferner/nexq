@@ -21,8 +21,8 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use nexq_core::engine::{MAX_QUEUES_PER_PAGE, QueueQuery};
-use nexq_core::model::{Queue, QueueAttributes, QueueName};
+use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery};
+use nexq_core::model::{MessageCounts, Queue, QueueAttributes, QueueName};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +75,31 @@ pub struct QueueResponse {
 
     /// How the queue is configured.
     pub attributes: QueueAttributesResponse,
+
+    /// How many messages the queue holds, present only when `counts=true` was asked for.
+    ///
+    /// Off by default because it costs an aggregate over the queue's messages — once per
+    /// queue, so asking for it while listing a thousand queues asks for a thousand of them.
+    /// Cheap against the in-memory backend and not necessarily against a durable one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counts: Option<MessageCountsResponse>,
+}
+
+/// How many messages a queue holds, in three disjoint groups that together cover all of
+/// them.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MessageCountsResponse {
+    /// Claimable right now.
+    pub visible: u64,
+
+    /// In flight: handed to a consumer whose claim has not lapsed, and not yet deleted.
+    pub not_visible: u64,
+
+    /// Waiting out a delay, and never yet delivered.
+    pub delayed: u64,
+
+    /// The three above added up — every message the queue holds.
+    pub total: u64,
 }
 
 /// A queue's settings.
@@ -129,6 +154,20 @@ pub struct ListQueuesQuery {
 
     /// Resume after this queue — the `next_cursor` from the previous page.
     pub cursor: Option<String>,
+
+    /// Include message counts for every queue on the page.
+    ///
+    /// Off by default: it costs one aggregate per queue, so a page of a thousand asks for
+    /// a thousand of them. Ask for it when you are showing depths, not by habit.
+    pub counts: Option<bool>,
+}
+
+/// How much of a queue to report.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct QueueViewQuery {
+    /// Include the queue's message counts.
+    pub counts: Option<bool>,
 }
 
 /// One page of queues.
@@ -156,45 +195,93 @@ impl From<Queue> for QueueResponse {
                 delay_seconds: queue.attributes.delay.as_secs(),
                 receive_wait_time_seconds: queue.attributes.receive_wait_time.as_secs(),
             },
+            counts: None,
         }
     }
 }
 
+impl From<MessageCounts> for MessageCountsResponse {
+    fn from(counts: MessageCounts) -> Self {
+        Self {
+            visible: counts.visible,
+            not_visible: counts.not_visible,
+            delayed: counts.delayed,
+            total: counts.total(),
+        }
+    }
+}
+
+impl QueueResponse {
+    /// Attach counts, or leave them off — whichever the request asked for.
+    ///
+    /// Takes the engine so that "asked for" and "fetched" cannot come apart: there is no
+    /// path here that queries the counts and then discards them, or that reports them
+    /// having queried nothing.
+    async fn counted(
+        mut self,
+        engine: &Engine,
+        name: &QueueName,
+        wanted: bool,
+    ) -> Result<Self, ApiError> {
+        if wanted {
+            self.counts = Some(engine.message_counts(name).await?.into());
+        }
+
+        Ok(self)
+    }
+}
+
 impl QueueAttributesBody {
-    /// Validate and fill in the defaults.
+    /// Validate and fill in the defaults, for creating a queue.
     ///
     /// Out-of-range values are refused rather than clamped, for the same reason a receive
     /// refuses one: quietly storing something other than what was asked for leaves the
     /// caller believing a setting took effect.
     fn to_attributes(&self) -> Result<QueueAttributes, ApiError> {
-        let defaults = QueueAttributes::default();
+        self.onto(QueueAttributes::default())
+    }
 
+    /// Apply only the attributes this body names, leaving the rest as they were.
+    ///
+    /// What a `PATCH` needs, and the difference from [`to_attributes`](Self::to_attributes)
+    /// is the whole distinction between the two verbs: an attribute a `PUT` does not name
+    /// takes its *default*, while one a `PATCH` does not name keeps its *current value*.
+    /// Getting those the same way round would make `PATCH` silently reset everything it was
+    /// not told about, which is the classic way a partial update destroys configuration.
+    fn onto(&self, current: QueueAttributes) -> Result<QueueAttributes, ApiError> {
         Ok(QueueAttributes {
             visibility_timeout: seconds(
                 "visibility_timeout_seconds",
                 self.visibility_timeout_seconds,
                 VISIBILITY_TIMEOUT_MAX_SECONDS,
-                defaults.visibility_timeout,
+                current.visibility_timeout,
             )?,
             delay: seconds(
                 "delay_seconds",
                 self.delay_seconds,
                 DELAY_MAX_SECONDS,
-                defaults.delay,
+                current.delay,
             )?,
             receive_wait_time: seconds(
                 "receive_wait_time_seconds",
                 self.receive_wait_time_seconds,
                 RECEIVE_WAIT_MAX_SECONDS,
-                defaults.receive_wait_time,
+                current.receive_wait_time,
             )?,
             // Not settable here while nothing enforces them — see the note on
-            // `QueueAttributesBody`. Spelled out rather than `..defaults` so that adding a
+            // `QueueAttributesBody`. Spelled out rather than `..current` so that adding a
             // field to the model is a compile error here, and a decision about whether this
-            // facade should expose it, rather than a silent default.
-            max_receive_count: defaults.max_receive_count,
-            dead_letter_queue: defaults.dead_letter_queue,
+            // facade should expose it, rather than a silent carry-over.
+            max_receive_count: current.max_receive_count,
+            dead_letter_queue: current.dead_letter_queue,
         })
+    }
+
+    /// Whether this body asks for nothing at all.
+    fn is_empty(&self) -> bool {
+        self.visibility_timeout_seconds.is_none()
+            && self.delay_seconds.is_none()
+            && self.receive_wait_time_seconds.is_none()
     }
 }
 
@@ -239,10 +326,50 @@ pub async fn put_queue(
 pub async fn get_queue(
     State(facade): State<FacadeState>,
     Path(QueuePath { queue }): Path<QueuePath>,
+    Query(view): Query<QueueViewQuery>,
 ) -> Result<Json<QueueResponse>, ApiError> {
     let name = QueueName::new(queue)?;
+    let queue: QueueResponse = facade.engine.get_queue(&name).await?.into();
 
-    Ok(Json(facade.engine.get_queue(&name).await?.into()))
+    Ok(Json(
+        queue
+            .counted(&facade.engine, &name, view.counts.unwrap_or(false))
+            .await?,
+    ))
+}
+
+/// `PATCH /api/v1/queues/{queue}`
+///
+/// A **partial** update: an attribute the body does not name keeps its current value rather
+/// than reverting to a default. That is the difference from `PUT`, which is why both exist —
+/// `PUT` says what a queue should be, `PATCH` changes part of what it is.
+///
+/// All-or-nothing, inherited from the engine: a request mixing a good attribute with a bad
+/// one changes neither, so a caller is never left with half a change applied.
+pub async fn patch_queue(
+    State(facade): State<FacadeState>,
+    Path(QueuePath { queue }): Path<QueuePath>,
+    body: OptionalJson<QueueAttributesBody>,
+) -> Result<Json<QueueResponse>, ApiError> {
+    let name = QueueName::new(queue)?;
+    let body = body.unwrap_or_default();
+
+    // A `PATCH` naming nothing is a request that cannot have been meant: it would touch
+    // `last_modified_at` and change nothing else, which reads as a change that did not
+    // happen.
+    if body.is_empty() {
+        return Err(ApiError::bad_request(
+            "empty_update",
+            "name at least one attribute to change",
+        ));
+    }
+
+    let updated = facade
+        .engine
+        .set_queue_attributes(&name, |current| body.onto(current))
+        .await?;
+
+    Ok(Json(updated.into()))
 }
 
 /// `DELETE /api/v1/queues/{queue}`
@@ -295,8 +422,19 @@ pub async fn list_queues(
         })
         .await?;
 
+    let wanted = query.counts.unwrap_or(false);
+    let mut queues = Vec::with_capacity(page.queues.len());
+    for queue in page.queues {
+        let name = queue.name.clone();
+        queues.push(
+            QueueResponse::from(queue)
+                .counted(&facade.engine, &name, wanted)
+                .await?,
+        );
+    }
+
     Ok(Json(ListQueuesResponse {
-        queues: page.queues.into_iter().map(QueueResponse::from).collect(),
+        queues,
         next_cursor: page.next.map(|name| name.as_str().to_owned()),
     }))
 }
@@ -348,10 +486,11 @@ pub fn get_queue_docs(operation: TransformOperation) -> TransformOperation {
         .description(
             "Returns the queue's name, when it was created, when its attributes were last \
              changed, and those attributes.\n\n\
-             Message counts are not part of this yet: a listing would otherwise cost one \
-             aggregate query per queue on the page, and how cheap that can be made depends \
-             on the storage backend. Ask the SQS facade's `GetQueueAttributes` for counts \
-             in the meantime.",
+             Add `?counts=true` for how many messages it holds, in three disjoint groups \
+             that together cover all of them: claimable now, in flight with a live claim, \
+             and waiting out a delay. Off by default because it costs an aggregate over the \
+             queue's messages, which is nearly free against the in-memory backend and not \
+             necessarily against a durable one.",
         )
         .response_with::<200, Json<QueueResponse>, _>(|response| {
             response.description("The queue and its attributes.")
@@ -363,6 +502,38 @@ pub fn get_queue_docs(operation: TransformOperation) -> TransformOperation {
             response.description("No queue by that name.")
         })
         .with(crate::error::needs_a_token)
+}
+
+pub fn patch_queue_docs(operation: TransformOperation) -> TransformOperation {
+    operation
+        .id("patchQueue")
+        .summary("Change a queue's attributes")
+        .description(
+            "A **partial** update: an attribute this body does not name keeps its current \
+             value rather than reverting to a default. That is the whole difference from \
+             `PUT`, which says what a queue should *be* — so `PUT` with one attribute \
+             resets the others and `PATCH` with one attribute leaves them alone.\n\n\
+             All-or-nothing: a request mixing a valid attribute with an invalid one changes \
+             neither, so you are never left with half a change applied. A request naming no \
+             attributes at all is refused rather than treated as a no-op that still moves \
+             `last_modified_at`.\n\n\
+             Only the three attributes this server has behaviour behind can be set. One it \
+             does not implement is refused rather than accepted and ignored.",
+        )
+        .response_with::<200, Json<QueueResponse>, _>(|response| {
+            response.description("The queue as it now is, with `last_modified_at` moved.")
+        })
+        .response_with::<400, Json<ErrorBody>, _>(|response| {
+            response.description(
+                "The name is not legal, no attribute was named, or one is outside its range \
+                 or not implemented.",
+            )
+        })
+        .response_with::<404, Json<ErrorBody>, _>(|response| {
+            response.description("No queue by that name.")
+        })
+        .with(crate::error::needs_a_token)
+        .with(crate::error::reads_a_json_body)
 }
 
 pub fn delete_queue_docs(operation: TransformOperation) -> TransformOperation {
@@ -394,7 +565,10 @@ pub fn list_queues_docs(operation: TransformOperation) -> TransformOperation {
         .id("listQueues")
         .summary("List queues")
         .description(
-            "In name order, one page at a time, optionally filtered by `prefix`.\n\n\
+            "In name order, one page at a time, optionally filtered by `prefix`. Add \
+             `?counts=true` for each queue's message counts — off by default because it \
+             costs one aggregate *per queue on the page*, so a page of a thousand asks for \
+             a thousand of them.\n\n\
              When `next_cursor` is not null there are more: pass it back as `cursor` to \
              continue. It is a **cursor, not an offset** — it names where to resume, so a \
              queue created or deleted between two requests cannot make you skip one or see \

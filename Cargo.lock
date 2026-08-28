@@ -656,6 +656,7 @@ version = "0.1.0"
 dependencies = [
  "aide",
  "axum",
+ "base64",
  "chrono",
  "http-body-util",
  "nexq-api-aws",

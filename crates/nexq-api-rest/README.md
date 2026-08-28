@@ -10,12 +10,12 @@ It is also the contract every client is generated from — the CLI, the web UI, 
 published SDK — so the routes and types in this crate are the one definition of the API,
 and [`openapi.json`](openapi.json) is generated from them rather than written.
 
-> **Under construction.** Queues are a complete resource — create, read, list with paging,
-> delete — and messages are not: `receive` is the only message operation, so nothing here
-> can send or delete one yet. The plumbing around it all is real: listener, TLS,
-> authentication, one error envelope, long polling, a generated and committed spec, and
-> browsable documentation. See [`todo.md`](../../todo.md) M9 for the order the rest arrives
-> in. Until sending lands, the SQS facade is the one that can drive a queue end to end.
+> **Under construction, but usable.** The queue and message surfaces are both complete —
+> create, read, list, reconfigure and delete a queue; send, receive, delete, re-time and
+> purge messages — so a producer and a consumer can now run entirely against this API.
+> What is still missing is the *extended* feature set this facade exists for: position in
+> queue, dead-letter queues, and redrive. Per-message priority is here already, since the
+> SQS-compatible facade cannot express it at all. See [`todo.md`](../../todo.md) M9 and M10.
 
 # Features
 
@@ -80,27 +80,50 @@ server hands out and the client must send back.
 - :white_check_mark: `GET /queues` — one page at a time, filtered by `prefix`, with
   **cursor** paging rather than offsets: a queue created or deleted between pages cannot
   make a caller skip one or see it twice
-- :ballot_box_with_check: Attributes on create — `visibility_timeout_seconds`,
-  `delay_seconds`, `receive_wait_time_seconds`. An out-of-range value is refused rather than
-  clamped, and an unrecognised one refused rather than dropped
-- :scroll: Changing attributes after creation
-- :scroll: The message counts
-- :scroll: Purge
+- :white_check_mark: `PATCH /queues/{queue}` — a **partial** update: an attribute it does
+  not name keeps its current value, where `PUT` would reset it to a default. All-or-nothing,
+  so a request mixing a good attribute with a bad one changes neither
+- :white_check_mark: Attributes — `visibility_timeout_seconds`, `delay_seconds`,
+  `receive_wait_time_seconds`. An out-of-range value is refused rather than clamped, and an
+  unrecognised one refused rather than dropped
+- :white_check_mark: Message counts, via `?counts=true` on either read. Off by default
+  because it costs one aggregate **per queue**, so a page of a thousand asks for a thousand
+- :scroll: A dead-letter queue and `max_receive_count`, which arrive with DLQ itself.
+  Refused rather than accepted-and-ignored in the meantime
 
 ## Message operations
 
-- :ballot_box_with_check: **Receive** — `POST /api/v1/queues/{queue}/messages/receive`, with
-  `max_messages`, `visibility_timeout_seconds`, and `wait_time_seconds`. Returns the
-  message id, receipt handle, body, priority, delivery count, and how long the claim has
-  left. Message attributes and absolute timestamps are not carried yet — see
-  [What receive leaves out](#what-receive-leaves-out)
+The collection is `/api/v1/queues/{queue}/messages`; one claim is
+`/api/v1/queues/{queue}/messages/{receipt_handle}`.
+
+- :white_check_mark: `POST /messages` — **send**, always a list. Sending one message is a
+  list of one, so SQS's `SendMessage`/`SendMessageBatch` pair collapses into a single
+  operation. Per-entry results, so one bad message does not sink the rest, identified by
+  **position** rather than by ids the client has to invent
+- :white_check_mark: `POST /messages/receive` — `max_messages`,
+  `visibility_timeout_seconds`, `wait_time_seconds`. Returns the message id, receipt handle,
+  body, priority, delivery count, attributes, and how long the claim has left
+- :white_check_mark: `DELETE /messages/{receipt_handle}` — finish with a message. A spent
+  handle is refused rather than silently accepted
+- :white_check_mark: `PATCH /messages/{receipt_handle}` — re-time a claim, counted from now,
+  so the one call both extends a claim and hands a message back with `0`
+- :white_check_mark: `POST /messages/delete` and `POST /messages/visibility` — the same, many
+  at a time. A `POST` rather than a `DELETE` with a body, which proxies mishandle
+- :white_check_mark: `DELETE /messages` — **purge**: emptying the message collection while
+  keeping the queue, which is what `DELETE` on a collection means. Takes in-flight messages
+  with it, and reports how many went
+- :white_check_mark: **Message attributes** on send and receive — `string`, `number`, and
+  `binary`, with the producer's own label. Binary travels base64 and is stored as the bytes
+  it decodes to, which is what makes the SQS facade's checksum of it come out right
+- :white_check_mark: **Per-message priority** on send, which the SQS facade cannot express —
+  messages sent through that one all arrive at the default
 - :white_check_mark: Long polling, on the **same** in-process waiter registry the SQS facade
   uses — one mechanism with two protocol faces, not two implementations. A send through
   either facade wakes a consumer waiting on the other
 - :white_check_mark: Shutdown releases a waiting consumer with its ordinary empty answer
   rather than holding the shutdown open or dropping the connection
-- :scroll: Send, delete, and change visibility
-- :scroll: Batches
+- :scroll: Absolute timestamps on a received message — see
+  [What receive leaves out](#what-receive-leaves-out)
 
 ## The extensions this facade exists for
 
@@ -134,12 +157,13 @@ than the surface is:
 
 | | |
 | --- | --- |
-| Documented operations | 5 — `putQueue`, `getQueue`, `deleteQueue`, `listQueues`, `receiveMessages` |
+| Documented operations | 12 |
 | Routes serving documentation | 3 (the spec, the page, and its two assets) |
 | Authentication | complete |
 | Error envelope | complete, and mapped from every `EngineError` variant |
-| Queue resource | complete except changing attributes, counts, and purge |
-| Message operations | `receive` only — no send, delete, change-visibility, or batches |
+| Queue resource | complete, bar the dead-letter settings that arrive with DLQ |
+| Message operations | complete: send, receive, delete, re-time, purge, and the multi-entry forms |
+| The extensions this exists for | priority only; position and DLQ are M10 |
 
 A path this facade does not have answers in its own envelope rather than with an empty
 `404`, so a client parsing errors never has to special-case a wrong URL.
@@ -225,47 +249,151 @@ guarantee carried onto the wire rather than re-derived from it.
 A cursor is this server's to issue, so a value it did not issue says so — `invalid_cursor`,
 not a complaint about your queue name.
 
-## Receiving a message
+## Sending
 
-There is no send endpoint yet, so this uses the SQS facade to produce and this one to
-consume — which is also the clearest demonstration that they are one queue and not two:
+Always a list, even for one message — which is why there is no separate batch operation to
+choose between:
 
 ```sh
-export AWS_ACCESS_KEY_ID=AKIANEXQDEV
-export AWS_SECRET_ACCESS_KEY=change-me
-export AWS_DEFAULT_REGION=us-east-1
-export AWS_ENDPOINT_URL_SQS=http://localhost:8080
-
-aws sqs create-queue --queue-name jobs
-aws sqs send-message \
-  --queue-url http://localhost:8080/000000000000/jobs \
-  --message-body "hello from sqs"
+curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages": [
+        {"body": "urgent work", "priority": 10,
+         "attributes": {"City": {"type": "string", "value": "Any City"}}},
+        {"body": "ordinary work"}
+      ]}'
 ```
+
+```json
+{
+  "results": [
+    {"index": 0, "status": "accepted", "message_id": "6d3d9901-a845-4564-a4cf-e920283588b7"},
+    {"index": 1, "status": "accepted", "message_id": "02cbf29f-3360-47a2-8e8e-a641349a216c"}
+  ]
+}
+```
+
+**A request carrying several messages is not a transaction.** Each is accepted or refused on
+its own, and the response reports both — so nine good messages are not lost to one bad one:
+
+```json
+{"index": 1, "status": "refused",
+ "error": {"code": "invalid_delay", "message": "delay_seconds must be between 0 and 900, got 901"}}
+```
+
+That is still a `200`, so **read the results** rather than relying on an error being raised.
+Entries are identified by their position in the request, so unlike SQS there are no ids to
+invent and no duplicate-id failure to handle. A queue that does not exist is one raised `404`
+rather than the same failure repeated in every entry, because the queue belongs to the
+request and not to any message in it.
+
+Two whole-request refusals remain: an empty list (`empty_request`) and more than ten
+(`too_many_entries`). Ten is the SQS facade's limit too, so a batch that works through one
+works through the other.
+
+### Attributes and priority
+
+`priority` is NexQ's own — the SQS-compatible facade cannot express it, so messages sent
+through that one all arrive at the default. Higher is served first, which is why the receive
+below returns `urgent work` first despite it being sent first only by coincidence.
+
+Attributes are `string`, `number`, or `binary`, with an optional label of the producer's own
+(`{"type": "string", "label": "uuid", ...}` is stored the way SQS spells `String.uuid`, so
+that facade reports it correctly). A `binary` value travels base64 and is **stored as the
+bytes it decodes to** — text that happens to look like base64 and the bytes it decodes to
+stay different things, which is what makes the SQS facade's checksum of it come out right.
+
+## Receiving
 
 ```sh
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"max_messages": 10}'
+  -d '{"max_messages": 2}'
 ```
 
 ```json
 {
   "messages": [
     {
-      "id": "18fb94f9-cdd4-4c5f-a94c-41db40e70641",
-      "receipt_handle": "ed2c38cc-c6c1-4121-aeaf-1fde14e314b0",
-      "body": "hello from sqs",
+      "id": "6d3d9901-a845-4564-a4cf-e920283588b7",
+      "receipt_handle": "a532dc51-07bc-4c78-9936-56e3ab8cbb1c",
+      "body": "urgent work",
+      "priority": 10,
+      "receive_count": 1,
+      "claim_expires_in_seconds": 29,
+      "attributes": {"City": {"type": "string", "value": "Any City"}}
+    },
+    {
+      "id": "02cbf29f-3360-47a2-8e8e-a641349a216c",
+      "receipt_handle": "2b275678-25a7-4693-9a20-2572bf9c74f2",
+      "body": "ordinary work",
       "priority": 0,
       "receive_count": 1,
-      "claim_expires_in_seconds": 29
+      "claim_expires_in_seconds": 29,
+      "attributes": {}
     }
   ]
 }
 ```
 
-The `id` is the same `MessageId` `send-message` returned. There is no way to **delete** the
-message yet, so it becomes claimable again when the visibility timeout lapses.
+## Finishing, or handing back
+
+A receipt handle identifies **one claim**, not the message: a redelivery comes with a new
+one. Deleting is how a consumer says it is done — until then the message comes back when its
+claim lapses, which is what makes delivery at-least-once.
+
+```sh
+# Done with it.
+curl -s -X DELETE "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" -H "Authorization: Bearer $TOKEN"
+
+# Need longer: extend the claim, counted from now.
+curl -s -X PATCH "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"visibility_timeout_seconds": 300}'
+
+# Cannot do it: hand it straight back for someone else.
+curl -s -X PATCH "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"visibility_timeout_seconds": 0}'
+```
+
+Handing a message back with `0` makes it claimable at once **and wakes a consumer that is
+long-polling for one**, so work one consumer could not do reaches the next without waiting
+out a timeout. The handle stays usable until someone else claims the message and is given a
+new one — re-timing a claim changes when it ends, not whose it is.
+
+Several at a time, with the same per-entry results as a send:
+
+```sh
+curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/delete" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"receipt_handles": ["…", "…"]}'
+
+curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/visibility" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"changes": [{"receipt_handle": "…", "visibility_timeout_seconds": 300}]}'
+```
+
+A `POST` rather than a `DELETE` carrying a body: a body on `DELETE` is legal and widely
+mishandled by proxies and clients.
+
+## Purging
+
+```sh
+curl -s -X DELETE "$NEXQ/api/v1/queues/jobs/messages" -H "Authorization: Bearer $TOKEN"
+# {"purged":2}
+```
+
+`DELETE` on the *message collection*, where deleting the queue itself is `DELETE` one level
+up. **Irreversible, and it takes in-flight messages with it** — a consumer working on a
+message right now finds its handle refused, because the message is gone. Sparing claimed
+messages would be a purge that quietly did not purge, since they would reappear when their
+claims lapsed.
+
+Unlike SQS there is no sixty-second cooldown: SQS needs one because its purge is
+asynchronous, and this one has finished by the time it answers.
 
 Every field of the body is optional, and no body at all is a plain poll of one message under
 the queue's own defaults:
@@ -310,13 +438,10 @@ Shutting the server down releases waiting consumers immediately with an empty re
 
 ## What receive leaves out
 
-Two things, both deliberate, both waiting on decisions rather than on work:
-
-- **Message attributes.** Carrying them means deciding how a binary value is represented,
-  which belongs with the OpenAPI schemas rather than being invented here first.
-- **Absolute timestamps** — `enqueued_at` and friends. A date format needs a date crate, and
-  choosing one halfway would churn every generated client. What a consumer actually needs
-  from a claim is a duration, which is what it gets.
+One thing: **absolute timestamps** — `enqueued_at`, and when a message was first delivered.
+What a consumer actually needs from a claim is how long it has, which is a duration and does
+not depend on the client's clock agreeing with the server's. The format question is settled
+now that queue timestamps are RFC 3339, so this is a small addition rather than a decision.
 
 Both are on the SQS facade already, so nothing is unreachable in the meantime.
 
@@ -393,6 +518,12 @@ on, and a `message` for a human that may change:
 | 400 | `invalid_queue_attribute` | An attribute is outside its range, which the message gives |
 | 400 | `invalid_limit` | A page limit outside 1–1000 |
 | 400 | `invalid_cursor` | A cursor this server did not issue |
+| 400 | `empty_update` | A `PATCH` naming no attribute to change |
+| 400 | `empty_request` | A list with no entries |
+| 400 | `too_many_entries` | More than ten entries in one request |
+| 400 | `invalid_delay` | A per-message delay outside 0–900 |
+| 400 | `invalid_visibility_timeout` | A visibility timeout outside 0–43200 |
+| 400 | `invalid_message_attribute` | An attribute's value does not match its type, or its label would not survive the round trip |
 | 415 | `unsupported_media_type` | A body was sent as something other than `application/json`. Send no body at all to use the defaults |
 | 409 | `queue_already_exists` | A queue of that name exists with different attributes |
 | 409 | `conflict` | Concurrent change; the request was fine and retrying should work |

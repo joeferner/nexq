@@ -9,9 +9,23 @@
     "/api/v1/queues": {
       "get": {
         "summary": "List queues",
-        "description": "In name order, one page at a time, optionally filtered by `prefix`.\n\nWhen `next_cursor` is not null there are more: pass it back as `cursor` to continue. It is a **cursor, not an offset** — it names where to resume, so a queue created or deleted between two requests cannot make you skip one or see it twice. That is the storage layer's keyset guarantee carried onto the wire rather than re-derived from it, and it is why there is no \"page number\".\n\nA cursor is this server's to issue. Constructing one yourself is not supported and is refused rather than interpreted. An empty result is a normal answer, not an error.",
+        "description": "In name order, one page at a time, optionally filtered by `prefix`. Add `?counts=true` for each queue's message counts — off by default because it costs one aggregate *per queue on the page*, so a page of a thousand asks for a thousand of them.\n\nWhen `next_cursor` is not null there are more: pass it back as `cursor` to continue. It is a **cursor, not an offset** — it names where to resume, so a queue created or deleted between two requests cannot make you skip one or see it twice. That is the storage layer's keyset guarantee carried onto the wire rather than re-derived from it, and it is why there is no \"page number\".\n\nA cursor is this server's to issue. Constructing one yourself is not supported and is refused rather than interpreted. An empty result is a normal answer, not an error.",
         "operationId": "listQueues",
         "parameters": [
+          {
+            "in": "query",
+            "name": "counts",
+            "description": "Include message counts for every queue on the page.\n\n Off by default: it costs one aggregate per queue, so a page of a thousand asks for\n a thousand of them. Ask for it when you are showing depths, not by habit.",
+            "schema": {
+              "description": "Include message counts for every queue on the page.\n\n Off by default: it costs one aggregate per queue, so a page of a thousand asks for\n a thousand of them. Ask for it when you are showing depths, not by habit.",
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "default": null
+            },
+            "style": "form"
+          },
           {
             "in": "query",
             "name": "cursor",
@@ -105,7 +119,7 @@
     "/api/v1/queues/{queue}": {
       "get": {
         "summary": "Read a queue",
-        "description": "Returns the queue's name, when it was created, when its attributes were last changed, and those attributes.\n\nMessage counts are not part of this yet: a listing would otherwise cost one aggregate query per queue on the page, and how cheap that can be made depends on the storage backend. Ask the SQS facade's `GetQueueAttributes` for counts in the meantime.",
+        "description": "Returns the queue's name, when it was created, when its attributes were last changed, and those attributes.\n\nAdd `?counts=true` for how many messages it holds, in three disjoint groups that together cover all of them: claimable now, in flight with a live claim, and waiting out a delay. Off by default because it costs an aggregate over the queue's messages, which is nearly free against the in-memory backend and not necessarily against a durable one.",
         "operationId": "getQueue",
         "parameters": [
           {
@@ -118,6 +132,20 @@
               "type": "string"
             },
             "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "counts",
+            "description": "Include the queue's message counts.",
+            "schema": {
+              "description": "Include the queue's message counts.",
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "default": null
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -326,6 +354,260 @@
             }
           }
         }
+      },
+      "patch": {
+        "summary": "Change a queue's attributes",
+        "description": "A **partial** update: an attribute this body does not name keeps its current value rather than reverting to a default. That is the whole difference from `PUT`, which says what a queue should *be* — so `PUT` with one attribute resets the others and `PATCH` with one attribute leaves them alone.\n\nAll-or-nothing: a request mixing a valid attribute with an invalid one changes neither, so you are never left with half a change applied. A request naming no attributes at all is refused rather than treated as a no-op that still moves `last_modified_at`.\n\nOnly the three attributes this server has behaviour behind can be set. One it does not implement is refused rather than accepted and ignored.",
+        "operationId": "patchQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "Settings to create a queue with. Every field is optional and falls back to the\n server's default. An unrecognised field is refused rather than ignored, so a setting\n never looks applied when it was dropped.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueAttributesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The queue as it now is, with `last_modified_at` moved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name is not legal, no attribute was named, or one is outside its range or not implemented.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues/{queue}/messages": {
+      "post": {
+        "summary": "Send messages to a queue",
+        "description": "Takes a **list**, always. Sending one message is a list of one — there is no separate batch operation to choose between, which is one fewer thing to get wrong than the SQS pair it replaces.\n\nNot a transaction. Each message is accepted or refused on its own and the response reports both, so nine good messages are not lost to one bad one. The request itself is a `200` in that case, so **read the results** rather than relying on an error being raised. Entries are identified by their position in the request, so unlike SQS there are no ids to supply and no duplicate-id failure.\n\n`priority` is NexQ's own and one of the reasons this API exists: the SQS-compatible facade cannot express it, so messages sent through that one all arrive at the default. Higher is served first.\n\nA queue that does not exist is one raised `404` rather than the same failure repeated in every entry, because the queue belongs to the request and not to any message in it.",
+        "operationId": "sendMessages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "Messages to send.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "One result per message, in request order. Some may be refused — check `status` on each.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The list is empty or too long, the queue name is not legal, or the body does not fit the schema. Nothing was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Throw away every message in a queue",
+        "description": "Empties the queue and keeps the queue — `DELETE` on the *message collection*, where deleting the queue itself is `DELETE` one level up.\n\n**Irreversible, and it takes in-flight messages with it**: a consumer working on a message right now will find its receipt handle refused, because the message is gone. A purge that spared claimed messages would be one that quietly did not purge, since those messages would reappear when their claims lapsed.\n\nUnlike SQS there is no sixty-second cooldown. SQS needs one because its purge runs asynchronously and it refuses a second while the first is still going; this one has finished by the time it answers, so refusing would be a limitation invented for its own sake. The count of what went is returned, and logged.",
+        "operationId": "purgeQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "How many messages were removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurgeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The queue name is not legal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/queues/{queue}/messages/receive": {
@@ -419,6 +701,363 @@
           }
         }
       }
+    },
+    "/api/v1/queues/{queue}/messages/delete": {
+      "post": {
+        "summary": "Finish with several messages",
+        "description": "The same as deleting one message, several at a time. A `POST` rather than a `DELETE` carrying a body, since a body on `DELETE` is legal but widely mishandled by proxies and clients.\n\nNot a transaction: each handle succeeds or fails on its own and the response reports both, identified by position. A handle whose claim already ended is refused as itself rather than sinking the rest.",
+        "operationId": "deleteMessages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "Receipt handles to delete.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteBatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "One result per receipt handle, in request order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The list is empty or too long, or the queue name is not legal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues/{queue}/messages/visibility": {
+      "post": {
+        "summary": "Re-time several claims",
+        "description": "The same as re-timing one claim, several at a time, each with its own timeout. Not a transaction: outcomes are per entry and identified by position.\n\nUnlike the SQS operation this replaces, a timeout is required on every entry rather than optional — there is no queue default to fall back to that would not be a guess about what the caller meant.",
+        "operationId": "changeMessageVisibilityBatch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "Claims to re-time.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityBatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "One result per change, in request order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The list is empty or too long, or the queue name is not legal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues/{queue}/messages/{receipt_handle}": {
+      "delete": {
+        "summary": "Finish with a message",
+        "description": "Deletes the message a receipt handle refers to, which is how a consumer says it is done. Until this happens the message comes back when its claim lapses — that is what makes delivery at-least-once.\n\nThe handle identifies **one claim**, not the message. A handle whose claim has already ended — deleted, or lapsed so the message went to another consumer — is refused rather than silently doing nothing, since a consumer that has lost its claim needs to know it may have duplicated work.",
+        "operationId": "deleteMessage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "receipt_handle",
+            "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
+            "required": true,
+            "schema": {
+              "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "The message is gone. No body."
+          },
+          "400": {
+            "description": "The queue name is not legal, or the receipt handle does not identify a current claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Re-time a claim",
+        "description": "Sets how much longer a claim lasts, **counted from now** rather than from when the message was received. One operation for two jobs, which is what makes that choice the useful one: a consumer that needs longer extends its claim instead of having the message handed to someone else mid-work, and a consumer that cannot do the work at all sets `0`.\n\n`0` hands the message straight back, and because that is a client action making a message claimable it **wakes a consumer that is long-polling** for one — work returned by one consumer reaches the next without waiting out a timeout.\n\nThe receipt handle stays valid on a non-zero change: this alters when a claim ends, not whose it is.",
+        "operationId": "changeMessageVisibility",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "receipt_handle",
+            "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
+            "required": true,
+            "schema": {
+              "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "A new visibility timeout for one claim.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisibilityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "The claim has been re-timed. No body."
+          },
+          "400": {
+            "description": "The queue name is not legal, the timeout is out of range, or the receipt handle does not identify a current claim.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -430,6 +1069,127 @@
       }
     },
     "schemas": {
+      "AttributeType": {
+        "description": "What kind of value an attribute carries.\n\n Three kinds, matching what the SQS facade accepts, so an attribute set here survives a\n round trip through that facade unchanged.",
+        "oneOf": [
+          {
+            "description": "Text, carried as-is.",
+            "type": "string",
+            "const": "string"
+          },
+          {
+            "description": "A number, still written as text so no precision is lost on the way through JSON.",
+            "type": "string",
+            "const": "number"
+          },
+          {
+            "description": "Bytes, carried base64-encoded in `value`.",
+            "type": "string",
+            "const": "binary"
+          }
+        ]
+      },
+      "ClaimPath": {
+        "description": "Which claim a request is about.",
+        "type": "object",
+        "properties": {
+          "queue": {
+            "description": "Name of the queue.",
+            "type": "string"
+          },
+          "receipt_handle": {
+            "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue",
+          "receipt_handle"
+        ]
+      },
+      "DeleteBatchBody": {
+        "description": "Receipt handles to delete.",
+        "type": "object",
+        "properties": {
+          "receipt_handles": {
+            "description": "The claims to finish, by receipt handle.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "receipt_handles"
+        ]
+      },
+      "EntryResult": {
+        "description": "What happened to one entry.\n\n **A request carrying several entries is not a transaction**: each succeeds or fails on\n its own and the response reports both, so nine good messages are not lost to one bad\n one. The request itself is still a `200` — a client has to read the results rather than\n rely on an error being raised.",
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "Why the entry was refused.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "description": "Which entry this is, by position in the request's list. Positions rather than\n client-supplied ids: an array already has them, and SQS's duplicate-id failure\n cannot happen.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "message_id": {
+            "description": "The id of the accepted message, for a send.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "Whether it was accepted. Exactly one of `message_id` and `error` accompanies it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EntryStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "index",
+          "status"
+        ]
+      },
+      "EntryResults": {
+        "description": "What happened to each entry of a multi-entry request.",
+        "type": "object",
+        "properties": {
+          "results": {
+            "description": "One per entry, in request order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryResult"
+            }
+          }
+        },
+        "required": [
+          "results"
+        ]
+      },
+      "EntryStatus": {
+        "description": "Whether one entry of a multi-entry request was accepted.",
+        "type": "string",
+        "enum": [
+          "accepted",
+          "refused"
+        ]
+      },
       "ErrorBody": {
         "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
         "type": "object",
@@ -469,6 +1229,14 @@
         "description": "Which queues to list, and where to resume.",
         "type": "object",
         "properties": {
+          "counts": {
+            "description": "Include message counts for every queue on the page.\n\n Off by default: it costs one aggregate per queue, so a page of a thousand asks for\n a thousand of them. Ask for it when you are showing depths, not by habit.",
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": null
+          },
           "cursor": {
             "description": "Resume after this queue — the `next_cursor` from the previous page.",
             "type": [
@@ -520,6 +1288,87 @@
         },
         "required": [
           "queues"
+        ]
+      },
+      "MessageAttributeBody": {
+        "description": "One piece of metadata the producer attached to a message.\n\n The value is always a JSON string. For `binary` it is base64 of the bytes, which is\n what keeps the wire format one shape instead of two — and the bytes are what is stored,\n so text that happens to look like base64 and the bytes it decodes to stay different\n things.",
+        "type": "object",
+        "properties": {
+          "type": {
+            "description": "How to read `value`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttributeType"
+              }
+            ]
+          },
+          "label": {
+            "description": "An optional label of the producer's own, describing the value more precisely — a\n `string` labelled `uuid`, say. Carried through untouched and given back on receive.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "description": "The value: text for `string` and `number`, base64 for `binary`.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value"
+        ]
+      },
+      "MessageCountsResponse": {
+        "description": "How many messages a queue holds, in three disjoint groups that together cover all of\n them.",
+        "type": "object",
+        "properties": {
+          "delayed": {
+            "description": "Waiting out a delay, and never yet delivered.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "not_visible": {
+            "description": "In flight: handed to a consumer whose claim has not lapsed, and not yet deleted.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "total": {
+            "description": "The three above added up — every message the queue holds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "visible": {
+            "description": "Claimable right now.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "visible",
+          "not_visible",
+          "delayed",
+          "total"
+        ]
+      },
+      "PurgeResponse": {
+        "description": "How much a purge threw away.",
+        "type": "object",
+        "properties": {
+          "purged": {
+            "description": "Messages removed, counting ones a consumer was holding.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "purged"
         ]
       },
       "QueueAttributesBody": {
@@ -616,6 +1465,17 @@
               }
             ]
           },
+          "counts": {
+            "description": "How many messages the queue holds, present only when `counts=true` was asked for.\n\n Off by default because it costs an aggregate over the queue's messages — once per\n queue, so asking for it while listing a thousand queues asks for a thousand of them.\n Cheap against the in-memory backend and not necessarily against a durable one.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageCountsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "description": "When the queue was created.",
             "type": "string",
@@ -637,6 +1497,21 @@
           "last_modified_at",
           "attributes"
         ]
+      },
+      "QueueViewQuery": {
+        "description": "How much of a queue to report.",
+        "type": "object",
+        "properties": {
+          "counts": {
+            "description": "Include the queue's message counts.",
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
       },
       "ReceiveBody": {
         "description": "What a consumer may ask for. Every field is optional; an empty body is a plain poll of\n one message under the queue's own defaults.",
@@ -697,6 +1572,13 @@
         "description": "One message, and the claim it came with.",
         "type": "object",
         "properties": {
+          "attributes": {
+            "description": "Whatever metadata the producer attached, keyed by name.\n\n Always present, and empty for a message carrying none — always returned in full\n rather than only when asked for, since a consumer that did not want them can ignore\n a map it already has, while one that did would otherwise need a second request.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MessageAttributeBody"
+            }
+          },
           "body": {
             "description": "The message body, exactly as it was sent.",
             "type": "string"
@@ -733,7 +1615,126 @@
           "body",
           "priority",
           "receive_count",
-          "claim_expires_in_seconds"
+          "claim_expires_in_seconds",
+          "attributes"
+        ]
+      },
+      "SendBody": {
+        "description": "Messages to send.",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "One or more messages. Sending a single message is a list of one — there is no\n separate batch operation to choose between.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendMessageBody"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "messages"
+        ]
+      },
+      "SendMessageBody": {
+        "description": "One message to send.",
+        "type": "object",
+        "properties": {
+          "attributes": {
+            "description": "Metadata to carry alongside the body, keyed by name.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MessageAttributeBody"
+            },
+            "default": null
+          },
+          "body": {
+            "description": "The message body.",
+            "type": "string"
+          },
+          "delay_seconds": {
+            "description": "Hold this message back for this long before any consumer can receive it.\n\n Overrides the queue's own delay for this message alone.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "maximum": 900,
+            "minimum": 0
+          },
+          "priority": {
+            "description": "Higher is served first; defaults to the middle of the road.\n\n NexQ's own concept, and one of the reasons this API exists: the SQS-compatible\n facade cannot express it, so messages sent through that one all arrive at the\n default.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "body"
+        ]
+      },
+      "VisibilityBatchBody": {
+        "description": "Claims to re-time.",
+        "type": "object",
+        "properties": {
+          "changes": {
+            "description": "One or more claims.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityChange"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "changes"
+        ]
+      },
+      "VisibilityBody": {
+        "description": "A new visibility timeout for one claim.",
+        "type": "object",
+        "properties": {
+          "visibility_timeout_seconds": {
+            "description": "How much longer the claim should last, counted from now.\n\n `0` hands the message straight back, which wakes a consumer waiting for one.",
+            "type": "integer",
+            "format": "uint64",
+            "maximum": 43200,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "visibility_timeout_seconds"
+        ]
+      },
+      "VisibilityChange": {
+        "description": "One claim to re-time.",
+        "type": "object",
+        "properties": {
+          "receipt_handle": {
+            "description": "Which claim.",
+            "type": "string"
+          },
+          "visibility_timeout_seconds": {
+            "description": "How much longer it should last, counted from now.",
+            "type": "integer",
+            "format": "uint64",
+            "maximum": 43200,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "receipt_handle",
+          "visibility_timeout_seconds"
         ]
       }
     }

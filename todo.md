@@ -363,10 +363,56 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       *this server's* fault, so its detail is logged and withheld. A backend error can
       carry hosts, paths, or credentials, none of which belong in a response — there is a
       test that a `postgres://user:hunter2@db` connection string does not reach the client.
-- [ ] Parity surface: ~~create/get/list/delete queue~~ (landed with the resource shape
-      above), get and set attributes, purge, send/delete/change-visibility, and the three
-      batch operations. Idempotent creation is inherited from the engine rather than
-      re-decided
+- [x] Parity surface. Twelve documented operations: the queue resource from the item above,
+      plus `PATCH` for attributes, message counts, send, delete, change-visibility, purge,
+      and the multi-entry forms. A producer and a consumer can now run entirely against this
+      API, which until now needed the SQS facade for everything but receiving.
+
+      **Sending is always a list.** SQS has `SendMessage` and `SendMessageBatch` because its
+      protocol needs two operations; here `POST /messages` takes `{"messages": [...]}` and
+      sending one is a list of one. That deletes a whole duplicate operation rather than
+      reproducing it — and with it SQS's `BatchEntryIdsNotDistinct` and `InvalidBatchEntryId`,
+      since entries are identified by **position** and nobody supplies an id. Two
+      whole-request refusals survive: an empty list and more than ten.
+
+      **A claim is a resource.** `DELETE` on a receipt handle finishes with a message and
+      `PATCH` on the same address re-times the claim, rather than two more verbs in a body.
+      Purge is `DELETE` on the *message collection*, one level below deleting the queue.
+      Multi-entry delete and re-time are `POST` rather than `DELETE` with a body, which
+      proxies mishandle.
+
+      **`PATCH` versus `PUT` on a queue** is the distinction worth having: an attribute a
+      `PATCH` does not name keeps its current value, where a `PUT` resets it to the default.
+      Getting those the same way round is how a partial update silently destroys
+      configuration, so it is mutation-tested. A `PATCH` naming nothing is refused rather
+      than moving `last_modified_at` while changing nothing.
+
+      **Counts are opt-in**, via `?counts=true` on either read. They cost one aggregate per
+      queue, so a page of a thousand would ask for a thousand — cheap against the memory
+      backend and not necessarily against a durable one, which is M13's concern arriving
+      early.
+
+      **Message attributes** are `string`/`number`/`binary` with the producer's own label,
+      stored as SQS spells them (`String.uuid`) so that facade reports them correctly.
+      Verified end to end: a message sent over REST with a binary attribute and priority 9
+      was read by the **real `aws` CLI** with `DataType: "Binary"` and the right value, and
+      came back first because priority ordering works. Priority on send also closes an
+      inconsistency this facade had: receive reported a value nothing could set.
+
+      **A mutation found a real blind spot.** Storing a binary attribute as its base64
+      *text* rather than the decoded bytes left every test green — a REST-only round trip
+      cannot see the difference, because the same string comes back either way. Where it
+      shows is the SQS facade, whose checksum is defined over the bytes. Now pinned by a test
+      against the stored value rather than the wire.
+
+      Four mutations verified in total: `PATCH` resetting unnamed attributes, a batch failing
+      whole on one bad entry, binary stored as text, and purge sparing in-flight messages.
+      One earlier mutation run reported a pass that was really an anchor that had missed —
+      caught and re-run rather than recorded.
+
+      Still open here, and owned by M10: position in queue, dead-letter queues and redrive.
+      Absolute timestamps on a received message are a small addition now that queue
+      timestamps settled the format.
 - [x] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
       mechanism with two protocol faces, per Q3a, not a second implementation. REST's
       `wait_time_seconds` goes to `Engine::receive` and nothing else, so there is nothing

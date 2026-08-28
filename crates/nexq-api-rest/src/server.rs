@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use aide::axum::ApiRouter;
-use aide::axum::routing::{get_with, post_with, put_with};
+use aide::axum::routing::{delete_with, get_with, post_with, put_with};
 use aide::openapi::{OpenApi, SecurityScheme};
 use aide::transform::TransformOpenApi;
 use axum::body::Bytes;
@@ -206,11 +206,35 @@ fn api_routes() -> ApiRouter<FacadeState> {
                 "/queues/{queue}",
                 put_with(queues::put_queue, queues::put_queue_docs)
                     .get_with(queues::get_queue, queues::get_queue_docs)
+                    .patch_with(queues::patch_queue, queues::patch_queue_docs)
                     .delete_with(queues::delete_queue, queues::delete_queue_docs),
+            )
+            // The message collection, its sub-resource actions, and one claim. Receiving,
+            // purging and the multi-entry forms are actions on the collection; deleting and
+            // re-timing a single claim address it directly.
+            .api_route(
+                "/queues/{queue}/messages",
+                post_with(messages::send, messages::send_docs)
+                    .delete_with(messages::purge, messages::purge_docs),
             )
             .api_route(
                 "/queues/{queue}/messages/receive",
                 post_with(messages::receive, messages::receive_docs),
+            )
+            .api_route(
+                "/queues/{queue}/messages/delete",
+                post_with(messages::delete_batch, messages::delete_batch_docs),
+            )
+            .api_route(
+                "/queues/{queue}/messages/visibility",
+                post_with(messages::visibility_batch, messages::visibility_batch_docs),
+            )
+            .api_route(
+                "/queues/{queue}/messages/{receipt_handle}",
+                delete_with(messages::delete_message, messages::delete_message_docs).patch_with(
+                    messages::change_visibility,
+                    messages::change_visibility_docs,
+                ),
             ),
     )
 }
@@ -483,7 +507,34 @@ mod tests {
     /// Drive one authenticated request, returning its status and parsed body.
     ///
     /// A `204` has no body, so it comes back as `null` rather than failing to parse.
-    async fn request(
+    /// A facade over a fresh in-memory engine, with the test credential.
+    pub(super) fn test_facade() -> FacadeState {
+        Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        })
+    }
+
+    /// The status of a request that presents no token.
+    pub(super) async fn unauthenticated(
+        facade: &FacadeState,
+        method: &str,
+        path: &str,
+    ) -> StatusCode {
+        let request = HttpRequest::builder()
+            .method(method)
+            .uri(path)
+            .body(Body::empty())
+            .expect("request");
+
+        router(Arc::clone(facade))
+            .oneshot(request)
+            .await
+            .expect("response")
+            .status()
+    }
+
+    pub(super) async fn request(
         facade: &FacadeState,
         method: &str,
         path: &str,
@@ -1048,5 +1099,544 @@ mod tests {
 
         assert_ne!(server.local_addr().port(), 0, "port 0 must be resolved");
         assert!(!server.is_tls(), "no [rest_api.tls] means plain HTTP");
+    }
+}
+
+/// The rest of the surface, driven through the router.
+///
+/// Its own module because [`tests`] was already long, and because these are about what the
+/// API *does* rather than about how it is wired — they read as a sequence of requests a
+/// client would actually make.
+#[cfg(test)]
+mod parity_tests {
+    use axum::http::StatusCode;
+
+    use super::tests::{request, test_facade, unauthenticated};
+
+    /// Produce and consume entirely over REST, which until now was impossible: there was
+    /// no way to send, and no way to say a message was done with.
+    #[tokio::test]
+    async fn a_message_can_be_sent_received_and_deleted_over_rest_alone() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"work","priority":5}]}"#),
+        )
+        .await;
+        assert_eq!(sent.0, StatusCode::OK);
+        assert_eq!(sent.1["results"][0]["status"], "accepted");
+        let id = sent.1["results"][0]["message_id"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        let message = &received.1["messages"][0];
+        assert_eq!(message["id"], id, "the message that was just sent");
+        assert_eq!(message["body"], "work");
+        assert_eq!(
+            message["priority"], 5,
+            "priority is settable here, unlike through the SQS facade"
+        );
+        let handle = message["receipt_handle"].as_str().expect("a handle");
+
+        let deleted = request(
+            &facade,
+            "DELETE",
+            &format!("/api/v1/queues/jobs/messages/{handle}"),
+            None,
+        )
+        .await;
+        assert_eq!(deleted.0, StatusCode::NO_CONTENT);
+
+        // Gone for good: a spent handle is refused rather than quietly accepted.
+        let again = request(
+            &facade,
+            "DELETE",
+            &format!("/api/v1/queues/jobs/messages/{handle}"),
+            None,
+        )
+        .await;
+        assert_eq!(again.0, StatusCode::BAD_REQUEST);
+        assert_eq!(again.1["error"]["code"], "invalid_receipt_handle");
+    }
+
+    /// The point of per-entry results: one bad message must not sink the others.
+    #[tokio::test]
+    async fn a_send_reports_each_message_separately() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(
+                r#"{"messages":[
+                     {"body":"fine"},
+                     {"body":"bad delay","delay_seconds":901},
+                     {"body":"also fine"}
+                   ]}"#,
+            ),
+        )
+        .await;
+
+        assert_eq!(sent.0, StatusCode::OK, "the request itself succeeded");
+        let results = sent.1["results"].as_array().expect("results");
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0]["status"], "accepted");
+        assert_eq!(results[1]["status"], "refused");
+        assert_eq!(results[1]["index"], 1, "identified by position");
+        assert_eq!(results[1]["error"]["code"], "invalid_delay");
+        assert_eq!(results[2]["status"], "accepted");
+
+        // Two arrived, not zero and not three.
+        let counted = request(&facade, "GET", "/api/v1/queues/jobs?counts=true", None).await;
+        assert_eq!(counted.1["counts"]["visible"], 2);
+        assert_eq!(counted.1["counts"]["total"], 2);
+    }
+
+    /// Message attributes must survive the round trip, binary included.
+    #[tokio::test]
+    async fn attributes_come_back_as_they_went_in() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(
+                r#"{"messages":[{"body":"hi","attributes":{
+                     "City":  {"type":"string","value":"Any City"},
+                     "Count": {"type":"number","value":"1250800"},
+                     "Label": {"type":"string","label":"uuid","value":"3f2b1c"},
+                     "Thumb": {"type":"binary","value":"aGVsbG8="}
+                   }}]}"#,
+            ),
+        )
+        .await;
+
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        let attributes = &received.1["messages"][0]["attributes"];
+
+        assert_eq!(attributes["City"]["type"], "string");
+        assert_eq!(attributes["City"]["value"], "Any City");
+        assert_eq!(attributes["Count"]["type"], "number");
+        assert_eq!(attributes["Count"]["value"], "1250800");
+        assert_eq!(attributes["Label"]["type"], "string");
+        assert_eq!(
+            attributes["Label"]["label"], "uuid",
+            "a producer's own label is carried through untouched"
+        );
+        assert_eq!(attributes["Thumb"]["type"], "binary");
+        assert_eq!(
+            attributes["Thumb"]["value"], "aGVsbG8=",
+            "binary comes back base64, of the bytes that were stored"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_binary_attribute_that_is_not_base64_is_refused() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"hi","attributes":{"T":{"type":"binary","value":"!!!"}}}]}"#),
+        )
+        .await;
+
+        assert_eq!(sent.1["results"][0]["status"], "refused");
+        assert_eq!(
+            sent.1["results"][0]["error"]["code"],
+            "invalid_message_attribute"
+        );
+    }
+
+    /// A number stored as text still has to be a number, or the next reader is handed a lie.
+    #[tokio::test]
+    async fn a_number_attribute_that_is_not_a_number_is_refused() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"hi","attributes":{"N":{"type":"number","value":"banana"}}}]}"#),
+        )
+        .await;
+
+        assert_eq!(sent.1["results"][0]["status"], "refused");
+    }
+
+    /// `PATCH` keeps what it does not name; `PUT` resets it. That difference is the reason
+    /// both verbs exist on the member.
+    #[tokio::test]
+    async fn patch_changes_one_attribute_and_put_resets_the_rest() {
+        let facade = test_facade();
+        request(
+            &facade,
+            "PUT",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds":5,"visibility_timeout_seconds":120}"#),
+        )
+        .await;
+
+        let patched = request(
+            &facade,
+            "PATCH",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds":7}"#),
+        )
+        .await;
+
+        assert_eq!(patched.0, StatusCode::OK);
+        assert_eq!(patched.1["attributes"]["delay_seconds"], 7);
+        assert_eq!(
+            patched.1["attributes"]["visibility_timeout_seconds"], 120,
+            "PATCH must leave an attribute it was not told about alone"
+        );
+
+        // And a PATCH that names nothing is refused rather than moving last_modified_at
+        // while changing nothing.
+        let empty = request(&facade, "PATCH", "/api/v1/queues/jobs", Some("{}")).await;
+        assert_eq!(empty.0, StatusCode::BAD_REQUEST);
+        assert_eq!(empty.1["error"]["code"], "empty_update");
+    }
+
+    #[tokio::test]
+    async fn a_patch_with_a_bad_attribute_changes_nothing() {
+        let facade = test_facade();
+        request(
+            &facade,
+            "PUT",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds":5}"#),
+        )
+        .await;
+
+        let refused = request(
+            &facade,
+            "PATCH",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds":9,"visibility_timeout_seconds":99999}"#),
+        )
+        .await;
+        assert_eq!(refused.0, StatusCode::BAD_REQUEST);
+
+        let read = request(&facade, "GET", "/api/v1/queues/jobs", None).await;
+        assert_eq!(
+            read.1["attributes"]["delay_seconds"], 5,
+            "all-or-nothing: the good attribute must not have been applied either"
+        );
+    }
+
+    /// Purge empties the queue and keeps it, taking claimed messages too.
+    #[tokio::test]
+    async fn purging_takes_in_flight_messages_with_it() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+        request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"a"},{"body":"b"},{"body":"c"}]}"#),
+        )
+        .await;
+
+        // Claim one, so a purge has an in-flight message to deal with.
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        let handle = received.1["messages"][0]["receipt_handle"]
+            .as_str()
+            .expect("a handle")
+            .to_owned();
+
+        let purged = request(&facade, "DELETE", "/api/v1/queues/jobs/messages", None).await;
+        assert_eq!(purged.0, StatusCode::OK);
+        assert_eq!(
+            purged.1["purged"], 3,
+            "all three, including the one being worked on"
+        );
+
+        // The queue survives, empty.
+        let counted = request(&facade, "GET", "/api/v1/queues/jobs?counts=true", None).await;
+        assert_eq!(counted.0, StatusCode::OK);
+        assert_eq!(counted.1["counts"]["total"], 0);
+
+        // And the handle taken across the purge no longer refers to anything.
+        let stale = request(
+            &facade,
+            "DELETE",
+            &format!("/api/v1/queues/jobs/messages/{handle}"),
+            None,
+        )
+        .await;
+        assert_eq!(stale.0, StatusCode::BAD_REQUEST);
+    }
+
+    /// Handing a message back with `0` is the useful edge, and it must make the message
+    /// claimable again straight away.
+    #[tokio::test]
+    async fn re_timing_a_claim_to_zero_hands_the_message_back() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+        request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"work"}]}"#),
+        )
+        .await;
+
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        let handle = received.1["messages"][0]["receipt_handle"]
+            .as_str()
+            .expect("a handle")
+            .to_owned();
+
+        // Nobody else can have it while the claim stands.
+        let blocked = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        assert_eq!(blocked.1["messages"], serde_json::json!([]));
+
+        let handed_back = request(
+            &facade,
+            "PATCH",
+            &format!("/api/v1/queues/jobs/messages/{handle}"),
+            Some(r#"{"visibility_timeout_seconds":0}"#),
+        )
+        .await;
+        assert_eq!(handed_back.0, StatusCode::NO_CONTENT);
+
+        let again = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        assert_eq!(
+            again.1["messages"][0]["body"], "work",
+            "a message handed back is available to the next consumer at once"
+        );
+        assert_eq!(
+            again.1["messages"][0]["receive_count"], 2,
+            "and it counts as a second delivery"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_batch_forms_report_per_entry_outcomes() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+        request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"a"},{"body":"b"}]}"#),
+        )
+        .await;
+
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some(r#"{"max_messages":2}"#),
+        )
+        .await;
+        let handles: Vec<String> = received.1["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .map(|message| {
+                message["receipt_handle"]
+                    .as_str()
+                    .expect("a handle")
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(handles.len(), 2);
+
+        // Re-time both, one of them to zero.
+        let retimed = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/visibility",
+            Some(&format!(
+                r#"{{"changes":[
+                     {{"receipt_handle":"{}","visibility_timeout_seconds":300}},
+                     {{"receipt_handle":"{}","visibility_timeout_seconds":0}}
+                   ]}}"#,
+                handles[0], handles[1]
+            )),
+        )
+        .await;
+        assert_eq!(retimed.0, StatusCode::OK);
+        assert_eq!(retimed.1["results"][0]["status"], "accepted");
+        assert_eq!(retimed.1["results"][1]["status"], "accepted");
+
+        // Delete a real handle alongside one that was never issued, which is the mix the
+        // per-entry results exist for.
+        //
+        // Note what is *not* used here: the handle handed back with `0` above still deletes
+        // its message, because handing a message back changes when its claim ends and not
+        // whose it is — the handle is spent only once someone else claims the message and
+        // is given a new one. That matches SQS, and it is worth knowing, because assuming
+        // otherwise is what this test first got wrong.
+        let deleted = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/delete",
+            Some(&format!(
+                r#"{{"receipt_handles":["{}","never-issued"]}}"#,
+                handles[0]
+            )),
+        )
+        .await;
+
+        assert_eq!(deleted.0, StatusCode::OK);
+        assert_eq!(deleted.1["results"][0]["status"], "accepted");
+        assert_eq!(
+            deleted.1["results"][1]["status"], "refused",
+            "one bad handle is refused as itself rather than sinking the good one"
+        );
+        assert_eq!(
+            deleted.1["results"][1]["error"]["code"],
+            "invalid_receipt_handle"
+        );
+    }
+
+    /// The whole-request failures that survive positional entries.
+    #[tokio::test]
+    async fn an_empty_or_oversized_list_is_refused_whole() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let empty = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[]}"#),
+        )
+        .await;
+        assert_eq!(empty.0, StatusCode::BAD_REQUEST);
+        assert_eq!(empty.1["error"]["code"], "empty_request");
+
+        let entries: Vec<String> = (0..11).map(|n| format!(r#"{{"body":"{n}"}}"#)).collect();
+        let too_many = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(&format!(r#"{{"messages":[{}]}}"#, entries.join(","))),
+        )
+        .await;
+        assert_eq!(too_many.0, StatusCode::BAD_REQUEST);
+        assert_eq!(too_many.1["error"]["code"], "too_many_entries");
+
+        // Nothing was sent by either attempt.
+        let counted = request(&facade, "GET", "/api/v1/queues/jobs?counts=true", None).await;
+        assert_eq!(counted.1["counts"]["total"], 0);
+    }
+
+    /// A missing queue is one raised error, not the same failure repeated per entry.
+    #[tokio::test]
+    async fn sending_to_a_missing_queue_is_one_error() {
+        let facade = test_facade();
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/nope/messages",
+            Some(r#"{"messages":[{"body":"a"},{"body":"b"}]}"#),
+        )
+        .await;
+
+        assert_eq!(sent.0, StatusCode::NOT_FOUND);
+        assert_eq!(sent.1["error"]["code"], "queue_not_found");
+        assert!(
+            sent.1["results"].is_null(),
+            "no per-entry list at all: {}",
+            sent.1
+        );
+    }
+
+    /// Counts are off by default, because asking for them costs an aggregate per queue.
+    #[tokio::test]
+    async fn counts_are_absent_unless_asked_for() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let without = request(&facade, "GET", "/api/v1/queues/jobs", None).await;
+        assert!(without.1["counts"].is_null(), "{}", without.1);
+
+        let with = request(&facade, "GET", "/api/v1/queues/jobs?counts=true", None).await;
+        assert_eq!(with.1["counts"]["visible"], 0);
+
+        let listed = request(&facade, "GET", "/api/v1/queues?counts=true", None).await;
+        assert_eq!(listed.1["queues"][0]["counts"]["total"], 0);
+
+        let listed_without = request(&facade, "GET", "/api/v1/queues", None).await;
+        assert!(listed_without.1["queues"][0]["counts"].is_null());
+    }
+
+    /// Every new route is behind the same layer as the old ones.
+    #[tokio::test]
+    async fn the_new_routes_need_a_token_too() {
+        let facade = test_facade();
+
+        for (method, path) in [
+            ("PATCH", "/api/v1/queues/jobs"),
+            ("POST", "/api/v1/queues/jobs/messages"),
+            ("DELETE", "/api/v1/queues/jobs/messages"),
+            ("POST", "/api/v1/queues/jobs/messages/delete"),
+            ("POST", "/api/v1/queues/jobs/messages/visibility"),
+            ("DELETE", "/api/v1/queues/jobs/messages/handle"),
+            ("PATCH", "/api/v1/queues/jobs/messages/handle"),
+        ] {
+            let response = unauthenticated(&facade, method, path).await;
+
+            assert_eq!(
+                response,
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} must not be reachable without a token"
+            );
+        }
     }
 }
