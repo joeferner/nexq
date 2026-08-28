@@ -26,20 +26,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ErrorBody};
-use crate::json::OptionalJson;
+use crate::extract::OptionalJson;
+use crate::queues::QueuePath;
 use crate::server::FacadeState;
-
-/// The queue a request is about.
-///
-/// A struct rather than `Path<String>` because that is what lets the parameter be
-/// *documented*: from a bare `String` aide learns a path parameter exists but not what it
-/// is called, and generates an operation with no parameters at all. The field name is the
-/// parameter name.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct QueuePath {
-    /// Name of the queue.
-    pub queue: String,
-}
 
 /// What a consumer may ask for. Every field is optional; an empty body is a plain poll of
 /// one message under the queue's own defaults.
@@ -83,12 +72,15 @@ pub struct ReceiveResponse {
 /// One message, and the claim it came with.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ReceivedMessage {
+    /// The message's identifier, stable across redeliveries. The same value the
+    /// SQS-compatible facade reports as `MessageId`.
     pub id: String,
 
     /// The token to present to delete this message or change its visibility. Refers to
     /// *this claim*, not to the message: a redelivery comes with a new one.
     pub receipt_handle: String,
 
+    /// The message body, exactly as it was sent.
     pub body: String,
 
     /// Higher is served first. Messages sent through the SQS facade all carry the
@@ -209,25 +201,40 @@ pub fn receive_docs(mut operation: TransformOperation) -> TransformOperation {
         .summary("Receive messages from a queue")
         .description(
             "Claims up to `max_messages` messages, making them invisible to other \
-             consumers until the claim lapses or they are deleted. Waits for the first \
-             message when `wait_time_seconds` is set — long polling — and returns an \
-             empty list rather than an error when there is nothing to hand out.",
+             consumers until the claim lapses or they are deleted. A `POST` because it \
+             changes something: two identical calls return different messages.\n\n\
+             With `wait_time_seconds` the request is held open until a message arrives or \
+             the wait runs out — long polling — and returns the moment one is sent, \
+             including one sent through the SQS-compatible facade, since both run over one \
+             queue. Omitting it uses the queue's own configured wait, which is a different \
+             thing from sending `0`: zero asks for a plain poll. The wait applies to the \
+             *first* message only, so asking for ten when three exist returns three rather \
+             than holding on for seven more.\n\n\
+             An empty list is a normal answer, not an error — including when a long poll \
+             runs out, and when the server is shutting down and releases waiting \
+             consumers.\n\n\
+             Every message comes with a receipt handle identifying **that claim**, not the \
+             message: a redelivery arrives with a new one. There is no way to delete a \
+             message through this facade yet, so a claim taken here lapses and the message \
+             returns; use the SQS facade to delete it.",
         )
         .response_with::<200, Json<ReceiveResponse>, _>(|response| {
-            response.description("Zero or more claimed messages.")
+            response.description(
+                "Zero or more claimed messages. `messages` is an empty list rather than \
+                 absent when there are none.",
+            )
         })
         .response_with::<400, Json<ErrorBody>, _>(|response| {
-            response.description("The queue name or one of the parameters is not valid.")
-        })
-        .response_with::<401, Json<ErrorBody>, _>(|response| {
-            response.description("The bearer token is missing or does not check out.")
+            response.description(
+                "The queue name is not legal, or `max_messages` or `wait_time_seconds` is \
+                 outside its range — refused rather than clamped.",
+            )
         })
         .response_with::<404, Json<ErrorBody>, _>(|response| {
             response.description("No queue by that name.")
         })
-        .response_with::<415, Json<ErrorBody>, _>(|response| {
-            response.description("A body was sent as something other than `application/json`.")
-        })
+        .with(crate::error::needs_a_token)
+        .with(crate::error::reads_a_json_body)
 }
 
 #[cfg(test)]

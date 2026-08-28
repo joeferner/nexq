@@ -6,10 +6,332 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/queues": {
+      "get": {
+        "summary": "List queues",
+        "description": "In name order, one page at a time, optionally filtered by `prefix`.\n\nWhen `next_cursor` is not null there are more: pass it back as `cursor` to continue. It is a **cursor, not an offset** — it names where to resume, so a queue created or deleted between two requests cannot make you skip one or see it twice. That is the storage layer's keyset guarantee carried onto the wire rather than re-derived from it, and it is why there is no \"page number\".\n\nA cursor is this server's to issue. Constructing one yourself is not supported and is refused rather than interpreted. An empty result is a normal answer, not an error.",
+        "operationId": "listQueues",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "description": "Resume after this queue — the `next_cursor` from the previous page.",
+            "schema": {
+              "description": "Resume after this queue — the `next_cursor` from the previous page.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "How many to return at most.",
+            "schema": {
+              "description": "How many to return at most.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "default": null,
+              "maximum": 1000,
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "prefix",
+            "description": "Only queues whose name starts with this.",
+            "schema": {
+              "description": "Only queues whose name starts with this.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "One page of queues, with a cursor when more remain. `queues` is an empty list rather than absent when there are none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListQueuesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The limit is outside 1–1000, a query parameter is not one this endpoint takes, or the cursor was not one this server issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues/{queue}": {
+      "get": {
+        "summary": "Read a queue",
+        "description": "Returns the queue's name, when it was created, when its attributes were last changed, and those attributes.\n\nMessage counts are not part of this yet: a listing would otherwise cost one aggregate query per queue on the page, and how cheap that can be made depends on the storage backend. Ask the SQS facade's `GetQueueAttributes` for counts in the meantime.",
+        "operationId": "getQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The queue and its attributes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name is not a legal queue name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Create a queue, or confirm one exists",
+        "description": "Creates the queue named in the path. `PUT` rather than a `POST` to the collection because the operation is idempotent and the client chooses the name: sending the same request twice leaves one queue, not two.\n\nSending it again with the *same* attributes returns the existing queue, because the intent — \"there should be a queue called this, configured like this\" — is already satisfied. Sending it with *different* attributes is a conflict rather than a reconfiguration, since silently retiming a queue consumers are working would be worse than refusing.\n\nEvery attribute is optional and falls back to the server's default. An attribute outside its range is refused rather than clamped, and one this server does not implement is refused rather than ignored, so a setting never looks applied when it was dropped.",
+        "operationId": "putQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "description": "Settings to create a queue with. Every field is optional and falls back to the\n server's default. An unrecognised field is refused rather than ignored, so a setting\n never looks applied when it was dropped.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueAttributesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The queue, whether it was just created or already existed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name is not a legal queue name, or an attribute is outside its range or not one this server implements.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A queue of that name exists with different attributes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a queue",
+        "description": "Deletes the queue and everything in it, **including messages a consumer is currently holding** — a receipt handle taken across this stops working, because the message it referred to is gone. Consumers long-polling on the queue are released rather than left waiting on something that no longer exists.\n\nNot idempotent in the way `PUT` is: deleting a queue that was never there is a `404`, because a caller in that position has a different problem from one whose delete worked.",
+        "operationId": "deleteQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "The queue is gone. No body."
+          },
+          "400": {
+            "description": "The name is not a legal queue name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/queues/{queue}/messages/receive": {
       "post": {
         "summary": "Receive messages from a queue",
-        "description": "Claims up to `max_messages` messages, making them invisible to other consumers until the claim lapses or they are deleted. Waits for the first message when `wait_time_seconds` is set — long polling — and returns an empty list rather than an error when there is nothing to hand out.",
+        "description": "Claims up to `max_messages` messages, making them invisible to other consumers until the claim lapses or they are deleted. A `POST` because it changes something: two identical calls return different messages.\n\nWith `wait_time_seconds` the request is held open until a message arrives or the wait runs out — long polling — and returns the moment one is sent, including one sent through the SQS-compatible facade, since both run over one queue. Omitting it uses the queue's own configured wait, which is a different thing from sending `0`: zero asks for a plain poll. The wait applies to the *first* message only, so asking for ten when three exist returns three rather than holding on for seven more.\n\nAn empty list is a normal answer, not an error — including when a long poll runs out, and when the server is shutting down and releases waiting consumers.\n\nEvery message comes with a receipt handle identifying **that claim**, not the message: a redelivery arrives with a new one. There is no way to delete a message through this facade yet, so a claim taken here lapses and the message returns; use the SQS facade to delete it.",
         "operationId": "receiveMessages",
         "parameters": [
           {
@@ -46,7 +368,7 @@
             }
           },
           "200": {
-            "description": "Zero or more claimed messages.",
+            "description": "Zero or more claimed messages. `messages` is an empty list rather than absent when there are none.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56,17 +378,7 @@
             }
           },
           "400": {
-            "description": "The queue name or one of the parameters is not valid.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The bearer token is missing or does not check out.",
+            "description": "The queue name is not legal, or `max_messages` or `wait_time_seconds` is outside its range — refused rather than clamped.",
             "content": {
               "application/json": {
                 "schema": {
@@ -85,8 +397,18 @@
               }
             }
           },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "415": {
-            "description": "A body was sent as something other than `application/json`.",
+            "description": "A body was sent as something other than `application/json`. Send no body at all to accept the defaults.",
             "content": {
               "application/json": {
                 "schema": {
@@ -143,6 +465,132 @@
           "message"
         ]
       },
+      "ListQueuesQuery": {
+        "description": "Which queues to list, and where to resume.",
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "description": "Resume after this queue — the `next_cursor` from the previous page.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "limit": {
+            "description": "How many to return at most.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "default": null,
+            "maximum": 1000,
+            "minimum": 1
+          },
+          "prefix": {
+            "description": "Only queues whose name starts with this.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "ListQueuesResponse": {
+        "description": "One page of queues.",
+        "type": "object",
+        "properties": {
+          "next_cursor": {
+            "description": "Pass as `cursor` to fetch the next page, or `null` when this is the last one.\n\n A **cursor**, not an offset: it names where to resume, so a queue created or\n deleted between pages cannot make a caller skip one or see it twice. Present\n whenever more remain, including when `limit` was not given.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queues": {
+            "description": "This page, in name order. Empty rather than absent when there are none.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueResponse"
+            }
+          }
+        },
+        "required": [
+          "queues"
+        ]
+      },
+      "QueueAttributesBody": {
+        "description": "Settings to create a queue with. Every field is optional and falls back to the\n server's default. An unrecognised field is refused rather than ignored, so a setting\n never looks applied when it was dropped.",
+        "type": "object",
+        "properties": {
+          "delay_seconds": {
+            "description": "Defaults to none.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "maximum": 900,
+            "minimum": 0
+          },
+          "receive_wait_time_seconds": {
+            "description": "Defaults to none, which makes a receive a plain poll unless it asks to wait.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "maximum": 20,
+            "minimum": 0
+          },
+          "visibility_timeout_seconds": {
+            "description": "Defaults to 30 seconds.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "default": null,
+            "maximum": 43200,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "QueueAttributesResponse": {
+        "description": "A queue's settings.",
+        "type": "object",
+        "properties": {
+          "delay_seconds": {
+            "description": "How long a newly sent message waits before it can be received.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "receive_wait_time_seconds": {
+            "description": "How long a receive that finds nothing waits by default — the long poll a consumer\n gets without asking for one.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "visibility_timeout_seconds": {
+            "description": "How long a claimed message stays invisible to other consumers before being\n redelivered.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "visibility_timeout_seconds",
+          "delay_seconds",
+          "receive_wait_time_seconds"
+        ]
+      },
       "QueuePath": {
         "description": "The queue a request is about.\n\n A struct rather than `Path<String>` because that is what lets the parameter be\n *documented*: from a bare `String` aide learns a path parameter exists but not what it\n is called, and generates an operation with no parameters at all. The field name is the\n parameter name.",
         "type": "object",
@@ -154,6 +602,40 @@
         },
         "required": [
           "queue"
+        ]
+      },
+      "QueueResponse": {
+        "description": "A queue, as this API represents it.",
+        "type": "object",
+        "properties": {
+          "attributes": {
+            "description": "How the queue is configured.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueueAttributesResponse"
+              }
+            ]
+          },
+          "created_at": {
+            "description": "When the queue was created.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_modified_at": {
+            "description": "When its attributes were last changed, or when it was created if they never have\n been. Reported separately because answering with the creation time for both would\n be a plausible-looking lie.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "description": "The queue's name, which is also its address: `/api/v1/queues/{name}`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "created_at",
+          "last_modified_at",
+          "attributes"
         ]
       },
       "ReceiveBody": {
@@ -216,6 +698,7 @@
         "type": "object",
         "properties": {
           "body": {
+            "description": "The message body, exactly as it was sent.",
             "type": "string"
           },
           "claim_expires_in_seconds": {
@@ -225,6 +708,7 @@
             "minimum": 0
           },
           "id": {
+            "description": "The message's identifier, stable across redeliveries. The same value the\n SQS-compatible facade reports as `MessageId`.",
             "type": "string"
           },
           "priority": {

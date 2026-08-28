@@ -15,6 +15,7 @@
 
 use aide::generate::GenContext;
 use aide::openapi::{Operation, Response as ApiResponse};
+use aide::transform::TransformOperation;
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -23,6 +24,32 @@ use nexq_core::model::InvalidQueueName;
 use schemars::JsonSchema;
 use serde::Serialize;
 use tracing::error;
+
+/// Document the `401` every route can answer with.
+///
+/// Its own helper because authentication is a **layer over every route**, not a decision
+/// each one makes — so restating it five times would be duplicating one fact, and forgetting
+/// it once would publish a route that looks reachable without a token. Applied with
+/// `.with(needs_a_token)`, and `every_operation_documents_the_401` fails when a new
+/// operation does not.
+pub fn needs_a_token(operation: TransformOperation) -> TransformOperation {
+    operation.response_with::<401, Json<ErrorBody>, _>(|response| {
+        response.description("The bearer token is missing or does not check out.")
+    })
+}
+
+/// Document the `415` a route that reads a JSON body can answer with.
+///
+/// Also shared, and for the same reason: it comes from the body extractor rather than from
+/// anything an individual operation decides.
+pub fn reads_a_json_body(operation: TransformOperation) -> TransformOperation {
+    operation.response_with::<415, Json<ErrorBody>, _>(|response| {
+        response.description(
+            "A body was sent as something other than `application/json`. Send no body at \
+             all to accept the defaults.",
+        )
+    })
+}
 
 /// A refused request, as a status plus a machine-readable code.
 #[derive(Debug)]

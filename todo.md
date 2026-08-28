@@ -273,22 +273,65 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       is what most people run, and the check should not depend on remembering a target.
       Both callers share one `check_openapi`, so they cannot explain a difference
       differently.
-- [ ] Resource-shaped routes, not a transliteration of SQS. Queue *name* in the path
-      rather than a queue URL in a parameter — the URL-as-identifier is an AWS artifact
-      that exists because SQS has accounts and regions to encode. Paging keeps the M2
-      cursor tokens, since keyset paging is the store's guarantee and not a wire detail
+- [x] Resource-shaped routes, not a transliteration of SQS. The queue resource is the
+      demonstration: a collection at `/api/v1/queues` and a member at
+      `/api/v1/queues/{queue}`, with the **name in the path** — SQS's
+      queue-URL-as-identifier exists because it has accounts and regions to encode, and
+      repeating it would be copying a workaround.
 
-      Settled already, since the one existing route had to choose: every route lives under
-      **`/api/v1`**, held in `server::API_PREFIX` and applied by `Router::nest` so it is
-      written once and a route cannot be added outside it by accident. Versioned because a
-      generated client's base path should not have to change the first time the API does;
-      under `/api` as well because the SPA will be served from the same origin and will want
-      `/` and its own asset paths, and a queue named `assets` must not be able to collide
-      with them. Tests spell the literal path rather than building it from the constant, so
-      changing the prefix is a failing test rather than a silent break — six of them fail on
-      a mutation back to bare `/v1`.
+      Every route lives under **`/api/v1`**, held in `server::API_PREFIX` and applied by
+      `Router::nest` so it is written once and a route cannot be added outside it by
+      accident. Versioned because a generated client's base path should not have to change
+      the first time the API does; under `/api` as well because the SPA will be served from
+      the same origin and will want `/` and its own asset paths, and a queue named `assets`
+      must not collide with them. Tests spell literal paths rather than building them from
+      the constant, so changing the prefix fails six tests rather than breaking silently.
 
-      Still open here: the rest of the surface, and paging, which has no route to page yet.
+      **Creating is `PUT` on the member.** The engine's creation has been
+      idempotent-when-attributes-match since M2, and "idempotent, addressed by name,
+      supplied by the client" is what `PUT` means — so this is existing semantics finding
+      their natural verb rather than a new rule. Differing attributes are a `409`, never a
+      silent reconfiguration of a live queue. `DELETE` answers `204`, and `404` when there
+      was nothing to delete, since that caller has a different problem from one whose
+      delete worked.
+
+      **Paging is by cursor**, carrying the store's keyset token onto the wire. The test
+      that matters reads a page, deletes a queue from behind the cursor, and asserts the
+      next page still starts where it should — an offset would have skipped one. Verified
+      by making the handler ignore the cursor, which fails exactly that test. A cursor this
+      server did not issue answers `invalid_cursor` rather than blaming the caller's queue
+      name, since the caller did not choose it.
+
+      Timestamps forced a decision deferred twice already: `chrono` renders `created_at`
+      and `last_modified_at` as **RFC 3339**, which the spec marks `format: date-time` and
+      every client generator turns into a real date type. Without `clock`, so no timezone
+      database and no platform clock — nothing here asks what time it is, it only formats
+      what the engine recorded.
+
+      Attributes on create are the three the engine has behaviour behind.
+      `max_receive_count` and a dead-letter queue are **refused rather than accepted and
+      ignored**, because a setting that does nothing tells a client its messages are
+      protected when they are not. Out-of-range values are refused rather than clamped.
+      Those limits are SQS's, kept so a queue's legal configuration does not depend on which
+      door it was created through, and `the_limits_match_the_sqs_facade` holds the two
+      definitions equal.
+
+      **A third envelope hole, found the same way as the second.** `axum::extract::Query`
+      answers a bad query string itself, in plain text, so a misspelled `?limti=2` bypassed
+      the error envelope exactly as a wrong content type had. That made it a pattern rather
+      than an incident: `json.rs` became `extract.rs` holding both extractors, on the
+      reasoning that the fix belongs to the extractor layer and not to whichever endpoint
+      someone happened to test.
+
+      The rustdoc-leak guard also caught a live mistake — my first `QueueAttributesBody` doc
+      comment carried a rustdoc link and maintainer rationale straight into the published
+      spec.
+
+      Three mutations verified: the cursor ignored, attributes clamped instead of refused,
+      and query rejections routed around the envelope again.
+
+      Still open, and owned by the parity item below: changing attributes after creation,
+      the message counts, purge, and every message operation but `receive`.
 - [x] One error envelope: HTTP status, a stable machine-readable code, and a message,
       nested under `error` so a successful response and a failed one can never be told
       apart only by which fields happen to be present. Distinct from the SQS facade's
@@ -320,9 +363,10 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       *this server's* fault, so its detail is logged and withheld. A backend error can
       carry hosts, paths, or credentials, none of which belong in a response — there is a
       test that a `postgres://user:hunter2@db` connection string does not reach the client.
-- [ ] Parity surface: create/get/list/delete queue, get and set attributes, purge,
-      send/receive/delete/change-visibility, and the three batch operations. Idempotent
-      creation is inherited from the engine rather than re-decided
+- [ ] Parity surface: ~~create/get/list/delete queue~~ (landed with the resource shape
+      above), get and set attributes, purge, send/delete/change-visibility, and the three
+      batch operations. Idempotent creation is inherited from the engine rather than
+      re-decided
 - [x] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
       mechanism with two protocol faces, per Q3a, not a second implementation. REST's
       `wait_time_seconds` goes to `Engine::receive` and nothing else, so there is nothing

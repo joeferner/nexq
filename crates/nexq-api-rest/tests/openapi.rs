@@ -51,14 +51,36 @@ fn the_document_describes_the_route_that_is_actually_served() {
         "the documented path must carry the prefix the router nests under"
     );
 
-    // One path, because there is one route. This is the assertion that fails when a route
-    // is added without being documented — `route` rather than `api_route`, say.
+    // The whole documented surface, spelled out. This is the assertion that fails when a
+    // route is added without being documented — `route` rather than `api_route`, say — and
+    // equally when one is documented that nobody meant to publish.
+    let mut paths: Vec<&str> = spec["paths"]
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    paths.sort_unstable();
+
     assert_eq!(
-        spec["paths"].as_object().map(|paths| paths.len()),
-        Some(1),
-        "a route registered outside `api_route` is invisible here: {}",
-        spec["paths"]
+        paths,
+        [
+            "/api/v1/queues",
+            "/api/v1/queues/{queue}",
+            "/api/v1/queues/{queue}/messages/receive",
+        ]
     );
+
+    // Every operation carries an id, since that is what names the method on a generated
+    // client — an operation without one gets a name invented from its path.
+    for (path, operations) in spec["paths"].as_object().expect("an object") {
+        for (method, operation) in operations.as_object().expect("an object") {
+            assert!(
+                operation["operationId"].is_string(),
+                "{method} {path} has no operationId"
+            );
+        }
+    }
 }
 
 /// `Path<String>` tells aide a parameter exists but not what it is called, and the
@@ -146,6 +168,130 @@ fn failures_are_documented_with_the_error_envelope() {
     let detail = &spec()["components"]["schemas"]["ErrorDetail"]["properties"];
     assert_eq!(detail["code"]["type"], "string");
     assert_eq!(detail["message"]["type"], "string");
+}
+
+/// Every operation in the document.
+fn operations(spec: &Value) -> Vec<(String, String, Value)> {
+    spec["paths"]
+        .as_object()
+        .expect("an object")
+        .iter()
+        .flat_map(|(path, methods)| {
+            methods
+                .as_object()
+                .expect("an object")
+                .iter()
+                .map(move |(method, operation)| {
+                    (method.to_owned(), path.to_owned(), operation.clone())
+                })
+        })
+        .collect()
+}
+
+/// A published operation without prose is a client method with no doc comment, which is
+/// what most consumers of a generated SDK actually read.
+///
+/// The two are held to different standards on purpose, and getting that wrong is how this
+/// test first failed: a `summary` is a label — "List queues" is a good one — while a
+/// `description` is where the behaviour that cannot be inferred from the types goes.
+#[test]
+fn every_operation_carries_a_summary_and_a_description() {
+    for (method, path, operation) in operations(&spec()) {
+        let method = method.to_uppercase();
+
+        let summary = operation["summary"].as_str().unwrap_or_default();
+        assert!(!summary.is_empty(), "{method} {path} has no summary");
+        assert!(
+            !summary.contains('\n'),
+            "{method} {path}: a summary is a one-line label, not prose: {summary:?}"
+        );
+
+        let description = operation["description"].as_str().unwrap_or_default();
+        assert!(
+            description.len() > 80,
+            "{method} {path} needs a description saying what the types cannot: \
+             {description:?}"
+        );
+    }
+}
+
+/// Authentication is a layer over *every* route, so every operation can answer `401` —
+/// and one that does not say so publishes an endpoint that looks reachable without a
+/// token. `error::needs_a_token` is the shared helper; this is what catches forgetting it.
+#[test]
+fn every_operation_documents_the_401() {
+    for (method, path, operation) in operations(&spec()) {
+        assert_eq!(
+            operation["responses"]["401"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ErrorBody",
+            "{} {path} does not document that it needs a token",
+            method.to_uppercase()
+        );
+    }
+}
+
+/// The `415` comes from the body extractor rather than from anything an operation decides,
+/// so an operation that reads a body must document it — and one that reads none must not.
+#[test]
+fn an_operation_documents_the_415_exactly_when_it_reads_a_body() {
+    for (method, path, operation) in operations(&spec()) {
+        let reads_a_body = operation["requestBody"].is_object();
+        let documents_415 = operation["responses"]["415"].is_object();
+
+        assert_eq!(
+            reads_a_body,
+            documents_415,
+            "{} {path}: reads a body = {reads_a_body}, documents 415 = {documents_415}",
+            method.to_uppercase()
+        );
+    }
+}
+
+/// Every response a client can receive is described, since an undescribed status code in a
+/// generated client is a bare number.
+#[test]
+fn every_documented_response_says_what_it_means() {
+    for (method, path, operation) in operations(&spec()) {
+        for (status, response) in operation["responses"].as_object().expect("an object") {
+            assert!(
+                response["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
+                "{} {path} response {status} has no description",
+                method.to_uppercase()
+            );
+        }
+    }
+}
+
+/// A field with no description becomes an undocumented field on a generated type. Not a
+/// stylistic preference — the schemas *are* the reference for anyone consuming this API.
+#[test]
+fn every_schema_field_is_described() {
+    let spec = spec();
+    let schemas = spec["components"]["schemas"]
+        .as_object()
+        .expect("an object");
+
+    assert!(!schemas.is_empty(), "there should be schemas");
+
+    for (name, schema) in schemas {
+        assert!(
+            schema["description"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "schema {name} has no description"
+        );
+
+        for (field, property) in schema["properties"].as_object().into_iter().flatten() {
+            assert!(
+                property["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
+                "{name}.{field} has no description"
+            );
+        }
+    }
 }
 
 /// Doc comments have two audiences now that `aide` publishes them, and rustdoc's own

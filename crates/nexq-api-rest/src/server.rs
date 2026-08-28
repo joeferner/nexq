@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use aide::axum::ApiRouter;
-use aide::axum::routing::post_with;
+use aide::axum::routing::{get_with, post_with, put_with};
 use aide::openapi::{OpenApi, SecurityScheme};
 use aide::transform::TransformOpenApi;
 use axum::body::Bytes;
@@ -33,6 +33,7 @@ use crate::auth;
 use crate::docs::Docs;
 use crate::error::ApiError;
 use crate::messages;
+use crate::queues;
 
 /// What every request needs: credentials to check the token against, and the engine to
 /// run the operation on.
@@ -194,10 +195,23 @@ fn api_routes() -> ApiRouter<FacadeState> {
         // Nested rather than spelled into each path, so [`API_PREFIX`] is written once,
         // a route cannot be added outside it by accident, and the spec's paths carry it.
         API_PREFIX,
-        ApiRouter::new().api_route(
-            "/queues/{queue}/messages/receive",
-            post_with(messages::receive, messages::receive_docs),
-        ),
+        ApiRouter::new()
+            // The collection, then the member, then what hangs off it — a queue is
+            // addressed by its name rather than by a URL this server handed out.
+            .api_route(
+                "/queues",
+                get_with(queues::list_queues, queues::list_queues_docs),
+            )
+            .api_route(
+                "/queues/{queue}",
+                put_with(queues::put_queue, queues::put_queue_docs)
+                    .get_with(queues::get_queue, queues::get_queue_docs)
+                    .delete_with(queues::delete_queue, queues::delete_queue_docs),
+            )
+            .api_route(
+                "/queues/{queue}/messages/receive",
+                post_with(messages::receive, messages::receive_docs),
+            ),
     )
 }
 
@@ -466,6 +480,49 @@ mod tests {
         request.body(Body::from(body.to_owned())).expect("request")
     }
 
+    /// Drive one authenticated request, returning its status and parsed body.
+    ///
+    /// A `204` has no body, so it comes back as `null` rather than failing to parse.
+    async fn request(
+        facade: &FacadeState,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut builder = HttpRequest::builder()
+            .method(method)
+            .uri(path)
+            .header(header::AUTHORIZATION, format!("Bearer {}", token()));
+
+        if body.is_some() {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+        }
+
+        let request = builder
+            .body(body.map_or_else(Body::empty, |body| Body::from(body.to_owned())))
+            .expect("request");
+
+        let response = router(Arc::clone(facade))
+            .oneshot(request)
+            .await
+            .expect("response");
+        let status = response.status();
+
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let json = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).expect("json")
+        };
+
+        (status, json)
+    }
+
     async fn json_of(response: Response) -> serde_json::Value {
         let bytes = response
             .into_body()
@@ -629,6 +686,208 @@ mod tests {
             json_of(response).await["error"]["code"],
             "invalid_queue_name"
         );
+    }
+
+    /// A queue's whole life over the resource routes: create, read, list, delete.
+    #[tokio::test]
+    async fn a_queue_is_created_read_listed_and_deleted_by_name() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        let created = request(
+            &facade,
+            "PUT",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds": 5}"#),
+        )
+        .await;
+        assert_eq!(created.0, StatusCode::OK);
+        assert_eq!(created.1["name"], "jobs");
+        assert_eq!(created.1["attributes"]["delay_seconds"], 5);
+        assert_eq!(
+            created.1["attributes"]["visibility_timeout_seconds"], 30,
+            "an unnamed attribute takes its default rather than zero"
+        );
+
+        // RFC 3339, which is what a generated client turns into a date type.
+        let created_at = created.1["created_at"].as_str().expect("a timestamp");
+        assert!(
+            created_at.contains('T') && created_at.ends_with('Z'),
+            "expected RFC 3339: {created_at}"
+        );
+
+        // Idempotent: the same request again is the same queue, not a conflict.
+        let again = request(
+            &facade,
+            "PUT",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds": 5}"#),
+        )
+        .await;
+        assert_eq!(again.0, StatusCode::OK);
+        assert_eq!(again.1["created_at"], created.1["created_at"]);
+
+        // Different attributes are a conflict rather than a silent reconfiguration.
+        let conflict = request(
+            &facade,
+            "PUT",
+            "/api/v1/queues/jobs",
+            Some(r#"{"delay_seconds": 6}"#),
+        )
+        .await;
+        assert_eq!(conflict.0, StatusCode::CONFLICT);
+        assert_eq!(conflict.1["error"]["code"], "queue_already_exists");
+
+        let read = request(&facade, "GET", "/api/v1/queues/jobs", None).await;
+        assert_eq!(read.0, StatusCode::OK);
+        assert_eq!(read.1["attributes"]["delay_seconds"], 5);
+
+        let listed = request(&facade, "GET", "/api/v1/queues", None).await;
+        assert_eq!(listed.1["queues"][0]["name"], "jobs");
+        assert_eq!(listed.1["next_cursor"], serde_json::Value::Null);
+
+        let deleted = request(&facade, "DELETE", "/api/v1/queues/jobs", None).await;
+        assert_eq!(deleted.0, StatusCode::NO_CONTENT);
+
+        assert_eq!(
+            request(&facade, "GET", "/api/v1/queues/jobs", None).await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// An empty collection is an empty list, not a 404 and not an absent field.
+    #[tokio::test]
+    async fn listing_nothing_is_an_empty_list() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        let listed = request(&facade, "GET", "/api/v1/queues", None).await;
+
+        assert_eq!(listed.0, StatusCode::OK);
+        assert_eq!(listed.1["queues"], serde_json::json!([]));
+        assert_eq!(listed.1["next_cursor"], serde_json::Value::Null);
+    }
+
+    /// The reason paging is by cursor rather than by offset: a queue deleted between
+    /// pages must not make the caller skip the one that would have shifted into its place.
+    #[tokio::test]
+    async fn a_cursor_survives_churn_that_would_break_an_offset() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        for name in ["a", "b", "c", "d"] {
+            request(&facade, "PUT", &format!("/api/v1/queues/{name}"), None).await;
+        }
+
+        let first = request(&facade, "GET", "/api/v1/queues?limit=2", None).await;
+        assert_eq!(first.1["queues"][0]["name"], "a");
+        assert_eq!(first.1["queues"][1]["name"], "b");
+        let cursor = first.1["next_cursor"]
+            .as_str()
+            .expect("more remain")
+            .to_owned();
+
+        // Delete one from the page already read. An offset of 2 would now skip "c".
+        request(&facade, "DELETE", "/api/v1/queues/a", None).await;
+
+        let second = request(
+            &facade,
+            "GET",
+            &format!("/api/v1/queues?cursor={cursor}"),
+            None,
+        )
+        .await;
+        let names: Vec<&str> = second.1["queues"]
+            .as_array()
+            .expect("a page")
+            .iter()
+            .map(|queue| queue["name"].as_str().expect("a name"))
+            .collect();
+
+        assert_eq!(names, ["c", "d"], "nothing skipped and nothing repeated");
+        assert_eq!(second.1["next_cursor"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn listing_can_be_filtered_by_prefix() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+        for name in ["job-one", "job-two", "email"] {
+            request(&facade, "PUT", &format!("/api/v1/queues/{name}"), None).await;
+        }
+
+        let listed = request(&facade, "GET", "/api/v1/queues?prefix=job", None).await;
+
+        assert_eq!(listed.1["queues"].as_array().map(Vec::len), Some(2));
+    }
+
+    /// A cursor is this server's to issue, so a nonsense one says that rather than
+    /// blaming the caller's queue name.
+    #[tokio::test]
+    async fn a_cursor_we_did_not_issue_is_refused_as_a_cursor() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        let refused = request(&facade, "GET", "/api/v1/queues?cursor=not%20a%20name", None).await;
+
+        assert_eq!(refused.0, StatusCode::BAD_REQUEST);
+        assert_eq!(refused.1["error"]["code"], "invalid_cursor");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_query_parameter_is_refused() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        // `limit` misspelled: silently listing everything would be worse than saying no.
+        let refused = request(&facade, "GET", "/api/v1/queues?limti=2", None).await;
+
+        assert_eq!(refused.0, StatusCode::BAD_REQUEST);
+    }
+
+    /// Every queue route needs a token, like every other route.
+    #[tokio::test]
+    async fn the_queue_routes_are_behind_the_same_auth_layer() {
+        let facade = Arc::new(Facade {
+            auth: test_auth(),
+            engine: test_engine(),
+        });
+
+        for (method, path) in [
+            ("GET", "/api/v1/queues"),
+            ("PUT", "/api/v1/queues/jobs"),
+            ("GET", "/api/v1/queues/jobs"),
+            ("DELETE", "/api/v1/queues/jobs"),
+        ] {
+            let request = HttpRequest::builder()
+                .method(method)
+                .uri(path)
+                .body(Body::empty())
+                .expect("request");
+
+            let response = router(Arc::clone(&facade))
+                .oneshot(request)
+                .await
+                .expect("response");
+
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} must not be reachable without a token"
+            );
+        }
     }
 
     /// Readable without a token, and by the same server that serves the routes it

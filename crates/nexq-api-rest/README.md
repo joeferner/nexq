@@ -10,12 +10,12 @@ It is also the contract every client is generated from — the CLI, the web UI, 
 published SDK — so the routes and types in this crate are the one definition of the API,
 and [`openapi.json`](openapi.json) is generated from them rather than written.
 
-> **Under construction, and mostly not built.** One queue operation exists. The plumbing
-> around it is real — listener, TLS, authentication, error envelope, long polling, generated
-> and committed spec, browsable documentation — but the operation surface is a single
-> `receive`, chosen because it is what proves this facade and the SQS one run over one
-> engine. See [`todo.md`](../../todo.md) M9 for the order the rest arrives in. Until then,
-> the SQS facade is the one that can actually drive a queue.
+> **Under construction.** Queues are a complete resource — create, read, list with paging,
+> delete — and messages are not: `receive` is the only message operation, so nothing here
+> can send or delete one yet. The plumbing around it all is real: listener, TLS,
+> authentication, one error envelope, long polling, a generated and committed spec, and
+> browsable documentation. See [`todo.md`](../../todo.md) M9 for the order the rest arrives
+> in. Until sending lands, the SQS facade is the one that can drive a queue end to end.
 
 # Features
 
@@ -67,8 +67,24 @@ and [`openapi.json`](openapi.json) is generated from them rather than written.
 
 ## Queue operations
 
-- :scroll: Create, get, list, and delete a queue
-- :scroll: Get and set queue attributes, and the message counts
+A queue is addressed by **name in the path** — `/api/v1/queues/jobs` — not by a URL the
+server hands out and the client must send back.
+
+- :white_check_mark: `PUT /queues/{queue}` — create, or confirm one exists. Idempotent when
+  the attributes match and a `409` when they differ, so a live queue is never reconfigured
+  by accident. `PUT` rather than `POST` to a collection precisely because that is what
+  idempotent-and-addressed-by-name means
+- :white_check_mark: `GET /queues/{queue}` — the queue, its timestamps, and its attributes
+- :white_check_mark: `DELETE /queues/{queue}` — `204`, and `404` when there was nothing to
+  delete. Takes the queue's messages with it and releases consumers waiting on it
+- :white_check_mark: `GET /queues` — one page at a time, filtered by `prefix`, with
+  **cursor** paging rather than offsets: a queue created or deleted between pages cannot
+  make a caller skip one or see it twice
+- :ballot_box_with_check: Attributes on create — `visibility_timeout_seconds`,
+  `delay_seconds`, `receive_wait_time_seconds`. An out-of-range value is refused rather than
+  clamped, and an unrecognised one refused rather than dropped
+- :scroll: Changing attributes after creation
+- :scroll: The message counts
 - :scroll: Purge
 
 ## Message operations
@@ -113,16 +129,17 @@ there. All are M10 rather than M9:
 
 # Coverage
 
-One of the operations this facade will carry is implemented. Stated plainly because the
-surrounding machinery is complete enough to look further along than it is:
+Stated plainly, because the surrounding machinery is complete enough to look further along
+than the surface is:
 
 | | |
 | --- | --- |
-| Routes serving the API | 1 (`receive`) |
+| Documented operations | 5 — `putQueue`, `getQueue`, `deleteQueue`, `listQueues`, `receiveMessages` |
 | Routes serving documentation | 3 (the spec, the page, and its two assets) |
 | Authentication | complete |
 | Error envelope | complete, and mapped from every `EngineError` variant |
-| Operation surface | one of roughly twenty |
+| Queue resource | complete except changing attributes, counts, and purge |
+| Message operations | `receive` only — no send, delete, change-visibility, or batches |
 
 A path this facade does not have answers in its own envelope rather than with an empty
 `404`, so a client parsing errors never has to special-case a wrong URL.
@@ -144,6 +161,69 @@ That serves the SQS facade on `:8080` and this one on `:8081`, from
 export NEXQ=http://localhost:8081
 export TOKEN=AKIANEXQDEV.change-me
 ```
+
+## Queues
+
+```sh
+curl -s -X PUT "$NEXQ/api/v1/queues/jobs" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"delay_seconds": 5}'
+```
+
+```json
+{
+  "name": "jobs",
+  "created_at": "2026-08-27T00:57:23.116130732Z",
+  "last_modified_at": "2026-08-27T00:57:23.116130732Z",
+  "attributes": {
+    "visibility_timeout_seconds": 30,
+    "delay_seconds": 5,
+    "receive_wait_time_seconds": 0
+  }
+}
+```
+
+An attribute not named takes its **default**, not zero — the visibility timeout above is 30
+because nothing asked for another. Timestamps are RFC 3339, which a generated client turns
+into its language's own date type.
+
+`PUT` is idempotent: the same request again returns the same queue. The same *name* with
+different attributes is a `409` rather than a silent reconfiguration of a live queue:
+
+```sh
+curl -s -X PUT "$NEXQ/api/v1/queues/jobs" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"delay_seconds": 6}'
+# {"error":{"code":"queue_already_exists","message":"a queue named jobs exists with different attributes"}}
+```
+
+```sh
+curl -s "$NEXQ/api/v1/queues/jobs" -H "Authorization: Bearer $TOKEN"
+curl -s -X DELETE "$NEXQ/api/v1/queues/jobs" -H "Authorization: Bearer $TOKEN"   # 204
+```
+
+Deleting takes the queue's messages with it, including ones a consumer is holding, and
+releases anyone long-polling on it. Deleting a queue that was never there is a `404` rather
+than a silent success — a caller in that position has a different problem from one whose
+delete worked.
+
+### Listing, and why the cursor is not an offset
+
+```sh
+curl -s "$NEXQ/api/v1/queues?limit=2" -H "Authorization: Bearer $TOKEN"
+# {"queues":[{"name":"alpha",…},{"name":"beta",…}],"next_cursor":"beta"}
+
+curl -s "$NEXQ/api/v1/queues?limit=2&cursor=beta" -H "Authorization: Bearer $TOKEN"
+# {"queues":[{"name":"delta",…},{"name":"gamma",…}],"next_cursor":"gamma"}
+```
+
+`next_cursor` is `null` on the last page, and `?prefix=` filters by name. The cursor names
+**where to resume**, so deleting `alpha` between the two requests above still yields
+`delta` next — where an offset of 2 would have skipped it. That is the store's keyset
+guarantee carried onto the wire rather than re-derived from it.
+
+A cursor is this server's to issue, so a value it did not issue says so — `invalid_cursor`,
+not a complaint about your queue name.
 
 ## Receiving a message
 
@@ -309,6 +389,10 @@ on, and a `message` for a human that may change:
 | 400 | `invalid_max_messages` | Outside 1–10. Refused rather than clamped: quietly returning ten when fifty were asked for leaves the caller's misunderstanding intact |
 | 400 | `invalid_wait_time` | Over the 20-second protocol maximum |
 | 400 | `invalid_request_body` | The JSON does not fit — `serde`'s message names the field and the column |
+| 400 | `invalid_query_parameter` | A query parameter is misspelled or malformed, and is named |
+| 400 | `invalid_queue_attribute` | An attribute is outside its range, which the message gives |
+| 400 | `invalid_limit` | A page limit outside 1–1000 |
+| 400 | `invalid_cursor` | A cursor this server did not issue |
 | 415 | `unsupported_media_type` | A body was sent as something other than `application/json`. Send no body at all to use the defaults |
 | 409 | `queue_already_exists` | A queue of that name exists with different attributes |
 | 409 | `conflict` | Concurrent change; the request was fine and retrying should work |

@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 aide = { workspace = true }
 axum = { workspace = true }
+chrono = { workspace = true }
 nexq-core = { workspace = true }
 rustls = { workspace = true }
 schemars = { workspace = true }

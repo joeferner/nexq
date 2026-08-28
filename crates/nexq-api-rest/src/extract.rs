@@ -1,23 +1,27 @@
-//! A JSON body extractor whose refusals arrive in this facade's error envelope.
+//! Extractors whose refusals arrive in this facade's error envelope.
 //!
-//! `Option<Json<T>>` would be the obvious choice and is nearly right: absent means absent,
-//! and the handler gets a default. What it gets wrong is the refusal — a body with the
-//! wrong content type or a syntax error is answered by `axum` directly, as **plain text**:
+//! `axum`'s own answer a malformed request **themselves**, as plain text, before any
+//! handler runs — so the one-envelope promise quietly has holes wherever a built-in
+//! extractor is used directly:
 //!
 //! ```text
 //! Expected request with `Content-Type: application/json`
+//! Failed to deserialize query string: unknown field `limti`
 //! ```
 //!
-//! No status a client can branch on, no `code`, and not JSON, so a client parsing errors
-//! has to special-case it. That was found by typing `curl -d '{}'` — which sets
-//! `application/x-www-form-urlencoded` — while writing the README, after the error envelope
-//! had already been called done.
+//! No status to branch on, no `code`, and not JSON, so a client parsing errors has to
+//! special-case them. Both were found the same way — by typing a request wrong while
+//! writing documentation — and the second turned up *after* the first was fixed, which is
+//! why these live together: the fix belongs to the extractor layer rather than to whichever
+//! endpoint happened to be tested.
 
 use aide::generate::GenContext;
 use aide::openapi::Operation;
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::rejection::QueryRejection;
+use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::header;
+use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
 
 use crate::error::ApiError;
@@ -101,6 +105,48 @@ where
     }
 }
 
+/// Query-string parameters, refused in the envelope rather than in plain text.
+///
+/// The same problem as [`OptionalJson`] one layer along: `axum::extract::Query` answers a
+/// bad query string itself. It matters most for `deny_unknown_fields`, where the refusal a
+/// caller sees is the one telling them they misspelled a parameter.
+#[derive(Debug)]
+pub struct Query<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for Query<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match axum::extract::Query::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Query(value)) => Ok(Self(value)),
+            // `serde`'s message names the parameter, which is the useful half of it.
+            Err(rejection) => Err(ApiError::bad_request(
+                "invalid_query_parameter",
+                query_detail(&rejection),
+            )),
+        }
+    }
+}
+
+/// The readable part of a query rejection.
+fn query_detail(rejection: &QueryRejection) -> String {
+    rejection.body_text()
+}
+
+/// Documented as `axum`'s own would be, so the spec still lists the parameters.
+impl<T> aide::OperationInput for Query<T>
+where
+    T: DeserializeOwned + schemars::JsonSchema,
+{
+    fn operation_input(context: &mut GenContext, operation: &mut Operation) {
+        <axum::extract::Query<T> as aide::OperationInput>::operation_input(context, operation);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
@@ -176,6 +222,58 @@ mod tests {
             "the message should say what to send: {}",
             error.message()
         );
+    }
+
+    /// The second hole, found after the first was fixed: a misspelled parameter must be
+    /// refused in the envelope, naming what was misspelled.
+    #[tokio::test]
+    async fn a_bad_query_string_is_refused_in_the_envelope() {
+        #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+        #[serde(deny_unknown_fields, default)]
+        struct Params {
+            limit: Option<usize>,
+        }
+
+        let mut parts = HttpRequest::builder()
+            .uri("/?limti=2")
+            .body(())
+            .expect("request")
+            .into_parts()
+            .0;
+
+        let error = Query::<Params>::from_request_parts(&mut parts, &())
+            .await
+            .expect_err("a misspelled parameter must not be ignored");
+
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(error.code(), "invalid_query_parameter");
+        assert!(
+            error.message().contains("limti"),
+            "the message should name it: {}",
+            error.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_good_query_string_is_parsed() {
+        #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+        #[serde(deny_unknown_fields, default)]
+        struct Params {
+            limit: Option<usize>,
+        }
+
+        let mut parts = HttpRequest::builder()
+            .uri("/?limit=7")
+            .body(())
+            .expect("request")
+            .into_parts()
+            .0;
+
+        let Query(params) = Query::<Params>::from_request_parts(&mut parts, &())
+            .await
+            .expect("valid");
+
+        assert_eq!(params.limit, Some(7));
     }
 
     #[tokio::test]
