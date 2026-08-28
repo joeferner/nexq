@@ -44,12 +44,6 @@ ahead of M14 is a one-line change to this file and it would remove both costs.
 The features REST exists to expose. All three are unreachable from any AWS facade, which
 is why they waited for one that can reach them.
 
-- [ ] **Position in queue.** `Store::position_of`, per-backend by construction (Q7): an
-      index into an ordered structure for memory, a count query for SQL and search. Two
-      semantics to settle and then _document_, because both answers surprise someone:
-      whether position counts only currently-visible messages, and that a
-      higher-priority arrival moves you backwards. Approximate by nature, and named
-      `Approximate…` for the same reason SQS names its counts that way
 - [ ] **Dead-letter queues.** A DLQ is its own queue, first-class rather than a special
       case (Q8), so it already has a backend setting — defaulting to its source's,
       overridable, which is the point: a live queue on `memory` with its DLQ on something

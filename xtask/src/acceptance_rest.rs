@@ -43,6 +43,7 @@ pub fn run() -> Result<(), String> {
         ("send, receive, delete", produce_and_consume),
         ("message attributes", message_attributes),
         ("priority", priority),
+        ("position in queue", position_in_queue),
         ("long polling", long_polling),
         ("handing a message back", handing_back),
         ("per-entry results", per_entry_results),
@@ -320,6 +321,55 @@ fn priority(rest: &Rest) -> Result<(), String> {
     expect(&as_str(&first["body"])?, "urgent")
         .map_err(|error| format!("higher priority should be served first: {error}"))?;
     expect_number(&first["priority"], 10)
+}
+
+/// "Where am I in line", the other thing the SQS facade cannot answer.
+fn position_in_queue(rest: &Rest) -> Result<(), String> {
+    let queue = "position";
+    rest.put(&path(queue), &json!({}))?;
+
+    let sent = rest.post(
+        &messages(queue),
+        &json!({ "messages": [{ "body": "first" }, { "body": "second" }] }),
+    )?;
+    let first = as_str(&sent.body["results"][0]["messageId"])?;
+    let second = as_str(&sent.body["results"][1]["messageId"])?;
+
+    let at = |id: &str| format!("{}/{id}/position", messages(queue));
+
+    let front = rest.get(&at(&first))?;
+    expect_status(&front, 200)?;
+    expect(&as_str(&front.body["messageId"])?, &first)?;
+    expect_number(&front.body["approximatePosition"], 1)
+        .map_err(|error| format!("the next message to be served is first in line: {error}"))?;
+    expect(&as_str(&front.body["state"])?, "visible")?;
+
+    expect_number(&rest.get(&at(&second))?.body["approximatePosition"], 2)?;
+
+    // A higher-priority arrival moves an existing message backwards, which is why this is
+    // reported as approximate rather than as a countdown.
+    rest.post(
+        &messages(queue),
+        &json!({ "messages": [{ "body": "urgent", "priority": 10 }] }),
+    )?;
+    expect_number(&rest.get(&at(&first))?.body["approximatePosition"], 2)
+        .map_err(|error| format!("an urgent message should have pushed this back: {error}"))?;
+
+    // And a message in flight is out of everyone else's way, since only what is claimable
+    // right now is counted.
+    let received = rest.post(&format!("{}/receive", messages(queue)), &json!({}))?;
+    let urgent = as_str(&received.body["messages"][0]["id"])?;
+    expect_number(&rest.get(&at(&first))?.body["approximatePosition"], 1)?;
+
+    let in_flight = rest.get(&at(&urgent))?;
+    expect(&as_str(&in_flight.body["state"])?, "notVisible")?;
+    expect_number(&in_flight.body["approximatePosition"], 3)
+        .map_err(|error| format!("a claimed message is behind everything claimable: {error}"))?;
+
+    // A message the queue does not hold says so as a missing message, not a missing queue.
+    let gone = rest.get(&at("never-issued"))?;
+    expect_status(&gone, 404)?;
+    expect_code(&gone, "message_not_found")
 }
 
 /// The request is held open and returns when a message arrives, not when the wait ends.

@@ -30,7 +30,7 @@ use tokio::time::{Instant, timeout};
 
 use crate::model::{
     ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, MessageCounts, MessageId, Priority,
-    Queue, QueueAttributes, QueueName, ReceiptHandle,
+    Queue, QueueAttributes, QueueName, QueuePosition, ReceiptHandle,
 };
 use crate::store::{Store, StoreError};
 use crate::waiters::Waiters;
@@ -295,6 +295,24 @@ impl Engine {
     /// How many messages a queue holds, split by visibility.
     pub async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts> {
         Ok(self.store.message_counts(name).await?)
+    }
+
+    /// Where a message sits in the line, or `None` if the queue does not hold it.
+    ///
+    /// One of the operations no AWS facade can express, which is why it is here and
+    /// reachable only over NexQ's own API. The answer counts what is claimable right now
+    /// and nothing else — the [`Store`] contract has the whole rule and the two ways it
+    /// surprises people.
+    ///
+    /// `None` is a normal answer, not a failure: a message that was received and deleted
+    /// while the question was being asked has no position, and neither does one whose id
+    /// was never issued. A caller cannot tell those apart, and does not need to.
+    pub async fn position_of(
+        &self,
+        queue: &QueueName,
+        message: &MessageId,
+    ) -> Result<Option<QueuePosition>> {
+        Ok(self.store.position_of(queue, message).await?)
     }
 
     /// Delete a queue and everything in it.
@@ -1090,6 +1108,42 @@ mod tests {
             )
             .await
             .expect("exactly at the limit is allowed");
+    }
+
+    /// The engine hands the question to the store and hands the answer back, `None`
+    /// included — a message that is gone is an answer here rather than an error, and a
+    /// facade turning it into a `404` is that facade's decision.
+    #[tokio::test]
+    async fn a_message_that_is_gone_has_no_position() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "hello").await;
+        let sent = engine
+            .enqueue(
+                &queue,
+                "second".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        let position = engine
+            .position_of(&queue, &sent.id)
+            .await
+            .expect("position")
+            .expect("the queue holds it");
+        assert_eq!(position.ahead, 1, "one message arrived before it");
+        assert_eq!(position.place(), 2, "one-based for a caller");
+
+        assert!(
+            engine
+                .position_of(&queue, &MessageId::new())
+                .await
+                .expect("position")
+                .is_none(),
+            "an id this queue never issued has no position"
+        );
     }
 
     #[tokio::test]
@@ -2036,6 +2090,14 @@ mod tests {
 
         async fn message_counts(&self, name: &QueueName) -> StoreResult<MessageCounts> {
             self.inner.message_counts(name).await
+        }
+
+        async fn position_of(
+            &self,
+            queue: &QueueName,
+            message: &MessageId,
+        ) -> StoreResult<Option<crate::model::QueuePosition>> {
+            self.inner.position_of(queue, message).await
         }
 
         async fn delete_queue(&self, name: &QueueName) -> StoreResult<()> {

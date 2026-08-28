@@ -96,6 +96,23 @@ macro_rules! conformance_tests {
         );
         $crate::conformance_case!($new_store, skipping_the_only_message_yields_nothing);
 
+        // Position in queue.
+        $crate::conformance_case!(
+            $new_store,
+            the_next_message_to_be_served_has_nothing_ahead_of_it
+        );
+        $crate::conformance_case!(
+            $new_store,
+            positions_follow_the_order_messages_will_be_served_in
+        );
+        $crate::conformance_case!(
+            $new_store,
+            a_higher_priority_arrival_moves_a_message_backwards
+        );
+        $crate::conformance_case!($new_store, a_delayed_message_is_behind_everything_claimable);
+        $crate::conformance_case!($new_store, a_claimed_message_is_behind_everything_claimable);
+        $crate::conformance_case!($new_store, a_message_that_is_gone_has_no_position);
+
         // Delay.
         $crate::conformance_case!($new_store, a_delayed_message_waits_before_it_can_be_claimed);
         $crate::conformance_case!($new_store, the_queues_own_delay_applies_when_none_is_given);

@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::model::{
     ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
-    ReceiptHandle,
+    QueuePosition, ReceiptHandle,
 };
 
 /// The result of a storage operation.
@@ -107,6 +107,34 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     /// expensive question: a backend may need to aggregate, where reading a queue's
     /// record does not. Callers should ask for it only when someone wants the numbers.
     async fn message_counts(&self, name: &QueueName) -> Result<MessageCounts>;
+
+    /// Where one message sits in the line, or `None` if the queue does not hold it.
+    ///
+    /// `None` rather than an error because "no such message" is an ordinary answer: the
+    /// message may have been received and deleted a moment ago, which is success from
+    /// everyone's point of view. A missing *queue* is still
+    /// [`StoreError::QueueNotFound`], since that one is a caller's mistake.
+    ///
+    /// **The contract is one sentence: how many messages claimable right now would be
+    /// served before this one.** Everything else follows from it — messages that are
+    /// delayed or in flight are not counted because a consumer polling now would not be
+    /// given them, and when the named message is itself not claimable everything
+    /// claimable is counted, because none of it can be served after something that cannot
+    /// be served at all.
+    ///
+    /// Per-backend by construction, which is the point of stating the contract rather
+    /// than an algorithm: an ordered structure indexes into it, while SQL and a search
+    /// backend each answer with one count query over the ordering
+    /// [`Store::claim_next_skipping`] already owes.
+    ///
+    /// Approximate the way SQS's counts are approximate, and rather more so: it is true
+    /// at the instant it was computed, and a higher-priority arrival moves a message
+    /// backwards. A caller treating it as a countdown will be wrong.
+    async fn position_of(
+        &self,
+        queue: &QueueName,
+        message: &MessageId,
+    ) -> Result<Option<QueuePosition>>;
 
     /// Delete a queue and everything in it.
     async fn delete_queue(&self, name: &QueueName) -> Result<()>;

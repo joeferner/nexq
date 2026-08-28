@@ -1,5 +1,11 @@
-//! Messages: the collection at `/queues/{queue}/messages` and one claim at
-//! `/queues/{queue}/messages/{receiptHandle}`.
+//! Messages: the collection at `/queues/{queue}/messages`, one claim at
+//! `/queues/{queue}/messages/{receiptHandle}`, and one message's place in the line at
+//! `/queues/{queue}/messages/{messageId}/position`.
+//!
+//! Those last two are addressed differently on purpose. A receipt handle names a *claim*
+//! and only its holder has one; a message id names the message for as long as it exists,
+//! and whoever sent it has one. Asking where a message is in the line is a producer's
+//! question, and a producer never holds a claim.
 //!
 //! Three places where this deliberately does not follow SQS:
 //!
@@ -29,7 +35,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use nexq_core::engine::{Engine, MAX_MESSAGES_PER_RECEIVE, MAX_RECEIVE_WAIT, ReceiveRequest};
 use nexq_core::model::{
-    AttributeValue, ClaimedMessage, MessageAttribute, MessageAttributes, Priority, ReceiptHandle,
+    AttributeValue, ClaimedMessage, MessageAttribute, MessageAttributes, MessageId, MessageState,
+    Priority, QueuePosition, ReceiptHandle,
 };
 use nexq_core::{Message, QueueName};
 use schemars::JsonSchema;
@@ -227,6 +234,65 @@ pub struct PurgeResponse {
     pub purged: u64,
 }
 
+/// Which message a request is about, by the id it was sent under.
+// A message id rather than a receipt handle, which is the distinction between this and
+// `ClaimPath`: an id names the message for as long as it exists and whoever sent it knows
+// one, while a handle names a claim and only its holder has one. Asking where a message is
+// in the line is a question its *producer* asks, and a producer never holds a claim. Kept
+// out of the doc comment because `aide` publishes these — see `published_descriptions_are_
+// not_written_for_rustdoc`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePath {
+    /// Name of the queue.
+    pub queue: String,
+
+    /// The message's identifier, as returned when it was sent.
+    pub message_id: String,
+}
+
+/// What a message is doing right now.
+///
+/// The same three groups a queue's counts are split into, for one message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageStateResponse {
+    /// Claimable now: a consumer receiving from this queue could be handed it.
+    Visible,
+
+    /// In flight — a consumer holds it under a claim that has not lapsed.
+    NotVisible,
+
+    /// Waiting out a delay, and never yet delivered.
+    Delayed,
+}
+
+/// Where a message sits in the line.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionResponse {
+    /// The message this is about, echoed back from the path.
+    pub message_id: String,
+
+    /// Its place in line, counting from one: `1` is the message a receive would be handed
+    /// next.
+    ///
+    /// Counts **only messages that are claimable right now**, so a queue holding a hundred
+    /// delayed or in-flight messages can still answer `1`. Approximate, and named that way
+    /// for the same reason SQS names its counts approximate — with one difference worth
+    /// knowing: this is not merely a number that lags. A higher-priority message arriving
+    /// moves an existing one *backwards*, so a caller polling this will see it go up as
+    /// well as down. It is a place in an order, not a countdown.
+    pub approximate_position: u64,
+
+    /// What the message itself is doing, which is what says how to read the position.
+    ///
+    /// For a `visible` message the position is its place among the claimable ones. For a
+    /// `delayed` or `notVisible` one it is the count of everything claimable, plus one —
+    /// since none of that can be served after a message that cannot be served at all.
+    pub state: MessageStateResponse,
+}
+
 /// Which claim a request is about.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -336,6 +402,16 @@ impl From<ClaimedMessage> for ReceivedMessage {
                 .into_iter()
                 .map(|(name, attribute)| (name, MessageAttributeBody::from(attribute)))
                 .collect(),
+        }
+    }
+}
+
+impl From<MessageState> for MessageStateResponse {
+    fn from(state: MessageState) -> Self {
+        match state {
+            MessageState::Visible => Self::Visible,
+            MessageState::NotVisible => Self::NotVisible,
+            MessageState::Delayed => Self::Delayed,
         }
     }
 }
@@ -769,6 +845,50 @@ pub async fn visibility_batch(
     Ok(Json(EntryResults { results }))
 }
 
+/// `GET /api/v1/queues/{queue}/messages/{messageId}/position`
+///
+/// Where a message is in the line. A `GET`, and the only safe operation on a message: it
+/// claims nothing and changes nothing, so a producer can ask it as often as it likes.
+///
+/// Its own sub-resource rather than a field on the message, because a message is not
+/// readable by id through this API — receiving is how a message is read, and receiving
+/// claims it. A producer wanting to know where its job got to should not have to take it
+/// out of the queue to find out.
+pub async fn position(
+    State(facade): State<FacadeState>,
+    Path(MessagePath { queue, message_id }): Path<MessagePath>,
+) -> Result<Json<PositionResponse>, ApiError> {
+    let name = QueueName::new(queue)?;
+
+    // A message id is opaque — whatever minted it decides its shape — so there is nothing
+    // to validate here. The only question worth asking is whether this queue holds one,
+    // and the store answers that.
+    let position = facade
+        .engine
+        .position_of(&name, &MessageId::from_backend(message_id.clone()))
+        .await?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "message_not_found",
+                format!("queue {name} holds no message with id {message_id}"),
+            )
+        })?;
+
+    Ok(Json(PositionResponse::of(message_id, position)))
+}
+
+impl PositionResponse {
+    /// The wire form of a position, which is one-based where the engine's is a count of
+    /// what is ahead.
+    fn of(message_id: String, position: QueuePosition) -> Self {
+        Self {
+            message_id,
+            approximate_position: position.place(),
+            state: position.state.into(),
+        }
+    }
+}
+
 /// `DELETE /api/v1/queues/{queue}/messages`
 ///
 /// Purging: deleting the message *collection* while keeping the queue, which is what
@@ -998,6 +1118,42 @@ pub fn visibility_batch_docs(operation: TransformOperation) -> TransformOperatio
         })
         .with(crate::error::needs_a_token)
         .with(crate::error::reads_a_json_body)
+}
+
+pub fn position_docs(operation: TransformOperation) -> TransformOperation {
+    operation
+        .id("getMessagePosition")
+        .summary("Ask where a message is in the line")
+        .description(
+            "Answers \"where am I in line\" for one message, by the id returned when it was \
+             sent. One of the operations the SQS-compatible facade cannot express, which is \
+             why this API exists.\n\n\
+             `approximatePosition` counts from one, and counts **only messages that are \
+             claimable right now**: `1` means a receive would be handed this message next. \
+             Delayed and in-flight messages are not counted, so a queue holding a hundred of \
+             them can still answer `1` — counting them would be the other kind of wrong, \
+             since a consumer polling now would not be given them either.\n\n\
+             Approximate, and not only in the way SQS's counts are approximate. It is true \
+             at the instant it was computed, and **a higher-priority message arriving moves \
+             an existing one backwards** — this is a place in an order, not a countdown, so \
+             a caller polling it will see it rise as well as fall. Read `state` alongside \
+             it: a message that is delayed or in flight is behind everything claimable, and \
+             its position says so rather than pretending it is about to be served.\n\n\
+             A message that is not in the queue — never sent, or received and deleted — is \
+             a `404`. That is a normal outcome for a producer polling a job to completion, \
+             and it does not distinguish \"finished\" from \"never existed\", because \
+             nothing at this layer can.",
+        )
+        .response_with::<200, Json<PositionResponse>, _>(|response| {
+            response.description("Where the message is, and what it is doing.")
+        })
+        .response_with::<400, Json<ErrorBody>, _>(|response| {
+            response.description("The queue name is not legal.")
+        })
+        .response_with::<404, Json<ErrorBody>, _>(|response| {
+            response.description("No queue by that name, or the queue holds no such message.")
+        })
+        .with(crate::error::needs_a_token)
 }
 
 pub fn purge_docs(operation: TransformOperation) -> TransformOperation {

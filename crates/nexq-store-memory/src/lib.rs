@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use nexq_core::model::{
-    ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
-    ReceiptHandle,
+    ClaimedMessage, Message, MessageCounts, MessageId, MessageState, Queue, QueueAttributes,
+    QueueName, QueuePosition, ReceiptHandle,
 };
 use nexq_core::store::{Result, Store, StoreError};
 
@@ -107,6 +107,22 @@ fn serve_first(left: &StoredMessage, right: &StoredMessage) -> Ordering {
         .then_with(|| left.message.id.cmp(&right.message.id))
 }
 
+/// Which of the three states a message is in.
+///
+/// One function rather than the same three-way test written wherever it is needed: the
+/// cases are disjoint by construction — either it is claimable now, or it is not, and if
+/// it is not then either someone holds it or it is waiting out a delay — and writing that
+/// twice is how two callers come to disagree about a message nobody has claimed yet.
+fn state_of(stored: &StoredMessage, now: SystemTime) -> MessageState {
+    if stored.visible_at <= now {
+        MessageState::Visible
+    } else if stored.claim.is_some() {
+        MessageState::NotVisible
+    } else {
+        MessageState::Delayed
+    }
+}
+
 /// `now + duration`, or `now` if that would overflow the clock.
 ///
 /// Overflow needs a duration far beyond anything a facade will accept, and treating it
@@ -172,19 +188,62 @@ impl Store for MemoryStore {
 
         let mut counts = MessageCounts::default();
         for stored in &held.messages {
-            // The three cases are what `visible_at` and `claim` mean together, and they
-            // are disjoint by construction: either it is claimable now, or it is not —
-            // and if it is not, either someone holds it or it is waiting out a delay.
-            if stored.visible_at <= now {
-                counts.visible += 1;
-            } else if stored.claim.is_some() {
-                counts.not_visible += 1;
-            } else {
-                counts.delayed += 1;
+            match state_of(stored, now) {
+                MessageState::Visible => counts.visible += 1,
+                MessageState::NotVisible => counts.not_visible += 1,
+                MessageState::Delayed => counts.delayed += 1,
             }
         }
 
         Ok(counts)
+    }
+
+    async fn position_of(
+        &self,
+        queue: &QueueName,
+        message: &MessageId,
+    ) -> Result<Option<QueuePosition>> {
+        let now = SystemTime::now();
+        let queues = self.read()?;
+        let held = queues
+            .get(queue)
+            .ok_or_else(|| StoreError::QueueNotFound(queue.clone()))?;
+
+        let Some(target) = held
+            .messages
+            .iter()
+            .find(|stored| &stored.message.id == message)
+        else {
+            return Ok(None);
+        };
+
+        let state = state_of(target, now);
+        let claimable = held
+            .messages
+            .iter()
+            .filter(|stored| state_of(stored, now) == MessageState::Visible);
+
+        // A linear scan, where a store built for this would keep an ordered index — the
+        // trait asks for the answer rather than the method precisely so that a backend
+        // can use one. This backend holds a `Vec` and the claim it serves every receive
+        // from is a scan already, so a second structure to maintain would cost more than
+        // it saves.
+        let ahead = match state {
+            // Claimable now, so the ones in its way are the ones that outrank it. Its own
+            // comparison is `Equal`, so it does not count itself.
+            MessageState::Visible => claimable
+                .filter(|stored| serve_first(stored, target) == Ordering::Less)
+                .count(),
+
+            // Not claimable, so everything claimable goes first: none of it is waiting on
+            // a message that cannot be served at all.
+            MessageState::NotVisible | MessageState::Delayed => claimable.count(),
+        };
+
+        Ok(Some(QueuePosition {
+            ahead: ahead as u64,
+            state,
+        }))
     }
 
     async fn delete_queue(&self, name: &QueueName) -> Result<()> {

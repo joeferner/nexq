@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use nexq_core::model::{
-    AttributeValue, Message, MessageAttribute, MessageAttributes, Priority, Queue, QueueAttributes,
-    QueueName,
+    AttributeValue, Message, MessageAttribute, MessageAttributes, MessageId, MessageState,
+    Priority, Queue, QueueAttributes, QueueName, QueuePosition,
 };
 use nexq_core::store::{Store, StoreError};
 
@@ -42,6 +42,32 @@ fn message(body: &str, priority: i32) -> Message {
 async fn jobs(store: &Arc<dyn Store>) -> QueueName {
     store.create_queue(queue("jobs")).await.expect("create");
     name("jobs")
+}
+
+/// Send a message and return the id it was stored under, so a case can ask about it
+/// later. `enqueue` takes the message rather than returning one, so the id is read off
+/// what went in.
+async fn send(
+    store: &Arc<dyn Store>,
+    queue: &QueueName,
+    body: &str,
+    priority: i32,
+    delay: Option<Duration>,
+) -> MessageId {
+    let message = message(body, priority);
+    let id = message.id.clone();
+    store.enqueue(queue, message, delay).await.expect("enqueue");
+
+    id
+}
+
+/// Where a message is, insisting the queue still holds it.
+async fn position(store: &Arc<dyn Store>, queue: &QueueName, id: &MessageId) -> QueuePosition {
+    store
+        .position_of(queue, id)
+        .await
+        .expect("position")
+        .unwrap_or_else(|| panic!("the queue should still hold {id}"))
 }
 
 /// Claim one message and return its body, or `None` if nothing was claimable.
@@ -516,6 +542,10 @@ pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
                 .err(),
         ),
         ("message_counts", store.message_counts(&missing).await.err()),
+        (
+            "position_of",
+            store.position_of(&missing, &MessageId::new()).await.err(),
+        ),
         ("purge_queue", store.purge_queue(&missing).await.err()),
     ];
 
@@ -882,6 +912,154 @@ pub async fn skipping_the_only_message_yields_nothing(store: Arc<dyn Store>) {
         claim_body(&store, &queue_name).await.as_deref(),
         Some("hello"),
         "a skipped message is not consumed, hidden, or otherwise altered"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Position in queue
+// ---------------------------------------------------------------------------
+//
+// The rule under test throughout: `ahead` counts the messages claimable *right now* that
+// would be served before this one. Every case below is that sentence applied to one
+// situation, which is why none of them assumes an ordered structure — a backend answering
+// with a count query has to reach the same numbers.
+
+/// The message a receive would be handed next has nothing ahead of it.
+pub async fn the_next_message_to_be_served_has_nothing_ahead_of_it(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let first = send(&store, &queue_name, "first", 0, None).await;
+
+    let position = position(&store, &queue_name, &first).await;
+
+    assert_eq!(position.ahead, 0, "{position:?}");
+    assert_eq!(position.place(), 1, "one-based for a caller: {position:?}");
+    assert_eq!(position.state, MessageState::Visible, "{position:?}");
+}
+
+/// Positions follow the order messages will actually be served in.
+///
+/// Asserted against claiming rather than only against the numbers, since a backend could
+/// report a self-consistent order that is not the one it serves — which would be a worse
+/// bug than a wrong number, because it would look right.
+pub async fn positions_follow_the_order_messages_will_be_served_in(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let mut sent = Vec::new();
+    for body in ["first", "second", "third"] {
+        sent.push(send(&store, &queue_name, body, 0, None).await);
+    }
+
+    for (expected, id) in sent.iter().enumerate() {
+        assert_eq!(
+            position(&store, &queue_name, id).await.ahead,
+            expected as u64,
+            "{id} should have {expected} ahead of it"
+        );
+    }
+
+    assert_eq!(
+        claim_body(&store, &queue_name).await.as_deref(),
+        Some("first"),
+        "the message reported first is the one actually served first"
+    );
+}
+
+/// A higher-priority arrival moves an existing message **backwards**.
+///
+/// The surprising half of the contract, and the reason position is documented as a place
+/// in an order rather than as a countdown.
+pub async fn a_higher_priority_arrival_moves_a_message_backwards(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let ordinary = send(&store, &queue_name, "ordinary", 0, None).await;
+    assert_eq!(position(&store, &queue_name, &ordinary).await.ahead, 0);
+
+    let urgent = send(&store, &queue_name, "urgent", 10, None).await;
+
+    assert_eq!(
+        position(&store, &queue_name, &ordinary).await.ahead,
+        1,
+        "a message that was next is now second"
+    );
+    assert_eq!(position(&store, &queue_name, &urgent).await.ahead, 0);
+}
+
+/// A delayed message is behind everything claimable, and says so.
+///
+/// It ranks first by arrival and still cannot be served, so counting only what outranks it
+/// would report `0` for a message nobody can have — the answer that would mislead most.
+pub async fn a_delayed_message_is_behind_everything_claimable(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let delayed = send(
+        &store,
+        &queue_name,
+        "delayed",
+        0,
+        Some(Duration::from_secs(3600)),
+    )
+    .await;
+    for body in ["claimable-one", "claimable-two"] {
+        send(&store, &queue_name, body, 0, None).await;
+    }
+
+    let position = position(&store, &queue_name, &delayed).await;
+
+    assert_eq!(position.ahead, 2, "both claimable messages: {position:?}");
+    assert_eq!(position.state, MessageState::Delayed, "{position:?}");
+}
+
+/// So is a message a consumer is holding — and, in the other direction, a claim takes a
+/// message out of everyone else's way.
+pub async fn a_claimed_message_is_behind_everything_claimable(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let first = send(&store, &queue_name, "first", 0, None).await;
+    let second = send(&store, &queue_name, "second", 0, None).await;
+
+    store
+        .claim_next(&queue_name, Some(Duration::from_secs(3600)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    let held = position(&store, &queue_name, &first).await;
+    assert_eq!(held.state, MessageState::NotVisible, "{held:?}");
+    assert_eq!(
+        held.ahead, 1,
+        "in flight, so the one claimable message goes first: {held:?}"
+    );
+
+    assert_eq!(
+        position(&store, &queue_name, &second).await.ahead,
+        0,
+        "a message being worked on is not in anybody's way"
+    );
+}
+
+/// A message the queue does not hold has no position, and that is an answer rather than a
+/// failure: a producer polling a job it sent gets this the moment the job is done.
+pub async fn a_message_that_is_gone_has_no_position(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    let sent = send(&store, &queue_name, "hello", 0, None).await;
+    let claimed = store
+        .claim_next(&queue_name, None)
+        .await
+        .expect("claim")
+        .expect("a message");
+    store.ack(&queue_name, &claimed.receipt).await.expect("ack");
+
+    assert!(
+        store
+            .position_of(&queue_name, &sent)
+            .await
+            .expect("position")
+            .is_none(),
+        "an acked message is not in the queue any more"
+    );
+    assert!(
+        store
+            .position_of(&queue_name, &MessageId::new())
+            .await
+            .expect("position")
+            .is_none(),
+        "and neither is an id this queue never issued"
     );
 }
 

@@ -97,6 +97,63 @@ impl MessageCounts {
     }
 }
 
+/// What one message is doing right now.
+///
+/// The same three-way split [`MessageCounts`] tallies, for a single message rather than
+/// a queueful — so a backend that can produce the counts can produce this, and the two
+/// cannot disagree about what "delayed" means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageState {
+    /// Claimable right now.
+    Visible,
+
+    /// In flight: a consumer holds it under a claim that has not expired.
+    NotVisible,
+
+    /// Waiting out a delay, and never yet delivered.
+    Delayed,
+}
+
+/// Where a message sits in the line.
+///
+/// Answers "how long until this one is mine", which is the question a producer asks after
+/// sending a job and being told nothing since. True at the instant it was computed and
+/// not for long afterwards — see [`QueuePosition::ahead`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueuePosition {
+    /// How many messages the backend would serve before this one, **counting only what is
+    /// claimable right now**. Zero means next.
+    ///
+    /// Two consequences of that counting rule, both of which surprise someone:
+    ///
+    /// - Messages that are delayed or in flight are not counted, so a queue holding a
+    ///   hundred of them can still answer `0`. Counting them would be the other kind of
+    ///   wrong: they are not in the way, because a consumer asking for a message right
+    ///   now would not be given one.
+    /// - A higher-priority arrival moves a message **backwards**. Position is a place in
+    ///   an order, not a countdown, and nothing about it only decreases.
+    ///
+    /// When the message itself is not claimable — [`QueuePosition::state`] says which —
+    /// everything claimable is counted, since none of it can be served after a message
+    /// that cannot be served at all. That is why the two fields belong together.
+    pub ahead: u64,
+
+    /// What the message itself is doing, without which `ahead` reads as a promise it is
+    /// not making.
+    pub state: MessageState,
+}
+
+impl QueuePosition {
+    /// The message's place in line, counting from one: `1` is served next.
+    ///
+    /// One-based because that is how a queue position is read aloud — "you are third" —
+    /// while [`QueuePosition::ahead`] is a count of other messages and is naturally zero
+    /// when there are none.
+    pub fn place(&self) -> u64 {
+        self.ahead.saturating_add(1)
+    }
+}
+
 /// The knobs that change how a queue behaves.
 ///
 /// Defaults match SQS's, so a client that sets nothing gets what it would get from AWS.

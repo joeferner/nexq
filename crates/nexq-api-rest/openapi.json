@@ -888,6 +888,89 @@
         }
       }
     },
+    "/api/v1/queues/{queue}/messages/{messageId}/position": {
+      "get": {
+        "summary": "Ask where a message is in the line",
+        "description": "Answers \"where am I in line\" for one message, by the id returned when it was sent. One of the operations the SQS-compatible facade cannot express, which is why this API exists.\n\n`approximatePosition` counts from one, and counts **only messages that are claimable right now**: `1` means a receive would be handed this message next. Delayed and in-flight messages are not counted, so a queue holding a hundred of them can still answer `1` — counting them would be the other kind of wrong, since a consumer polling now would not be given them either.\n\nApproximate, and not only in the way SQS's counts are approximate. It is true at the instant it was computed, and **a higher-priority message arriving moves an existing one backwards** — this is a place in an order, not a countdown, so a caller polling it will see it rise as well as fall. Read `state` alongside it: a message that is delayed or in flight is behind everything claimable, and its position says so rather than pretending it is about to be served.\n\nA message that is not in the queue — never sent, or received and deleted — is a `404`. That is a normal outcome for a producer polling a job to completion, and it does not distinguish \"finished\" from \"never existed\", because nothing at this layer can.",
+        "operationId": "getMessagePosition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "messageId",
+            "description": "The message's identifier, as returned when it was sent.",
+            "required": true,
+            "schema": {
+              "description": "The message's identifier, as returned when it was sent.",
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "queue",
+            "description": "Name of the queue.",
+            "required": true,
+            "schema": {
+              "description": "Name of the queue.",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The body of every failed request.\n\n Nested under `error` rather than flattened so that a successful response and a failed\n one can never be told apart only by which fields happen to be present.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Where the message is, and what it is doing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The queue name is not legal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No queue by that name, or the queue holds no such message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing or does not check out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/queues/{queue}/messages/{receiptHandle}": {
       "delete": {
         "summary": "Finish with a message",
@@ -1354,6 +1437,73 @@
           "notVisible",
           "delayed",
           "total"
+        ]
+      },
+      "MessagePath": {
+        "description": "Which message a request is about, by the id it was sent under.",
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "description": "The message's identifier, as returned when it was sent.",
+            "type": "string"
+          },
+          "queue": {
+            "description": "Name of the queue.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue",
+          "messageId"
+        ]
+      },
+      "MessageStateResponse": {
+        "description": "What a message is doing right now.\n\n The same three groups a queue's counts are split into, for one message.",
+        "oneOf": [
+          {
+            "description": "Claimable now: a consumer receiving from this queue could be handed it.",
+            "type": "string",
+            "const": "visible"
+          },
+          {
+            "description": "In flight — a consumer holds it under a claim that has not lapsed.",
+            "type": "string",
+            "const": "notVisible"
+          },
+          {
+            "description": "Waiting out a delay, and never yet delivered.",
+            "type": "string",
+            "const": "delayed"
+          }
+        ]
+      },
+      "PositionResponse": {
+        "description": "Where a message sits in the line.",
+        "type": "object",
+        "properties": {
+          "approximatePosition": {
+            "description": "Its place in line, counting from one: `1` is the message a receive would be handed\n next.\n\n Counts **only messages that are claimable right now**, so a queue holding a hundred\n delayed or in-flight messages can still answer `1`. Approximate, and named that way\n for the same reason SQS names its counts approximate — with one difference worth\n knowing: this is not merely a number that lags. A higher-priority message arriving\n moves an existing one *backwards*, so a caller polling this will see it go up as\n well as down. It is a place in an order, not a countdown.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "messageId": {
+            "description": "The message this is about, echoed back from the path.",
+            "type": "string"
+          },
+          "state": {
+            "description": "What the message itself is doing, which is what says how to read the position.\n\n For a `visible` message the position is its place among the claimable ones. For a\n `delayed` or `notVisible` one it is the count of everything claimable, plus one —\n since none of that can be served after a message that cannot be served at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MessageStateResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "messageId",
+          "approximatePosition",
+          "state"
         ]
       },
       "PurgeResponse": {

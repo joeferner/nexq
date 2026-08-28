@@ -229,6 +229,12 @@ fn api_routes() -> ApiRouter<FacadeState> {
                 "/queues/{queue}/messages/visibility",
                 post_with(messages::visibility_batch, messages::visibility_batch_docs),
             )
+            // Position is addressed by *message id*, not by receipt handle: the producer
+            // asking where its job got to has an id and never holds a claim.
+            .api_route(
+                "/queues/{queue}/messages/{messageId}/position",
+                get_with(messages::position, messages::position_docs),
+            )
             .api_route(
                 "/queues/{queue}/messages/{receiptHandle}",
                 delete_with(messages::delete_message, messages::delete_message_docs).patch_with(
@@ -1617,6 +1623,117 @@ mod parity_tests {
         assert!(listed_without.1["queues"][0]["counts"].is_null());
     }
 
+    /// Position over the wire: a producer asks where its job is, by the id it was given
+    /// when it sent it, and never has to claim anything to find out.
+    #[tokio::test]
+    async fn a_producer_can_ask_where_its_message_is_in_the_line() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let sent = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"first"},{"body":"second"}]}"#),
+        )
+        .await;
+        let ids: Vec<String> = sent.1["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .map(|result| result["messageId"].as_str().expect("an id").to_owned())
+            .collect();
+
+        let position = |id: &str| format!("/api/v1/queues/jobs/messages/{id}/position");
+
+        let first = request(&facade, "GET", &position(&ids[0]), None).await;
+        assert_eq!(first.0, StatusCode::OK);
+        assert_eq!(first.1["messageId"], ids[0]);
+        assert_eq!(
+            first.1["approximatePosition"], 1,
+            "one-based, so the next message to be served is first: {}",
+            first.1
+        );
+        assert_eq!(first.1["state"], "visible");
+
+        let second = request(&facade, "GET", &position(&ids[1]), None).await;
+        assert_eq!(second.1["approximatePosition"], 2);
+
+        // The surprising half of the contract, and the reason it is called approximate:
+        // an urgent arrival pushes both of these back.
+        request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages",
+            Some(r#"{"messages":[{"body":"urgent","priority":10}]}"#),
+        )
+        .await;
+        let moved = request(&facade, "GET", &position(&ids[0]), None).await;
+        assert_eq!(
+            moved.1["approximatePosition"], 2,
+            "a higher-priority message moves an existing one backwards: {}",
+            moved.1
+        );
+
+        // And a consumer taking that urgent message off the queue moves them up again:
+        // only what is claimable now counts, and a message in flight is not.
+        let received = request(
+            &facade,
+            "POST",
+            "/api/v1/queues/jobs/messages/receive",
+            Some("{}"),
+        )
+        .await;
+        assert_eq!(received.1["messages"][0]["body"], "urgent");
+        let urgent_id = received.1["messages"][0]["id"].as_str().expect("an id");
+
+        let back_in_front = request(&facade, "GET", &position(&ids[0]), None).await;
+        assert_eq!(back_in_front.1["approximatePosition"], 1);
+
+        let in_flight = request(&facade, "GET", &position(urgent_id), None).await;
+        assert_eq!(
+            in_flight.1["state"], "notVisible",
+            "a message being worked on says so: {}",
+            in_flight.1
+        );
+        assert_eq!(
+            in_flight.1["approximatePosition"], 3,
+            "and is behind everything claimable rather than still at the front: {}",
+            in_flight.1
+        );
+    }
+
+    /// A message the queue does not hold is a `404` in this facade's own envelope, and
+    /// says it is the *message* that is missing rather than the queue.
+    #[tokio::test]
+    async fn asking_where_a_message_that_is_gone_is_answers_404() {
+        let facade = test_facade();
+        request(&facade, "PUT", "/api/v1/queues/jobs", None).await;
+
+        let unknown = request(
+            &facade,
+            "GET",
+            "/api/v1/queues/jobs/messages/no-such-id/position",
+            None,
+        )
+        .await;
+        assert_eq!(unknown.0, StatusCode::NOT_FOUND);
+        assert_eq!(unknown.1["error"]["code"], "message_not_found");
+
+        let no_queue = request(
+            &facade,
+            "GET",
+            "/api/v1/queues/nowhere/messages/no-such-id/position",
+            None,
+        )
+        .await;
+        assert_eq!(no_queue.0, StatusCode::NOT_FOUND);
+        assert_eq!(
+            no_queue.1["error"]["code"], "queue_not_found",
+            "a missing queue is a different problem from a missing message"
+        );
+    }
+
     /// Every new route is behind the same layer as the old ones.
     #[tokio::test]
     async fn the_new_routes_need_a_token_too() {
@@ -1624,6 +1741,7 @@ mod parity_tests {
 
         for (method, path) in [
             ("PATCH", "/api/v1/queues/jobs"),
+            ("GET", "/api/v1/queues/jobs/messages/some-id/position"),
             ("POST", "/api/v1/queues/jobs/messages"),
             ("DELETE", "/api/v1/queues/jobs/messages"),
             ("POST", "/api/v1/queues/jobs/messages/delete"),

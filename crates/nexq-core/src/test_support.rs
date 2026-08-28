@@ -12,8 +12,8 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use crate::model::{
-    ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
-    ReceiptHandle,
+    ClaimedMessage, Message, MessageCounts, MessageId, MessageState, Queue, QueueAttributes,
+    QueueName, QueuePosition, ReceiptHandle,
 };
 use crate::store::{Result, Store, StoreError};
 
@@ -47,6 +47,17 @@ struct Claimable {
 impl FakeStore {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// Which of the three states a message is in, the same way the real backends decide it.
+fn state_of(held: &Claimable, now: SystemTime) -> MessageState {
+    if held.visible_at <= now {
+        MessageState::Visible
+    } else if held.claim.is_some() {
+        MessageState::NotVisible
+    } else {
+        MessageState::Delayed
     }
 }
 
@@ -102,16 +113,59 @@ impl Store for FakeStore {
 
         let mut counts = MessageCounts::default();
         for held in messages.iter().filter(|held| &held.queue == name) {
-            if held.visible_at <= now {
-                counts.visible += 1;
-            } else if held.claim.is_some() {
-                counts.not_visible += 1;
-            } else {
-                counts.delayed += 1;
+            match state_of(held, now) {
+                MessageState::Visible => counts.visible += 1,
+                MessageState::NotVisible => counts.not_visible += 1,
+                MessageState::Delayed => counts.delayed += 1,
             }
         }
 
         Ok(counts)
+    }
+
+    /// Position under this double's own order, which is arrival and nothing else.
+    ///
+    /// Priority is ignored here exactly as it is when claiming: a double that ordered one
+    /// way and reported positions another would be a worse test than one that is simply
+    /// first-in-first-out throughout.
+    async fn position_of(
+        &self,
+        queue: &QueueName,
+        message: &MessageId,
+    ) -> Result<Option<QueuePosition>> {
+        if !self.queues.lock().expect("lock").contains_key(queue) {
+            return Err(StoreError::QueueNotFound(queue.clone()));
+        }
+
+        let now = SystemTime::now();
+        let messages = self.messages.lock().expect("lock");
+        let held: Vec<&Claimable> = messages
+            .iter()
+            .filter(|held| &held.queue == queue)
+            .collect();
+
+        let Some(at) = held.iter().position(|held| &held.message.id == message) else {
+            return Ok(None);
+        };
+
+        let state = state_of(held[at], now);
+        let claimable = |over: &[&Claimable]| {
+            over.iter()
+                .filter(|held| state_of(held, now) == MessageState::Visible)
+                .count()
+        };
+
+        let ahead = match state {
+            // Claimable, so what is in its way is what arrived before it.
+            MessageState::Visible => claimable(&held[..at]),
+            // Not claimable, so everything claimable is served first.
+            MessageState::NotVisible | MessageState::Delayed => claimable(&held),
+        };
+
+        Ok(Some(QueuePosition {
+            ahead: ahead as u64,
+            state,
+        }))
     }
 
     async fn delete_queue(&self, name: &QueueName) -> Result<()> {
@@ -287,6 +341,14 @@ impl Store for BrokenStore {
     }
 
     async fn message_counts(&self, _name: &QueueName) -> Result<MessageCounts> {
+        Err(Self::failure())
+    }
+
+    async fn position_of(
+        &self,
+        _queue: &QueueName,
+        _message: &MessageId,
+    ) -> Result<Option<QueuePosition>> {
         Err(Self::failure())
     }
 

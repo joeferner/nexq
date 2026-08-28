@@ -13,10 +13,12 @@ and [`openapi.json`](openapi.json) is generated from them rather than written.
 > **Under construction, but usable.** The queue and message surfaces are both complete —
 > create, read, list, reconfigure and delete a queue; send, receive, delete, re-time and
 > purge messages — so a producer and a consumer can now run entirely against this API.
-> What is still missing is the *extended* feature set this facade exists for: position in
-> queue, dead-letter queues, and redrive. Per-message priority is here already, as a plain
-> field — the SQS-compatible facade has to carry it as a message attribute, because its
-> protocol has nowhere else to put it. See [`todo.md`](../../todo.md) M9 and M10.
+> What is still missing is the last of the *extended* feature set this facade exists for:
+> dead-letter queues and redrive. Per-message priority and position in queue are here
+> already — priority as a plain field, where the SQS-compatible facade has to carry it as a
+> message attribute because its protocol has nowhere else to put it, and position as an
+> operation that facade has no way to express at all. See [`todo.md`](../../todo.md) M9 and
+> M10.
 
 # Features
 
@@ -100,7 +102,9 @@ server hands out and the client must send back.
 ## Message operations
 
 The collection is `/api/v1/queues/{queue}/messages`; one claim is
-`/api/v1/queues/{queue}/messages/{receiptHandle}`.
+`/api/v1/queues/{queue}/messages/{receiptHandle}`, and one message's place in the line is
+`/api/v1/queues/{queue}/messages/{messageId}/position` — a handle names a claim its holder
+was given, while an id names the message for as long as it exists.
 
 - :white_check_mark: `POST /messages` — **send**, always a list. Sending one message is a
   list of one, so SQS's `SendMessage`/`SendMessageBatch` pair collapses into a single
@@ -115,6 +119,10 @@ The collection is `/api/v1/queues/{queue}/messages`; one claim is
   so the one call both extends a claim and hands a message back with `0`
 - :white_check_mark: `POST /messages/delete` and `POST /messages/visibility` — the same, many
   at a time. A `POST` rather than a `DELETE` with a body, which proxies mishandle
+- :white_check_mark: `GET /messages/{messageId}/position` — **where a message is in the
+  line**, addressed by message id rather than by receipt handle, since the caller asking is
+  the producer and a producer never holds a claim. The only safe operation on a message:
+  reading a message is receiving it, and receiving claims it
 - :white_check_mark: `DELETE /messages` — **purge**: emptying the message collection while
   keeping the queue, which is what `DELETE` on a collection means. Takes in-flight messages
   with it, and reports how many went
@@ -140,7 +148,11 @@ there. All are M10 rather than M9:
 - :ballot_box_with_check: **Per-message priority.** Reported on receive, and there is no way
   to *set* it yet, since there is no send endpoint — so everything currently carries the
   default. The engine and the memory store have ordered by priority since M3
-- :scroll: **Position in queue** — "where am I in line", approximate by nature
+- :white_check_mark: **Position in queue** — `GET /messages/{messageId}/position`, "where am
+  I in line" asked by the producer that sent the message and never holds a claim. Counts
+  only what is claimable right now, and is approximate in a stronger sense than SQS's
+  counts: a higher-priority arrival moves an existing message *backwards*, so it is a place
+  in an order rather than a countdown. See [Position in queue](#position-in-queue)
 - :scroll: **Dead-letter queues and redrive**, including the four SQS operations deferred
   along with them
 - :scroll: Cluster and leader status, which needs a cluster first
@@ -164,13 +176,13 @@ than the surface is:
 
 | | |
 | --- | --- |
-| Documented operations | 12 |
+| Documented operations | 13 |
 | Routes serving documentation | 3 (the spec, the page, and its two assets) |
 | Authentication | complete |
 | Error envelope | complete, and mapped from every `EngineError` variant |
 | Queue resource | complete, bar the dead-letter settings that arrive with DLQ |
-| Message operations | complete: send, receive, delete, re-time, purge, and the multi-entry forms |
-| The extensions this exists for | priority only; position and DLQ are M10 |
+| Message operations | complete: send, receive, delete, re-time, purge, position, and the multi-entry forms |
+| The extensions this exists for | priority and position; DLQ and redrive are M10 |
 
 A path this facade does not have answers in its own envelope rather than with an empty
 `404`, so a client parsing errors never has to special-case a wrong URL.
@@ -315,6 +327,42 @@ stay different things, which is what makes the SQS facade's checksum of it come 
 Attribute names beginning `nexq.` are reserved and refused. That namespace is where the SQS
 facade carries what it has no field for — `NexQ.Priority` — and here those fields exist, so
 an attribute in it could only disagree with one.
+
+## Position in queue
+
+```sh
+curl -s "$NEXQ/api/v1/queues/jobs/messages/$MESSAGE_ID/position" \
+  -H "Authorization: Bearer $TOKEN"
+# {"messageId":"…","approximatePosition":3,"state":"visible"}
+```
+
+"Where am I in line", for the id a send returned. Addressed by **message id**, not by
+receipt handle: the caller asking is the producer that sent the message, and a producer
+never holds a claim. It is also the only safe operation on a message — reading a message is
+receiving it, and receiving claims it, so a producer checking on its job must not have to
+take the job out of the queue to do so.
+
+`approximatePosition` counts from one, so `1` is the message the next receive will be
+handed. Two things about how it counts, both of which surprise someone, which is why they
+are on the wire rather than only in prose:
+
+- **Only messages that are claimable right now are counted.** A queue holding a hundred
+  delayed or in-flight messages can still answer `1`. Counting them would be the other kind
+  of wrong: a consumer polling now would not be given them either, so they are not in the
+  way.
+- **A higher-priority arrival moves an existing message backwards.** This is a place in an
+  order, not a countdown — a caller polling it will see it rise as well as fall. That is the
+  stronger sense in which it is *approximate*: SQS's counts merely lag, while this one is a
+  true answer that the next send can change.
+
+`state` says how to read the number. A `visible` message is genuinely that far down the
+line; a `delayed` or `notVisible` one is behind everything claimable, and its position says
+so rather than pretending it is about to be served — a message that ranks first by arrival
+but is still waiting out its delay would otherwise report `1` while nobody can have it.
+
+A message the queue does not hold is a `404` with code `message_not_found`, which is the
+normal end of a producer polling its job: it cannot tell "finished" from "never existed",
+because nothing at this layer can.
 
 ## Receiving
 
@@ -521,6 +569,7 @@ on, and a `message` for a human that may change:
 | --- | --- | --- |
 | 401 | `unauthorized` | No bearer token, or one that does not check out. Deliberately the same answer for an unknown key id and a wrong secret |
 | 404 | `queue_not_found` | No queue by that name |
+| 404 | `message_not_found` | The queue holds no message with that id — never sent, or already received and deleted |
 | 404 | `no_such_route` | No route for that method and path |
 | 400 | `invalid_queue_name` | The name in the path is not a legal queue name |
 | 400 | `invalid_max_messages` | Outside 1–10. Refused rather than clamped: quietly returning ten when fifty were asked for leaves the caller's misunderstanding intact |
