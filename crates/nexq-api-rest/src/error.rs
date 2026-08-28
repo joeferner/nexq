@@ -9,9 +9,11 @@
 //! { "error": { "code": "queue_not_found", "message": "no queue named jobs" } }
 //! ```
 //!
-//! Codes are `snake_case`, matching the field naming everywhere else in this facade, and
-//! are part of the contract: a client may branch on `code`, so one must not be renamed
-//! without that being a breaking change. `message` is for a human and may change freely.
+//! Codes are `snake_case` even though every *field* on the wire is `camelCase`: a code is
+//! a value, not a field name, and the underscores keep it visibly one — something to match
+//! on rather than something to read. They are part of the contract, since a client may
+//! branch on `code`, so one must not be renamed without that being a breaking change.
+//! `message` is for a human and may change freely.
 
 use aide::generate::GenContext;
 use aide::openapi::{Operation, Response as ApiResponse};

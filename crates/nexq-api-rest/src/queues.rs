@@ -54,6 +54,7 @@ pub const RECEIVE_WAIT_MAX_SECONDS: u64 = 20;
 /// is called, and generates an operation with no parameters at all. The field name is the
 /// parameter name.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct QueuePath {
     /// Name of the queue.
     pub queue: String,
@@ -61,6 +62,7 @@ pub struct QueuePath {
 
 /// A queue, as this API represents it.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct QueueResponse {
     /// The queue's name, which is also its address: `/api/v1/queues/{name}`.
     pub name: String,
@@ -88,6 +90,7 @@ pub struct QueueResponse {
 /// How many messages a queue holds, in three disjoint groups that together cover all of
 /// them.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageCountsResponse {
     /// Claimable right now.
     pub visible: u64,
@@ -104,6 +107,7 @@ pub struct MessageCountsResponse {
 
 /// A queue's settings.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct QueueAttributesResponse {
     /// How long a claimed message stays invisible to other consumers before being
     /// redelivered.
@@ -126,7 +130,7 @@ pub struct QueueAttributesResponse {
 // doc comment because `aide` publishes these — see `published_descriptions_are_not_written_
 // for_rustdoc`, which is what caught the first draft of this.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, rename_all = "camelCase")]
 pub struct QueueAttributesBody {
     /// Defaults to 30 seconds.
     #[schemars(range(min = 0, max = 43200))]
@@ -143,7 +147,7 @@ pub struct QueueAttributesBody {
 
 /// Which queues to list, and where to resume.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, rename_all = "camelCase")]
 pub struct ListQueuesQuery {
     /// Only queues whose name starts with this.
     pub prefix: Option<String>,
@@ -152,7 +156,7 @@ pub struct ListQueuesQuery {
     #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
 
-    /// Resume after this queue — the `next_cursor` from the previous page.
+    /// Resume after this queue — the `nextCursor` from the previous page.
     pub cursor: Option<String>,
 
     /// Include message counts for every queue on the page.
@@ -164,7 +168,7 @@ pub struct ListQueuesQuery {
 
 /// How much of a queue to report.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, rename_all = "camelCase")]
 pub struct QueueViewQuery {
     /// Include the queue's message counts.
     pub counts: Option<bool>,
@@ -172,6 +176,7 @@ pub struct QueueViewQuery {
 
 /// One page of queues.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ListQueuesResponse {
     /// This page, in name order. Empty rather than absent when there are none.
     pub queues: Vec<QueueResponse>,
@@ -251,19 +256,19 @@ impl QueueAttributesBody {
     fn onto(&self, current: QueueAttributes) -> Result<QueueAttributes, ApiError> {
         Ok(QueueAttributes {
             visibility_timeout: seconds(
-                "visibility_timeout_seconds",
+                "visibilityTimeoutSeconds",
                 self.visibility_timeout_seconds,
                 VISIBILITY_TIMEOUT_MAX_SECONDS,
                 current.visibility_timeout,
             )?,
             delay: seconds(
-                "delay_seconds",
+                "delaySeconds",
                 self.delay_seconds,
                 DELAY_MAX_SECONDS,
                 current.delay,
             )?,
             receive_wait_time: seconds(
-                "receive_wait_time_seconds",
+                "receiveWaitTimeSeconds",
                 self.receive_wait_time_seconds,
                 RECEIVE_WAIT_MAX_SECONDS,
                 current.receive_wait_time,
@@ -516,12 +521,12 @@ pub fn patch_queue_docs(operation: TransformOperation) -> TransformOperation {
              All-or-nothing: a request mixing a valid attribute with an invalid one changes \
              neither, so you are never left with half a change applied. A request naming no \
              attributes at all is refused rather than treated as a no-op that still moves \
-             `last_modified_at`.\n\n\
+             `lastModifiedAt`.\n\n\
              Only the three attributes this server has behaviour behind can be set. One it \
              does not implement is refused rather than accepted and ignored.",
         )
         .response_with::<200, Json<QueueResponse>, _>(|response| {
-            response.description("The queue as it now is, with `last_modified_at` moved.")
+            response.description("The queue as it now is, with `lastModifiedAt` moved.")
         })
         .response_with::<400, Json<ErrorBody>, _>(|response| {
             response.description(
@@ -569,7 +574,7 @@ pub fn list_queues_docs(operation: TransformOperation) -> TransformOperation {
              `?counts=true` for each queue's message counts — off by default because it \
              costs one aggregate *per queue on the page*, so a page of a thousand asks for \
              a thousand of them.\n\n\
-             When `next_cursor` is not null there are more: pass it back as `cursor` to \
+             When `nextCursor` is not null there are more: pass it back as `cursor` to \
              continue. It is a **cursor, not an offset** — it names where to resume, so a \
              queue created or deleted between two requests cannot make you skip one or see \
              it twice. That is the storage layer's keyset guarantee carried onto the wire \
@@ -613,8 +618,8 @@ mod tests {
     #[test]
     fn seconds_become_durations() {
         let attributes = body(
-            r#"{"visibility_timeout_seconds": 120, "delay_seconds": 5,
-                "receive_wait_time_seconds": 20}"#,
+            r#"{"visibilityTimeoutSeconds": 120, "delaySeconds": 5,
+                "receiveWaitTimeSeconds": 20}"#,
         )
         .to_attributes()
         .expect("valid");
@@ -628,7 +633,7 @@ mod tests {
     /// which is a different thing from "whatever was left over".
     #[test]
     fn an_unnamed_attribute_takes_its_default() {
-        let attributes = body(r#"{"delay_seconds": 5}"#)
+        let attributes = body(r#"{"delaySeconds": 5}"#)
             .to_attributes()
             .expect("valid");
 
@@ -642,9 +647,9 @@ mod tests {
     #[test]
     fn out_of_range_values_are_refused_rather_than_clamped() {
         for (json, needle) in [
-            (r#"{"visibility_timeout_seconds": 43201}"#, "43200"),
-            (r#"{"delay_seconds": 901}"#, "900"),
-            (r#"{"receive_wait_time_seconds": 21}"#, "20"),
+            (r#"{"visibilityTimeoutSeconds": 43201}"#, "43200"),
+            (r#"{"delaySeconds": 901}"#, "900"),
+            (r#"{"receiveWaitTimeSeconds": 21}"#, "20"),
         ] {
             let error = body(json).to_attributes().expect_err("over the limit");
 
@@ -661,8 +666,8 @@ mod tests {
     #[test]
     fn the_limits_themselves_are_accepted() {
         body(
-            r#"{"visibility_timeout_seconds": 43200, "delay_seconds": 900,
-                 "receive_wait_time_seconds": 20}"#,
+            r#"{"visibilityTimeoutSeconds": 43200, "delaySeconds": 900,
+                 "receiveWaitTimeSeconds": 20}"#,
         )
         .to_attributes()
         .expect("the boundary values are legal");
@@ -673,8 +678,8 @@ mod tests {
     #[test]
     fn attributes_with_nothing_behind_them_are_refused() {
         for json in [
-            r#"{"max_receive_count": 5}"#,
-            r#"{"dead_letter_queue": "failed"}"#,
+            r#"{"maxReceiveCount": 5}"#,
+            r#"{"deadLetterQueue": "failed"}"#,
         ] {
             serde_json::from_str::<QueueAttributesBody>(json)
                 .expect_err("must not be accepted while it does nothing");

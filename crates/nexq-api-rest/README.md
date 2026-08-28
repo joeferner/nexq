@@ -32,6 +32,11 @@ and [`openapi.json`](openapi.json) is generated from them rather than written.
   writing the OpenAPI structure by hand
 - :white_check_mark: Field descriptions, types, and bounds derived from the Rust types by
   `schemars` — the doc comments on a field *are* its documentation in the spec
+- :white_check_mark: Every field on the wire is `camelCase`, in request bodies, response
+  bodies, and path parameters alike, so a generated JavaScript or Java client needs no
+  renaming layer. An unrecognised field is refused rather than ignored, which means a client
+  sending the snake_case spelling is told so instead of quietly getting the default. Error
+  *codes* stay `snake_case` — a code is a value to match on, not a field name
 - :white_check_mark: [`openapi.json`](openapi.json) is **committed**, and a test fails when
   it and the code disagree. Without it a change to the published API is invisible in review,
   and every generated client changes with it silently. `make openapi` regenerates;
@@ -83,29 +88,29 @@ server hands out and the client must send back.
 - :white_check_mark: `PATCH /queues/{queue}` — a **partial** update: an attribute it does
   not name keeps its current value, where `PUT` would reset it to a default. All-or-nothing,
   so a request mixing a good attribute with a bad one changes neither
-- :white_check_mark: Attributes — `visibility_timeout_seconds`, `delay_seconds`,
-  `receive_wait_time_seconds`. An out-of-range value is refused rather than clamped, and an
+- :white_check_mark: Attributes — `visibilityTimeoutSeconds`, `delaySeconds`,
+  `receiveWaitTimeSeconds`. An out-of-range value is refused rather than clamped, and an
   unrecognised one refused rather than dropped
 - :white_check_mark: Message counts, via `?counts=true` on either read. Off by default
   because it costs one aggregate **per queue**, so a page of a thousand asks for a thousand
-- :scroll: A dead-letter queue and `max_receive_count`, which arrive with DLQ itself.
+- :scroll: A dead-letter queue and `maxReceiveCount`, which arrive with DLQ itself.
   Refused rather than accepted-and-ignored in the meantime
 
 ## Message operations
 
 The collection is `/api/v1/queues/{queue}/messages`; one claim is
-`/api/v1/queues/{queue}/messages/{receipt_handle}`.
+`/api/v1/queues/{queue}/messages/{receiptHandle}`.
 
 - :white_check_mark: `POST /messages` — **send**, always a list. Sending one message is a
   list of one, so SQS's `SendMessage`/`SendMessageBatch` pair collapses into a single
   operation. Per-entry results, so one bad message does not sink the rest, identified by
   **position** rather than by ids the client has to invent
-- :white_check_mark: `POST /messages/receive` — `max_messages`,
-  `visibility_timeout_seconds`, `wait_time_seconds`. Returns the message id, receipt handle,
+- :white_check_mark: `POST /messages/receive` — `maxMessages`,
+  `visibilityTimeoutSeconds`, `waitTimeSeconds`. Returns the message id, receipt handle,
   body, priority, delivery count, attributes, and how long the claim has left
-- :white_check_mark: `DELETE /messages/{receipt_handle}` — finish with a message. A spent
+- :white_check_mark: `DELETE /messages/{receiptHandle}` — finish with a message. A spent
   handle is refused rather than silently accepted
-- :white_check_mark: `PATCH /messages/{receipt_handle}` — re-time a claim, counted from now,
+- :white_check_mark: `PATCH /messages/{receiptHandle}` — re-time a claim, counted from now,
   so the one call both extends a claim and hands a message back with `0`
 - :white_check_mark: `POST /messages/delete` and `POST /messages/visibility` — the same, many
   at a time. A `POST` rather than a `DELETE` with a body, which proxies mishandle
@@ -192,18 +197,18 @@ export TOKEN=AKIANEXQDEV.change-me
 curl -s -X PUT "$NEXQ/api/v1/queues/jobs" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"delay_seconds": 5}'
+  -d '{"delaySeconds": 5}'
 ```
 
 ```json
 {
   "name": "jobs",
-  "created_at": "2026-08-27T00:57:23.116130732Z",
-  "last_modified_at": "2026-08-27T00:57:23.116130732Z",
+  "createdAt": "2026-08-27T00:57:23.116130732Z",
+  "lastModifiedAt": "2026-08-27T00:57:23.116130732Z",
   "attributes": {
-    "visibility_timeout_seconds": 30,
-    "delay_seconds": 5,
-    "receive_wait_time_seconds": 0
+    "visibilityTimeoutSeconds": 30,
+    "delaySeconds": 5,
+    "receiveWaitTimeSeconds": 0
   }
 }
 ```
@@ -217,7 +222,7 @@ different attributes is a `409` rather than a silent reconfiguration of a live q
 
 ```sh
 curl -s -X PUT "$NEXQ/api/v1/queues/jobs" -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"delay_seconds": 6}'
+  -H 'Content-Type: application/json' -d '{"delaySeconds": 6}'
 # {"error":{"code":"queue_already_exists","message":"a queue named jobs exists with different attributes"}}
 ```
 
@@ -235,13 +240,13 @@ delete worked.
 
 ```sh
 curl -s "$NEXQ/api/v1/queues?limit=2" -H "Authorization: Bearer $TOKEN"
-# {"queues":[{"name":"alpha",…},{"name":"beta",…}],"next_cursor":"beta"}
+# {"queues":[{"name":"alpha",…},{"name":"beta",…}],"nextCursor":"beta"}
 
 curl -s "$NEXQ/api/v1/queues?limit=2&cursor=beta" -H "Authorization: Bearer $TOKEN"
-# {"queues":[{"name":"delta",…},{"name":"gamma",…}],"next_cursor":"gamma"}
+# {"queues":[{"name":"delta",…},{"name":"gamma",…}],"nextCursor":"gamma"}
 ```
 
-`next_cursor` is `null` on the last page, and `?prefix=` filters by name. The cursor names
+`nextCursor` is `null` on the last page, and `?prefix=` filters by name. The cursor names
 **where to resume**, so deleting `alpha` between the two requests above still yields
 `delta` next — where an offset of 2 would have skipped it. That is the store's keyset
 guarantee carried onto the wire rather than re-derived from it.
@@ -268,8 +273,8 @@ curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages" \
 ```json
 {
   "results": [
-    {"index": 0, "status": "accepted", "message_id": "6d3d9901-a845-4564-a4cf-e920283588b7"},
-    {"index": 1, "status": "accepted", "message_id": "02cbf29f-3360-47a2-8e8e-a641349a216c"}
+    {"index": 0, "status": "accepted", "messageId": "6d3d9901-a845-4564-a4cf-e920283588b7"},
+    {"index": 1, "status": "accepted", "messageId": "02cbf29f-3360-47a2-8e8e-a641349a216c"}
   ]
 }
 ```
@@ -279,7 +284,7 @@ its own, and the response reports both — so nine good messages are not lost to
 
 ```json
 {"index": 1, "status": "refused",
- "error": {"code": "invalid_delay", "message": "delay_seconds must be between 0 and 900, got 901"}}
+ "error": {"code": "invalid_delay", "message": "delaySeconds must be between 0 and 900, got 901"}}
 ```
 
 That is still a `200`, so **read the results** rather than relying on an error being raised.
@@ -310,7 +315,7 @@ stay different things, which is what makes the SQS facade's checksum of it come 
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"max_messages": 2}'
+  -d '{"maxMessages": 2}'
 ```
 
 ```json
@@ -318,20 +323,20 @@ curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" \
   "messages": [
     {
       "id": "6d3d9901-a845-4564-a4cf-e920283588b7",
-      "receipt_handle": "a532dc51-07bc-4c78-9936-56e3ab8cbb1c",
+      "receiptHandle": "a532dc51-07bc-4c78-9936-56e3ab8cbb1c",
       "body": "urgent work",
       "priority": 10,
-      "receive_count": 1,
-      "claim_expires_in_seconds": 29,
+      "receiveCount": 1,
+      "claimExpiresInSeconds": 29,
       "attributes": {"City": {"type": "string", "value": "Any City"}}
     },
     {
       "id": "02cbf29f-3360-47a2-8e8e-a641349a216c",
-      "receipt_handle": "2b275678-25a7-4693-9a20-2572bf9c74f2",
+      "receiptHandle": "2b275678-25a7-4693-9a20-2572bf9c74f2",
       "body": "ordinary work",
       "priority": 0,
-      "receive_count": 1,
-      "claim_expires_in_seconds": 29,
+      "receiveCount": 1,
+      "claimExpiresInSeconds": 29,
       "attributes": {}
     }
   ]
@@ -351,12 +356,12 @@ curl -s -X DELETE "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" -H "Authorization:
 # Need longer: extend the claim, counted from now.
 curl -s -X PATCH "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"visibility_timeout_seconds": 300}'
+  -d '{"visibilityTimeoutSeconds": 300}'
 
 # Cannot do it: hand it straight back for someone else.
 curl -s -X PATCH "$NEXQ/api/v1/queues/jobs/messages/$HANDLE" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"visibility_timeout_seconds": 0}'
+  -d '{"visibilityTimeoutSeconds": 0}'
 ```
 
 Handing a message back with `0` makes it claimable at once **and wakes a consumer that is
@@ -369,11 +374,11 @@ Several at a time, with the same per-entry results as a send:
 ```sh
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/delete" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"receipt_handles": ["…", "…"]}'
+  -d '{"receiptHandles": ["…", "…"]}'
 
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/visibility" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"changes": [{"receipt_handle": "…", "visibility_timeout_seconds": 300}]}'
+  -d '{"changes": [{"receiptHandle": "…", "visibilityTimeoutSeconds": 300}]}'
 ```
 
 A `POST` rather than a `DELETE` carrying a body: a body on `DELETE` is legal and widely
@@ -406,7 +411,7 @@ curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" -H "Authorization: B
 An empty list is a normal answer, including when a long poll runs out — **not** an error, and
 not an omitted field the way SQS omits `Messages`.
 
-`claim_expires_in_seconds` is a duration rather than an expiry timestamp, deliberately: a
+`claimExpiresInSeconds` is a duration rather than an expiry timestamp, deliberately: a
 consumer needs to know how long it has, and answering with a timestamp would make that
 depend on the client's clock agreeing with the server's. It truncates rather than rounds, so
 a 30-second timeout reads as `29` a moment later — the conservative direction, since it
@@ -418,14 +423,14 @@ never claims more time than there is.
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"wait_time_seconds": 20, "max_messages": 10}'
+  -d '{"waitTimeSeconds": 20, "maxMessages": 10}'
 ```
 
 The request is held open until a message arrives or the wait runs out, and returns the
 moment one is sent — including when it is sent **through the SQS facade**, because both
 facades wake consumers through the same registry. Twenty seconds is the maximum, as in SQS.
 
-Omitting `wait_time_seconds` falls back to the queue's own
+Omitting `waitTimeSeconds` falls back to the queue's own
 `ReceiveMessageWaitTimeSeconds`, which is a different thing from sending `0`: zero asks for a
 plain poll. The wait applies to the *first* message only, so asking for ten when three exist
 returns three rather than holding on for seven more.
@@ -537,11 +542,11 @@ applied when it was silently dropped:
 ```sh
 curl -s -X POST "$NEXQ/api/v1/queues/jobs/messages/receive" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"visibility_timeout": 30}'
+  -d '{"visibilityTimeout": 30}'
 ```
 
 ```json
-{"error":{"code":"invalid_request_body","message":"Failed to deserialize the JSON body into the target type: visibility_timeout: unknown field `visibility_timeout`, expected one of `max_messages`, `visibility_timeout_seconds`, `wait_time_seconds` at line 1 column 21"}}
+{"error":{"code":"invalid_request_body","message":"Failed to deserialize the JSON body into the target type: visibilityTimeout: unknown field `visibilityTimeout`, expected one of `maxMessages`, `visibilityTimeoutSeconds`, `waitTimeSeconds` at line 1 column 20"}}
 ```
 
 Run the server with `RUST_LOG=nexq=debug` to see which principal each request authenticated

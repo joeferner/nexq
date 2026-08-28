@@ -230,7 +230,7 @@ fn api_routes() -> ApiRouter<FacadeState> {
                 post_with(messages::visibility_batch, messages::visibility_batch_docs),
             )
             .api_route(
-                "/queues/{queue}/messages/{receipt_handle}",
+                "/queues/{queue}/messages/{receiptHandle}",
                 delete_with(messages::delete_message, messages::delete_message_docs).patch_with(
                     messages::change_visibility,
                     messages::change_visibility_docs,
@@ -244,9 +244,10 @@ fn api_metadata(api: TransformOpenApi) -> TransformOpenApi {
     api.title("NexQ")
         .version(env!("CARGO_PKG_VERSION"))
         .description(
-            "NexQ's native API: the complete operation set, including the extensions the \
-             SQS-compatible facade cannot express. This document is generated from the \
-             server's own routing table and is the source every client is generated from.",
+            "The native REST API for NexQ, a multi-protocol queue server. It covers every \
+             operation NexQ supports — including the features that go beyond what the \
+             SQS-compatible endpoint can express — and is the API to reach for when you \
+             are writing against NexQ directly rather than through an AWS SDK.",
         )
         .security_scheme(
             SECURITY_SCHEME,
@@ -601,9 +602,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = json_of(response).await;
         assert_eq!(json["messages"][0]["body"], "hello over rest");
-        assert_eq!(json["messages"][0]["receive_count"], 1);
+        assert_eq!(json["messages"][0]["receiveCount"], 1);
         assert!(
-            json["messages"][0]["receipt_handle"]
+            json["messages"][0]["receiptHandle"]
                 .as_str()
                 .is_some_and(|handle| !handle.is_empty()),
             "a claim must come with a handle: {json}"
@@ -751,19 +752,19 @@ mod tests {
             &facade,
             "PUT",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds": 5}"#),
+            Some(r#"{"delaySeconds": 5}"#),
         )
         .await;
         assert_eq!(created.0, StatusCode::OK);
         assert_eq!(created.1["name"], "jobs");
-        assert_eq!(created.1["attributes"]["delay_seconds"], 5);
+        assert_eq!(created.1["attributes"]["delaySeconds"], 5);
         assert_eq!(
-            created.1["attributes"]["visibility_timeout_seconds"], 30,
+            created.1["attributes"]["visibilityTimeoutSeconds"], 30,
             "an unnamed attribute takes its default rather than zero"
         );
 
         // RFC 3339, which is what a generated client turns into a date type.
-        let created_at = created.1["created_at"].as_str().expect("a timestamp");
+        let created_at = created.1["createdAt"].as_str().expect("a timestamp");
         assert!(
             created_at.contains('T') && created_at.ends_with('Z'),
             "expected RFC 3339: {created_at}"
@@ -774,18 +775,18 @@ mod tests {
             &facade,
             "PUT",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds": 5}"#),
+            Some(r#"{"delaySeconds": 5}"#),
         )
         .await;
         assert_eq!(again.0, StatusCode::OK);
-        assert_eq!(again.1["created_at"], created.1["created_at"]);
+        assert_eq!(again.1["createdAt"], created.1["createdAt"]);
 
         // Different attributes are a conflict rather than a silent reconfiguration.
         let conflict = request(
             &facade,
             "PUT",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds": 6}"#),
+            Some(r#"{"delaySeconds": 6}"#),
         )
         .await;
         assert_eq!(conflict.0, StatusCode::CONFLICT);
@@ -793,11 +794,11 @@ mod tests {
 
         let read = request(&facade, "GET", "/api/v1/queues/jobs", None).await;
         assert_eq!(read.0, StatusCode::OK);
-        assert_eq!(read.1["attributes"]["delay_seconds"], 5);
+        assert_eq!(read.1["attributes"]["delaySeconds"], 5);
 
         let listed = request(&facade, "GET", "/api/v1/queues", None).await;
         assert_eq!(listed.1["queues"][0]["name"], "jobs");
-        assert_eq!(listed.1["next_cursor"], serde_json::Value::Null);
+        assert_eq!(listed.1["nextCursor"], serde_json::Value::Null);
 
         let deleted = request(&facade, "DELETE", "/api/v1/queues/jobs", None).await;
         assert_eq!(deleted.0, StatusCode::NO_CONTENT);
@@ -820,7 +821,7 @@ mod tests {
 
         assert_eq!(listed.0, StatusCode::OK);
         assert_eq!(listed.1["queues"], serde_json::json!([]));
-        assert_eq!(listed.1["next_cursor"], serde_json::Value::Null);
+        assert_eq!(listed.1["nextCursor"], serde_json::Value::Null);
     }
 
     /// The reason paging is by cursor rather than by offset: a queue deleted between
@@ -839,7 +840,7 @@ mod tests {
         let first = request(&facade, "GET", "/api/v1/queues?limit=2", None).await;
         assert_eq!(first.1["queues"][0]["name"], "a");
         assert_eq!(first.1["queues"][1]["name"], "b");
-        let cursor = first.1["next_cursor"]
+        let cursor = first.1["nextCursor"]
             .as_str()
             .expect("more remain")
             .to_owned();
@@ -862,7 +863,7 @@ mod tests {
             .collect();
 
         assert_eq!(names, ["c", "d"], "nothing skipped and nothing repeated");
-        assert_eq!(second.1["next_cursor"], serde_json::Value::Null);
+        assert_eq!(second.1["nextCursor"], serde_json::Value::Null);
     }
 
     #[tokio::test]
@@ -1129,7 +1130,7 @@ mod parity_tests {
         .await;
         assert_eq!(sent.0, StatusCode::OK);
         assert_eq!(sent.1["results"][0]["status"], "accepted");
-        let id = sent.1["results"][0]["message_id"]
+        let id = sent.1["results"][0]["messageId"]
             .as_str()
             .expect("an id")
             .to_owned();
@@ -1148,7 +1149,7 @@ mod parity_tests {
             message["priority"], 5,
             "priority is settable here, unlike through the SQS facade"
         );
-        let handle = message["receipt_handle"].as_str().expect("a handle");
+        let handle = message["receiptHandle"].as_str().expect("a handle");
 
         let deleted = request(
             &facade,
@@ -1184,7 +1185,7 @@ mod parity_tests {
             Some(
                 r#"{"messages":[
                      {"body":"fine"},
-                     {"body":"bad delay","delay_seconds":901},
+                     {"body":"bad delay","delaySeconds":901},
                      {"body":"also fine"}
                    ]}"#,
             ),
@@ -1298,7 +1299,7 @@ mod parity_tests {
             &facade,
             "PUT",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds":5,"visibility_timeout_seconds":120}"#),
+            Some(r#"{"delaySeconds":5,"visibilityTimeoutSeconds":120}"#),
         )
         .await;
 
@@ -1306,14 +1307,14 @@ mod parity_tests {
             &facade,
             "PATCH",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds":7}"#),
+            Some(r#"{"delaySeconds":7}"#),
         )
         .await;
 
         assert_eq!(patched.0, StatusCode::OK);
-        assert_eq!(patched.1["attributes"]["delay_seconds"], 7);
+        assert_eq!(patched.1["attributes"]["delaySeconds"], 7);
         assert_eq!(
-            patched.1["attributes"]["visibility_timeout_seconds"], 120,
+            patched.1["attributes"]["visibilityTimeoutSeconds"], 120,
             "PATCH must leave an attribute it was not told about alone"
         );
 
@@ -1331,7 +1332,7 @@ mod parity_tests {
             &facade,
             "PUT",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds":5}"#),
+            Some(r#"{"delaySeconds":5}"#),
         )
         .await;
 
@@ -1339,14 +1340,14 @@ mod parity_tests {
             &facade,
             "PATCH",
             "/api/v1/queues/jobs",
-            Some(r#"{"delay_seconds":9,"visibility_timeout_seconds":99999}"#),
+            Some(r#"{"delaySeconds":9,"visibilityTimeoutSeconds":99999}"#),
         )
         .await;
         assert_eq!(refused.0, StatusCode::BAD_REQUEST);
 
         let read = request(&facade, "GET", "/api/v1/queues/jobs", None).await;
         assert_eq!(
-            read.1["attributes"]["delay_seconds"], 5,
+            read.1["attributes"]["delaySeconds"], 5,
             "all-or-nothing: the good attribute must not have been applied either"
         );
     }
@@ -1372,7 +1373,7 @@ mod parity_tests {
             Some("{}"),
         )
         .await;
-        let handle = received.1["messages"][0]["receipt_handle"]
+        let handle = received.1["messages"][0]["receiptHandle"]
             .as_str()
             .expect("a handle")
             .to_owned();
@@ -1421,7 +1422,7 @@ mod parity_tests {
             Some("{}"),
         )
         .await;
-        let handle = received.1["messages"][0]["receipt_handle"]
+        let handle = received.1["messages"][0]["receiptHandle"]
             .as_str()
             .expect("a handle")
             .to_owned();
@@ -1440,7 +1441,7 @@ mod parity_tests {
             &facade,
             "PATCH",
             &format!("/api/v1/queues/jobs/messages/{handle}"),
-            Some(r#"{"visibility_timeout_seconds":0}"#),
+            Some(r#"{"visibilityTimeoutSeconds":0}"#),
         )
         .await;
         assert_eq!(handed_back.0, StatusCode::NO_CONTENT);
@@ -1457,7 +1458,7 @@ mod parity_tests {
             "a message handed back is available to the next consumer at once"
         );
         assert_eq!(
-            again.1["messages"][0]["receive_count"], 2,
+            again.1["messages"][0]["receiveCount"], 2,
             "and it counts as a second delivery"
         );
     }
@@ -1478,7 +1479,7 @@ mod parity_tests {
             &facade,
             "POST",
             "/api/v1/queues/jobs/messages/receive",
-            Some(r#"{"max_messages":2}"#),
+            Some(r#"{"maxMessages":2}"#),
         )
         .await;
         let handles: Vec<String> = received.1["messages"]
@@ -1486,7 +1487,7 @@ mod parity_tests {
             .expect("messages")
             .iter()
             .map(|message| {
-                message["receipt_handle"]
+                message["receiptHandle"]
                     .as_str()
                     .expect("a handle")
                     .to_owned()
@@ -1501,8 +1502,8 @@ mod parity_tests {
             "/api/v1/queues/jobs/messages/visibility",
             Some(&format!(
                 r#"{{"changes":[
-                     {{"receipt_handle":"{}","visibility_timeout_seconds":300}},
-                     {{"receipt_handle":"{}","visibility_timeout_seconds":0}}
+                     {{"receiptHandle":"{}","visibilityTimeoutSeconds":300}},
+                     {{"receiptHandle":"{}","visibilityTimeoutSeconds":0}}
                    ]}}"#,
                 handles[0], handles[1]
             )),
@@ -1525,7 +1526,7 @@ mod parity_tests {
             "POST",
             "/api/v1/queues/jobs/messages/delete",
             Some(&format!(
-                r#"{{"receipt_handles":["{}","never-issued"]}}"#,
+                r#"{{"receiptHandles":["{}","never-issued"]}}"#,
                 handles[0]
             )),
         )

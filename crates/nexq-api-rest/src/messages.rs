@@ -1,5 +1,5 @@
 //! Messages: the collection at `/queues/{queue}/messages` and one claim at
-//! `/queues/{queue}/messages/{receipt_handle}`.
+//! `/queues/{queue}/messages/{receiptHandle}`.
 //!
 //! Three places where this deliberately does not follow SQS:
 //!
@@ -51,7 +51,7 @@ pub const MAX_MESSAGES_PER_SEND: usize = 10;
 /// Three kinds, matching what the SQS facade accepts, so an attribute set here survives a
 /// round trip through that facade unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum AttributeType {
     /// Text, carried as-is.
     String,
@@ -70,7 +70,7 @@ pub enum AttributeType {
 /// so text that happens to look like base64 and the bytes it decodes to stay different
 /// things.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct MessageAttributeBody {
     /// How to read `value`.
     #[serde(rename = "type")]
@@ -87,7 +87,7 @@ pub struct MessageAttributeBody {
 
 /// One message to send.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SendMessageBody {
     /// The message body.
     pub body: String,
@@ -114,7 +114,7 @@ pub struct SendMessageBody {
 
 /// Messages to send.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SendBody {
     /// One or more messages. Sending a single message is a list of one — there is no
     /// separate batch operation to choose between.
@@ -123,7 +123,7 @@ pub struct SendBody {
 
 /// Whether one entry of a multi-entry request was accepted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum EntryStatus {
     Accepted,
     Refused,
@@ -136,13 +136,14 @@ pub enum EntryStatus {
 /// one. The request itself is still a `200` — a client has to read the results rather than
 /// rely on an error being raised.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct EntryResult {
     /// Which entry this is, by position in the request's list. Positions rather than
     /// client-supplied ids: an array already has them, and SQS's duplicate-id failure
     /// cannot happen.
     pub index: usize,
 
-    /// Whether it was accepted. Exactly one of `message_id` and `error` accompanies it.
+    /// Whether it was accepted. Exactly one of `messageId` and `error` accompanies it.
     pub status: EntryStatus,
 
     /// The id of the accepted message, for a send.
@@ -156,6 +157,7 @@ pub struct EntryResult {
 
 /// What happened to each entry of a multi-entry request.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct EntryResults {
     /// One per entry, in request order.
     pub results: Vec<EntryResult>,
@@ -163,7 +165,7 @@ pub struct EntryResults {
 
 /// Receipt handles to delete.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DeleteBatchBody {
     /// The claims to finish, by receipt handle.
     pub receipt_handles: Vec<String>,
@@ -171,7 +173,7 @@ pub struct DeleteBatchBody {
 
 /// A new visibility timeout for one claim.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VisibilityBody {
     /// How much longer the claim should last, counted from now.
     ///
@@ -182,7 +184,7 @@ pub struct VisibilityBody {
 
 /// One claim to re-time.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VisibilityChange {
     /// Which claim.
     pub receipt_handle: String,
@@ -194,7 +196,7 @@ pub struct VisibilityChange {
 
 /// Claims to re-time.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VisibilityBatchBody {
     /// One or more claims.
     pub changes: Vec<VisibilityChange>,
@@ -202,6 +204,7 @@ pub struct VisibilityBatchBody {
 
 /// How much a purge threw away.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PurgeResponse {
     /// Messages removed, counting ones a consumer was holding.
     pub purged: u64,
@@ -209,6 +212,7 @@ pub struct PurgeResponse {
 
 /// Which claim a request is about.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaimPath {
     /// Name of the queue.
     pub queue: String,
@@ -221,7 +225,7 @@ pub struct ClaimPath {
 /// What a consumer may ask for. Every field is optional; an empty body is a plain poll of
 /// one message under the queue's own defaults.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, rename_all = "camelCase")]
 pub struct ReceiveBody {
     /// How many messages to return at most. Fewer may come back, including none.
     ///
@@ -248,6 +252,7 @@ pub struct ReceiveBody {
 
 /// The answer to a receive.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ReceiveResponse {
     /// Claimed messages, **empty rather than absent** when there are none.
     ///
@@ -259,6 +264,7 @@ pub struct ReceiveResponse {
 
 /// One message, and the claim it came with.
 #[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ReceivedMessage {
     /// The message's identifier, stable across redeliveries. The same value the
     /// SQS-compatible facade reports as `MessageId`.
@@ -426,7 +432,7 @@ impl SendMessageBody {
         {
             return Err(ApiError::bad_request(
                 "invalid_delay",
-                format!("delay_seconds must be between 0 and {DELAY_MAX_SECONDS}, got {delay}"),
+                format!("delaySeconds must be between 0 and {DELAY_MAX_SECONDS}, got {delay}"),
             ));
         }
 
@@ -542,7 +548,7 @@ async fn change_one(
         return Err(ApiError::bad_request(
             "invalid_visibility_timeout",
             format!(
-                "visibility_timeout_seconds must be between 0 and \
+                "visibilityTimeoutSeconds must be between 0 and \
                  {VISIBILITY_TIMEOUT_MAX_SECONDS}, got {seconds}"
             ),
         ));
@@ -570,7 +576,7 @@ impl ReceiveBody {
         {
             return Err(ApiError::bad_request(
                 "invalid_max_messages",
-                format!("max_messages must be between 1 and {MAX_MESSAGES_PER_RECEIVE}, got {max}"),
+                format!("maxMessages must be between 1 and {MAX_MESSAGES_PER_RECEIVE}, got {max}"),
             ));
         }
 
@@ -580,7 +586,7 @@ impl ReceiveBody {
             return Err(ApiError::bad_request(
                 "invalid_wait_time",
                 format!(
-                    "wait_time_seconds must be at most {}, got {wait}",
+                    "waitTimeSeconds must be at most {}, got {wait}",
                     MAX_RECEIVE_WAIT.as_secs()
                 ),
             ));
@@ -642,7 +648,7 @@ pub async fn send(
     Ok(Json(EntryResults { results }))
 }
 
-/// `DELETE /api/v1/queues/{queue}/messages/{receipt_handle}`
+/// `DELETE /api/v1/queues/{queue}/messages/{receiptHandle}`
 ///
 /// Finishing one claim, which is what deleting a message means: the handle identifies the
 /// claim, so a stale one is refused rather than silently doing nothing.
@@ -659,7 +665,7 @@ pub async fn delete_message(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `PATCH /api/v1/queues/{queue}/messages/{receipt_handle}`
+/// `PATCH /api/v1/queues/{queue}/messages/{receiptHandle}`
 pub async fn change_visibility(
     State(facade): State<FacadeState>,
     Path(ClaimPath {
@@ -776,10 +782,10 @@ pub fn receive_docs(mut operation: TransformOperation) -> TransformOperation {
         .id("receiveMessages")
         .summary("Receive messages from a queue")
         .description(
-            "Claims up to `max_messages` messages, making them invisible to other \
+            "Claims up to `maxMessages` messages, making them invisible to other \
              consumers until the claim lapses or they are deleted. A `POST` because it \
              changes something: two identical calls return different messages.\n\n\
-             With `wait_time_seconds` the request is held open until a message arrives or \
+             With `waitTimeSeconds` the request is held open until a message arrives or \
              the wait runs out — long polling — and returns the moment one is sent, \
              including one sent through the SQS-compatible facade, since both run over one \
              queue. Omitting it uses the queue's own configured wait, which is a different \
@@ -802,7 +808,7 @@ pub fn receive_docs(mut operation: TransformOperation) -> TransformOperation {
         })
         .response_with::<400, Json<ErrorBody>, _>(|response| {
             response.description(
-                "The queue name is not legal, or `max_messages` or `wait_time_seconds` is \
+                "The queue name is not legal, or `maxMessages` or `waitTimeSeconds` is \
                  outside its range — refused rather than clamped.",
             )
         })
@@ -1010,7 +1016,7 @@ mod tests {
 
     #[test]
     fn seconds_become_durations() {
-        let request = body(r#"{"visibility_timeout_seconds": 45, "wait_time_seconds": 20}"#)
+        let request = body(r#"{"visibilityTimeoutSeconds": 45, "waitTimeSeconds": 20}"#)
             .to_request()
             .expect("valid");
 
@@ -1023,7 +1029,7 @@ mod tests {
     #[test]
     fn a_zero_wait_is_not_the_same_as_an_absent_one() {
         assert_eq!(
-            body(r#"{"wait_time_seconds": 0}"#)
+            body(r#"{"waitTimeSeconds": 0}"#)
                 .to_request()
                 .expect("valid")
                 .wait,
@@ -1034,7 +1040,7 @@ mod tests {
 
     #[test]
     fn too_many_messages_is_refused_rather_than_clamped() {
-        let error = body(r#"{"max_messages": 50}"#)
+        let error = body(r#"{"maxMessages": 50}"#)
             .to_request()
             .expect_err("over the cap");
 
@@ -1046,7 +1052,7 @@ mod tests {
     fn zero_messages_is_refused() {
         // Distinct from omitting the field: asking for none cannot be what was meant.
         assert_eq!(
-            body(r#"{"max_messages": 0}"#)
+            body(r#"{"maxMessages": 0}"#)
                 .to_request()
                 .expect_err("zero messages")
                 .code(),
@@ -1056,7 +1062,7 @@ mod tests {
 
     #[test]
     fn a_wait_over_the_protocol_cap_is_refused() {
-        let error = body(r#"{"wait_time_seconds": 300}"#)
+        let error = body(r#"{"waitTimeSeconds": 300}"#)
             .to_request()
             .expect_err("over the cap");
 
@@ -1064,12 +1070,19 @@ mod tests {
         assert!(error.message().contains("20"), "{}", error.message());
     }
 
-    /// A typo must not be accepted as a default. `visibility_timeout` without the unit
-    /// suffix is the mistake this actually catches.
+    /// A typo must not be accepted as a default. The two this actually catches are
+    /// `visibilityTimeout` without the unit suffix, and the snake_case spelling — every
+    /// field on the wire is camelCase, and a client carrying the other habit should be
+    /// told so rather than silently served the queue's default.
     #[test]
     fn an_unknown_field_is_refused() {
-        serde_json::from_str::<ReceiveBody>(r#"{"visibility_timeout": 30}"#)
-            .expect_err("an unknown field must not be silently ignored");
+        for json in [
+            r#"{"visibilityTimeout": 30}"#,
+            r#"{"visibility_timeout_seconds": 30}"#,
+        ] {
+            serde_json::from_str::<ReceiveBody>(json)
+                .expect_err("an unknown field must not be silently ignored");
+        }
     }
 
     /// A binary attribute must be stored as the **bytes**, not as the base64 text that

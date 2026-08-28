@@ -97,8 +97,9 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       7 tests. The three that carry the weight were each checked to go red against a
       deliberate mutation: the clash check removed, the default port moved onto 8080, and
       the REST certificate error made to name `aws_api`.
+
 - [x] Both facades in one process, over one `Engine`. `nexq-server` binds both when both
-      are enabled, handing each the *same* `auth` and `engine`, and
+      are enabled, handing each the _same_ `auth` and `engine`, and
       `nexq-api-rest/tests/cross_facade.rs` proves what that buys over real sockets:
       created and sent through the SQS facade with a genuine SigV4 signature, then received
       through REST — asserting the **message id**, not just the body, so it is the same
@@ -148,8 +149,9 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       unlike SigV4 — where a signature covers one request and the secret never crosses the
       wire — anyone who can read the traffic can replay it. That is why `[rest_api.tls]`
       exists.
+
 - [x] Axum + `aide`: `ApiRouter`, and `#[derive(JsonSchema)]` beside the existing
-      `Serialize`/`Deserialize`, so route registration *is* the documentation source. The
+      `Serialize`/`Deserialize`, so route registration _is_ the documentation source. The
       alternative considered and rejected in Q18a was `utoipa`, whose per-handler
       `#[utoipa::path(...)]` amounts to writing the OpenAPI structure by hand.
 
@@ -226,6 +228,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       context, and removing that reset leaves every test green, because one route means one
       set of types and re-extracting them yields identical components. Kept as insurance
       with the comment saying so, rather than claimed as covered.
+
 - [x] The generated spec is **committed** at `crates/nexq-api-rest/openapi.json`, and
       `the_committed_document_is_the_generated_one` fails when it and the code disagree.
       Without it the contract can change in a way no diff shows, and every generated client
@@ -273,6 +276,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       is what most people run, and the check should not depend on remembering a target.
       Both callers share one `check_openapi`, so they cannot explain a difference
       differently.
+
 - [x] Resource-shaped routes, not a transliteration of SQS. The queue resource is the
       demonstration: a collection at `/api/v1/queues` and a member at
       `/api/v1/queues/{queue}`, with the **name in the path** — SQS's
@@ -332,6 +336,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
 
       Still open, and owned by the parity item below: changing attributes after creation,
       the message counts, purge, and every message operation but `receive`.
+
 - [x] One error envelope: HTTP status, a stable machine-readable code, and a message,
       nested under `error` so a successful response and a failed one can never be told
       apart only by which fields happen to be present. Distinct from the SQS facade's
@@ -363,6 +368,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       *this server's* fault, so its detail is logged and withheld. A backend error can
       carry hosts, paths, or credentials, none of which belong in a response — there is a
       test that a `postgres://user:hunter2@db` connection string does not reach the client.
+
 - [x] Parity surface. Twelve documented operations: the queue resource from the item above,
       plus `PATCH` for attributes, message counts, send, delete, change-visibility, purge,
       and the multi-entry forms. A producer and a consumer can now run entirely against this
@@ -413,6 +419,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       Still open here, and owned by M10: position in queue, dead-letter queues and redrive.
       Absolute timestamps on a received message are a small addition now that queue
       timestamps settled the format.
+
 - [x] Long-polling receive on the **same** `nexq-core::waiters` primitive as SQS — one
       mechanism with two protocol faces, per Q3a, not a second implementation. REST's
       `wait_time_seconds` goes to `Engine::receive` and nothing else, so there is nothing
@@ -428,8 +435,7 @@ that one spec. Nothing downstream is hand-written, so nothing downstream can dis
       test could not tell which one had. It now binds REST alone, where nothing else can be
       the cause, and the same mutation fails. A green test that cannot go red is decoration,
       and this one nearly was.
-- [ ] `nexq-client` generated from the spec, and used by something in-tree, so "the
-      generated client works" is a fact rather than an assumption
+
 - [ ] **Gate: `cargo xtask acceptance-rest` — a `curl`-level suite that exercises the
       surface over the wire, plus the same round trip through the generated client.** Two
       callers because a hand-written HTTP call proves the protocol and a generated one
@@ -445,7 +451,7 @@ is why they waited for one that can reach them.
       road, so an unset priority behaves as it does today
 - [ ] **Position in queue.** `Store::position_of`, per-backend by construction (Q7): an
       index into an ordered structure for memory, a count query for SQL and search. Two
-      semantics to settle and then *document*, because both answers surprise someone:
+      semantics to settle and then _document_, because both answers surprise someone:
       whether position counts only currently-visible messages, and that a
       higher-priority arrival moves you backwards. Approximate by nature, and named
       `Approximate…` for the same reason SQS names its counts that way
@@ -568,7 +574,7 @@ the conformance suite earn its existence.
 - [ ] `position_of` as a count query (Q7), and `message_counts` as an aggregation cheap
       enough for M13's scrape interval
 - [ ] `[client_tls]`'s second consumer, plus authentication to the cluster — these are
-      *outbound* credentials, the same category the plan is careful to keep separate from
+      _outbound_ credentials, the same category the plan is careful to keep separate from
       NexQ's own trust root
 - [ ] CI needs a service container for the first time, which **breaks the property every
       suite has had so far**: no secrets, no services, runs unchanged on a pull request

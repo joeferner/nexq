@@ -2,14 +2,14 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NexQ",
-    "description": "NexQ's native API: the complete operation set, including the extensions the SQS-compatible facade cannot express. This document is generated from the server's own routing table and is the source every client is generated from.",
+    "description": "The native REST API for NexQ, a multi-protocol queue server. It covers every operation NexQ supports — including the features that go beyond what the SQS-compatible endpoint can express — and is the API to reach for when you are writing against NexQ directly rather than through an AWS SDK.",
     "version": "0.1.0"
   },
   "paths": {
     "/api/v1/queues": {
       "get": {
         "summary": "List queues",
-        "description": "In name order, one page at a time, optionally filtered by `prefix`. Add `?counts=true` for each queue's message counts — off by default because it costs one aggregate *per queue on the page*, so a page of a thousand asks for a thousand of them.\n\nWhen `next_cursor` is not null there are more: pass it back as `cursor` to continue. It is a **cursor, not an offset** — it names where to resume, so a queue created or deleted between two requests cannot make you skip one or see it twice. That is the storage layer's keyset guarantee carried onto the wire rather than re-derived from it, and it is why there is no \"page number\".\n\nA cursor is this server's to issue. Constructing one yourself is not supported and is refused rather than interpreted. An empty result is a normal answer, not an error.",
+        "description": "In name order, one page at a time, optionally filtered by `prefix`. Add `?counts=true` for each queue's message counts — off by default because it costs one aggregate *per queue on the page*, so a page of a thousand asks for a thousand of them.\n\nWhen `nextCursor` is not null there are more: pass it back as `cursor` to continue. It is a **cursor, not an offset** — it names where to resume, so a queue created or deleted between two requests cannot make you skip one or see it twice. That is the storage layer's keyset guarantee carried onto the wire rather than re-derived from it, and it is why there is no \"page number\".\n\nA cursor is this server's to issue. Constructing one yourself is not supported and is refused rather than interpreted. An empty result is a normal answer, not an error.",
         "operationId": "listQueues",
         "parameters": [
           {
@@ -29,9 +29,9 @@
           {
             "in": "query",
             "name": "cursor",
-            "description": "Resume after this queue — the `next_cursor` from the previous page.",
+            "description": "Resume after this queue — the `nextCursor` from the previous page.",
             "schema": {
-              "description": "Resume after this queue — the `next_cursor` from the previous page.",
+              "description": "Resume after this queue — the `nextCursor` from the previous page.",
               "type": [
                 "string",
                 "null"
@@ -357,7 +357,7 @@
       },
       "patch": {
         "summary": "Change a queue's attributes",
-        "description": "A **partial** update: an attribute this body does not name keeps its current value rather than reverting to a default. That is the whole difference from `PUT`, which says what a queue should *be* — so `PUT` with one attribute resets the others and `PATCH` with one attribute leaves them alone.\n\nAll-or-nothing: a request mixing a valid attribute with an invalid one changes neither, so you are never left with half a change applied. A request naming no attributes at all is refused rather than treated as a no-op that still moves `last_modified_at`.\n\nOnly the three attributes this server has behaviour behind can be set. One it does not implement is refused rather than accepted and ignored.",
+        "description": "A **partial** update: an attribute this body does not name keeps its current value rather than reverting to a default. That is the whole difference from `PUT`, which says what a queue should *be* — so `PUT` with one attribute resets the others and `PATCH` with one attribute leaves them alone.\n\nAll-or-nothing: a request mixing a valid attribute with an invalid one changes neither, so you are never left with half a change applied. A request naming no attributes at all is refused rather than treated as a no-op that still moves `lastModifiedAt`.\n\nOnly the three attributes this server has behaviour behind can be set. One it does not implement is refused rather than accepted and ignored.",
         "operationId": "patchQueue",
         "parameters": [
           {
@@ -395,7 +395,7 @@
             }
           },
           "200": {
-            "description": "The queue as it now is, with `last_modified_at` moved.",
+            "description": "The queue as it now is, with `lastModifiedAt` moved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -613,7 +613,7 @@
     "/api/v1/queues/{queue}/messages/receive": {
       "post": {
         "summary": "Receive messages from a queue",
-        "description": "Claims up to `max_messages` messages, making them invisible to other consumers until the claim lapses or they are deleted. A `POST` because it changes something: two identical calls return different messages.\n\nWith `wait_time_seconds` the request is held open until a message arrives or the wait runs out — long polling — and returns the moment one is sent, including one sent through the SQS-compatible facade, since both run over one queue. Omitting it uses the queue's own configured wait, which is a different thing from sending `0`: zero asks for a plain poll. The wait applies to the *first* message only, so asking for ten when three exist returns three rather than holding on for seven more.\n\nAn empty list is a normal answer, not an error — including when a long poll runs out, and when the server is shutting down and releases waiting consumers.\n\nEvery message comes with a receipt handle identifying **that claim**, not the message: a redelivery arrives with a new one. There is no way to delete a message through this facade yet, so a claim taken here lapses and the message returns; use the SQS facade to delete it.",
+        "description": "Claims up to `maxMessages` messages, making them invisible to other consumers until the claim lapses or they are deleted. A `POST` because it changes something: two identical calls return different messages.\n\nWith `waitTimeSeconds` the request is held open until a message arrives or the wait runs out — long polling — and returns the moment one is sent, including one sent through the SQS-compatible facade, since both run over one queue. Omitting it uses the queue's own configured wait, which is a different thing from sending `0`: zero asks for a plain poll. The wait applies to the *first* message only, so asking for ten when three exist returns three rather than holding on for seven more.\n\nAn empty list is a normal answer, not an error — including when a long poll runs out, and when the server is shutting down and releases waiting consumers.\n\nEvery message comes with a receipt handle identifying **that claim**, not the message: a redelivery arrives with a new one. There is no way to delete a message through this facade yet, so a claim taken here lapses and the message returns; use the SQS facade to delete it.",
         "operationId": "receiveMessages",
         "parameters": [
           {
@@ -660,7 +660,7 @@
             }
           },
           "400": {
-            "description": "The queue name is not legal, or `max_messages` or `wait_time_seconds` is outside its range — refused rather than clamped.",
+            "description": "The queue name is not legal, or `maxMessages` or `waitTimeSeconds` is outside its range — refused rather than clamped.",
             "content": {
               "application/json": {
                 "schema": {
@@ -888,7 +888,7 @@
         }
       }
     },
-    "/api/v1/queues/{queue}/messages/{receipt_handle}": {
+    "/api/v1/queues/{queue}/messages/{receiptHandle}": {
       "delete": {
         "summary": "Finish with a message",
         "description": "Deletes the message a receipt handle refers to, which is how a consumer says it is done. Until this happens the message comes back when its claim lapses — that is what makes delivery at-least-once.\n\nThe handle identifies **one claim**, not the message. A handle whose claim has already ended — deleted, or lapsed so the message went to another consumer — is refused rather than silently doing nothing, since a consumer that has lost its claim needs to know it may have duplicated work.",
@@ -907,7 +907,7 @@
           },
           {
             "in": "path",
-            "name": "receipt_handle",
+            "name": "receiptHandle",
             "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
             "required": true,
             "schema": {
@@ -981,7 +981,7 @@
           },
           {
             "in": "path",
-            "name": "receipt_handle",
+            "name": "receiptHandle",
             "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
             "required": true,
             "schema": {
@@ -1097,21 +1097,21 @@
             "description": "Name of the queue.",
             "type": "string"
           },
-          "receipt_handle": {
+          "receiptHandle": {
             "description": "The receipt handle a receive handed out. It identifies one claim, not the message,\n so it stops working when that claim ends.",
             "type": "string"
           }
         },
         "required": [
           "queue",
-          "receipt_handle"
+          "receiptHandle"
         ]
       },
       "DeleteBatchBody": {
         "description": "Receipt handles to delete.",
         "type": "object",
         "properties": {
-          "receipt_handles": {
+          "receiptHandles": {
             "description": "The claims to finish, by receipt handle.",
             "type": "array",
             "items": {
@@ -1121,7 +1121,7 @@
         },
         "additionalProperties": false,
         "required": [
-          "receipt_handles"
+          "receiptHandles"
         ]
       },
       "EntryResult": {
@@ -1145,7 +1145,7 @@
             "format": "uint",
             "minimum": 0
           },
-          "message_id": {
+          "messageId": {
             "description": "The id of the accepted message, for a send.",
             "type": [
               "string",
@@ -1153,7 +1153,7 @@
             ]
           },
           "status": {
-            "description": "Whether it was accepted. Exactly one of `message_id` and `error` accompanies it.",
+            "description": "Whether it was accepted. Exactly one of `messageId` and `error` accompanies it.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/EntryStatus"
@@ -1238,7 +1238,7 @@
             "default": null
           },
           "cursor": {
-            "description": "Resume after this queue — the `next_cursor` from the previous page.",
+            "description": "Resume after this queue — the `nextCursor` from the previous page.",
             "type": [
               "string",
               "null"
@@ -1271,7 +1271,7 @@
         "description": "One page of queues.",
         "type": "object",
         "properties": {
-          "next_cursor": {
+          "nextCursor": {
             "description": "Pass as `cursor` to fetch the next page, or `null` when this is the last one.\n\n A **cursor**, not an offset: it names where to resume, so a queue created or\n deleted between pages cannot make a caller skip one or see it twice. Present\n whenever more remain, including when `limit` was not given.",
             "type": [
               "string",
@@ -1330,7 +1330,7 @@
             "format": "uint64",
             "minimum": 0
           },
-          "not_visible": {
+          "notVisible": {
             "description": "In flight: handed to a consumer whose claim has not lapsed, and not yet deleted.",
             "type": "integer",
             "format": "uint64",
@@ -1351,7 +1351,7 @@
         },
         "required": [
           "visible",
-          "not_visible",
+          "notVisible",
           "delayed",
           "total"
         ]
@@ -1375,7 +1375,7 @@
         "description": "Settings to create a queue with. Every field is optional and falls back to the\n server's default. An unrecognised field is refused rather than ignored, so a setting\n never looks applied when it was dropped.",
         "type": "object",
         "properties": {
-          "delay_seconds": {
+          "delaySeconds": {
             "description": "Defaults to none.",
             "type": [
               "integer",
@@ -1386,7 +1386,7 @@
             "maximum": 900,
             "minimum": 0
           },
-          "receive_wait_time_seconds": {
+          "receiveWaitTimeSeconds": {
             "description": "Defaults to none, which makes a receive a plain poll unless it asks to wait.",
             "type": [
               "integer",
@@ -1397,7 +1397,7 @@
             "maximum": 20,
             "minimum": 0
           },
-          "visibility_timeout_seconds": {
+          "visibilityTimeoutSeconds": {
             "description": "Defaults to 30 seconds.",
             "type": [
               "integer",
@@ -1415,19 +1415,19 @@
         "description": "A queue's settings.",
         "type": "object",
         "properties": {
-          "delay_seconds": {
+          "delaySeconds": {
             "description": "How long a newly sent message waits before it can be received.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
-          "receive_wait_time_seconds": {
+          "receiveWaitTimeSeconds": {
             "description": "How long a receive that finds nothing waits by default — the long poll a consumer\n gets without asking for one.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
-          "visibility_timeout_seconds": {
+          "visibilityTimeoutSeconds": {
             "description": "How long a claimed message stays invisible to other consumers before being\n redelivered.",
             "type": "integer",
             "format": "uint64",
@@ -1435,9 +1435,9 @@
           }
         },
         "required": [
-          "visibility_timeout_seconds",
-          "delay_seconds",
-          "receive_wait_time_seconds"
+          "visibilityTimeoutSeconds",
+          "delaySeconds",
+          "receiveWaitTimeSeconds"
         ]
       },
       "QueuePath": {
@@ -1476,12 +1476,12 @@
               }
             ]
           },
-          "created_at": {
+          "createdAt": {
             "description": "When the queue was created.",
             "type": "string",
             "format": "date-time"
           },
-          "last_modified_at": {
+          "lastModifiedAt": {
             "description": "When its attributes were last changed, or when it was created if they never have\n been. Reported separately because answering with the creation time for both would\n be a plausible-looking lie.",
             "type": "string",
             "format": "date-time"
@@ -1493,8 +1493,8 @@
         },
         "required": [
           "name",
-          "created_at",
-          "last_modified_at",
+          "createdAt",
+          "lastModifiedAt",
           "attributes"
         ]
       },
@@ -1517,7 +1517,7 @@
         "description": "What a consumer may ask for. Every field is optional; an empty body is a plain poll of\n one message under the queue's own defaults.",
         "type": "object",
         "properties": {
-          "max_messages": {
+          "maxMessages": {
             "description": "How many messages to return at most. Fewer may come back, including none.\n\n Defaults to one when omitted. A value outside the range is refused rather than\n clamped, so asking for more than the maximum is an error and not a short answer.",
             "type": [
               "integer",
@@ -1528,7 +1528,7 @@
             "maximum": 10,
             "minimum": 1
           },
-          "visibility_timeout_seconds": {
+          "visibilityTimeoutSeconds": {
             "description": "How long the returned messages stay invisible to other consumers.\n\n Omitted means the queue's own configured timeout.",
             "type": [
               "integer",
@@ -1538,7 +1538,7 @@
             "default": null,
             "minimum": 0
           },
-          "wait_time_seconds": {
+          "waitTimeSeconds": {
             "description": "How long to wait for a message when the queue has none — long polling.\n\n Omitted means the queue's own configured wait, which is a different thing from\n `0`: zero asks for a plain poll that returns immediately.",
             "type": [
               "integer",
@@ -1583,7 +1583,7 @@
             "description": "The message body, exactly as it was sent.",
             "type": "string"
           },
-          "claim_expires_in_seconds": {
+          "claimExpiresInSeconds": {
             "description": "How long this claim has left.\n\n A duration rather than an absolute expiry time on purpose: a consumer needs to\n know how long it has, and answering that with a timestamp makes the answer depend\n on the client's clock agreeing with the server's. Saturates at zero rather than\n going negative if the claim lapsed while the response was being written.",
             "type": "integer",
             "format": "uint64",
@@ -1598,11 +1598,11 @@
             "type": "integer",
             "format": "int32"
           },
-          "receipt_handle": {
+          "receiptHandle": {
             "description": "The token to present to delete this message or change its visibility. Refers to\n *this claim*, not to the message: a redelivery comes with a new one.",
             "type": "string"
           },
-          "receive_count": {
+          "receiveCount": {
             "description": "How many times this message has been delivered, counting this delivery.",
             "type": "integer",
             "format": "uint32",
@@ -1611,11 +1611,11 @@
         },
         "required": [
           "id",
-          "receipt_handle",
+          "receiptHandle",
           "body",
           "priority",
-          "receive_count",
-          "claim_expires_in_seconds",
+          "receiveCount",
+          "claimExpiresInSeconds",
           "attributes"
         ]
       },
@@ -1655,7 +1655,7 @@
             "description": "The message body.",
             "type": "string"
           },
-          "delay_seconds": {
+          "delaySeconds": {
             "description": "Hold this message back for this long before any consumer can receive it.\n\n Overrides the queue's own delay for this message alone.",
             "type": [
               "integer",
@@ -1702,7 +1702,7 @@
         "description": "A new visibility timeout for one claim.",
         "type": "object",
         "properties": {
-          "visibility_timeout_seconds": {
+          "visibilityTimeoutSeconds": {
             "description": "How much longer the claim should last, counted from now.\n\n `0` hands the message straight back, which wakes a consumer waiting for one.",
             "type": "integer",
             "format": "uint64",
@@ -1712,18 +1712,18 @@
         },
         "additionalProperties": false,
         "required": [
-          "visibility_timeout_seconds"
+          "visibilityTimeoutSeconds"
         ]
       },
       "VisibilityChange": {
         "description": "One claim to re-time.",
         "type": "object",
         "properties": {
-          "receipt_handle": {
+          "receiptHandle": {
             "description": "Which claim.",
             "type": "string"
           },
-          "visibility_timeout_seconds": {
+          "visibilityTimeoutSeconds": {
             "description": "How much longer it should last, counted from now.",
             "type": "integer",
             "format": "uint64",
@@ -1733,8 +1733,8 @@
         },
         "additionalProperties": false,
         "required": [
-          "receipt_handle",
-          "visibility_timeout_seconds"
+          "receiptHandle",
+          "visibilityTimeoutSeconds"
         ]
       }
     }

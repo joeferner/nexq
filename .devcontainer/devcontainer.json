@@ -48,7 +48,8 @@
 
   "forwardPorts": [8080, 9090, 9091, 4200, 5173],
   "portsAttributes": {
-    "8080": { "label": "NexQ HTTP (REST / SQS / SNS facades)" },
+    "8080": { "label": "NexQ HTTP (SQS / SNS facades)" },
+    "8081": { "label": "NexQ HTTP (REST facades)" },
     "9090": { "label": "Prometheus metrics" },
     "9091": { "label": "KEDA external scaler (gRPC)" },
     "4200": { "label": "Angular dev server" },

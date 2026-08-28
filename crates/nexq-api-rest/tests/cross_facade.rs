@@ -309,9 +309,9 @@ async fn a_message_sent_over_sqs_is_receivable_over_rest() {
         messages[0]["id"], sent_id,
         "the same message, not merely a message with the same body"
     );
-    assert_eq!(messages[0]["receive_count"], 1);
+    assert_eq!(messages[0]["receiveCount"], 1);
     assert!(
-        messages[0]["claim_expires_in_seconds"]
+        messages[0]["claimExpiresInSeconds"]
             .as_u64()
             .is_some_and(|seconds| seconds > 0),
         "a claim was made, so it has time left: {messages}"
@@ -361,7 +361,7 @@ async fn a_message_claimed_over_rest_is_invisible_to_sqs() {
     // A long visibility timeout, so the claim cannot lapse during the test.
     let received = round_trip(
         rest,
-        &rest_receive_request(rest, QUEUE, r#"{"visibility_timeout_seconds": 300}"#),
+        &rest_receive_request(rest, QUEUE, r#"{"visibilityTimeoutSeconds": 300}"#),
     )
     .await;
     assert_eq!(
@@ -450,7 +450,7 @@ async fn an_sqs_send_wakes_a_rest_long_poll() {
         .to_owned();
 
     // Parked on an empty queue for ten seconds.
-    let request = rest_receive_request(rest, QUEUE, r#"{"wait_time_seconds": 10}"#);
+    let request = rest_receive_request(rest, QUEUE, r#"{"waitTimeSeconds": 10}"#);
     let started = std::time::Instant::now();
     let poll = tokio::spawn(async move { round_trip(rest, &request).await });
 
@@ -497,7 +497,7 @@ async fn shutting_down_releases_a_rest_long_poll() {
         .await
         .expect("create the queue");
 
-    let request = rest_receive_request(rest, QUEUE, r#"{"wait_time_seconds": 20}"#);
+    let request = rest_receive_request(rest, QUEUE, r#"{"waitTimeSeconds": 20}"#);
     let started = std::time::Instant::now();
     let poll = tokio::spawn(async move { round_trip(rest, &request).await });
 

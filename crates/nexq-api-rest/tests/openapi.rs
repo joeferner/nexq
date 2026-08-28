@@ -71,7 +71,7 @@ fn the_document_describes_the_route_that_is_actually_served() {
             "/api/v1/queues/{queue}/messages/delete",
             "/api/v1/queues/{queue}/messages/receive",
             "/api/v1/queues/{queue}/messages/visibility",
-            "/api/v1/queues/{queue}/messages/{receipt_handle}",
+            "/api/v1/queues/{queue}/messages/{receiptHandle}",
         ]
     );
 
@@ -127,13 +127,13 @@ fn the_documented_limits_match_the_engine() {
     let properties = spec()["components"]["schemas"]["ReceiveBody"]["properties"].clone();
 
     assert_eq!(
-        properties["max_messages"]["maximum"].as_u64(),
+        properties["maxMessages"]["maximum"].as_u64(),
         Some(MAX_MESSAGES_PER_RECEIVE as u64),
         "the published maximum has drifted from the engine's"
     );
-    assert_eq!(properties["max_messages"]["minimum"].as_u64(), Some(1));
+    assert_eq!(properties["maxMessages"]["minimum"].as_u64(), Some(1));
     assert_eq!(
-        properties["wait_time_seconds"]["maximum"].as_u64(),
+        properties["waitTimeSeconds"]["maximum"].as_u64(),
         Some(MAX_RECEIVE_WAIT.as_secs()),
         "the published wait cap has drifted from the engine's"
     );
