@@ -53,7 +53,16 @@ nexq-client = { path = "crates/nexq-client" }
 # air-gapped deployment (plan Q21) cannot do. The spec itself is served instead.
 aide = { version = "0.15.1", features = ["axum", "axum-json", "axum-query"] }
 async-trait = "0.1.92"
-axum = "0.8.9"
+# `http2` is **not** one of axum's default features, and without it hyper only speaks
+# HTTP/1 — while `nexq-core::tls` advertises `h2` in ALPN. A client that took us at our
+# word then sent an HTTP/2 preface to a server that could not read it and the connection
+# died: `curl: (18) HTTP/2 stream 1 was not closed cleanly`. Found by the REST acceptance
+# suite, because `curl` negotiates h2 and the `aws` CLI never does.
+#
+# Enabled rather than dropping `h2` from the ALPN list: multiplexing matters here, since a
+# long poll holds a connection for up to twenty seconds and HTTP/1.1 needs one per
+# concurrent consumer.
+axum = { version = "0.8.9", features = ["http2"] }
 base64 = "0.23.1"
 # Only to render the times the engine already produced as RFC 3339, which is what a
 # generated client turns into a real date type. Deliberately without `clock`: nothing here

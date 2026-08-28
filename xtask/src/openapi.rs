@@ -77,7 +77,7 @@ pub fn run(check: bool) -> Result<(), String> {
 ///
 /// Its own copy rather than `harness`'s, so this task does not pull in a module that
 /// builds and starts servers.
-fn workspace_root() -> Result<PathBuf, String> {
+pub fn workspace_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(PathBuf::from)

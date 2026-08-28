@@ -32,7 +32,16 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// A running server, stopped when this is dropped.
 pub struct Server {
     child: Child,
+
+    /// Where the SQS-compatible facade is listening.
     pub endpoint: String,
+
+    /// Where the REST facade is listening.
+    ///
+    /// A second address rather than a second server: both facades run in the one process
+    /// over one engine, so a suite driving this one is driving the same queues the `aws`
+    /// CLI would see.
+    pub rest_endpoint: String,
 }
 
 impl Server {
@@ -64,6 +73,7 @@ impl Server {
         let address = format!("127.0.0.1:{port}");
         let scheme = if tls.is_some() { "https" } else { "http" };
         let endpoint = format!("{scheme}://localhost:{port}");
+        let rest_endpoint = format!("{scheme}://localhost:{rest_port}");
 
         // The example config is used as-is, so this also checks that the file we tell
         // people to copy actually works.
@@ -83,18 +93,26 @@ impl Server {
 
         if let Some(chain) = &tls {
             // Set through the environment rather than a config file, which also exercises
-            // the `NEXQ_*__*` override path for a nested table.
+            // the `NEXQ_*__*` override path for a nested table. Both facades, since TLS is
+            // per facade and not inherited — which is the thing worth exercising.
             command
                 .env("NEXQ_AWS_API__TLS__CERTIFICATE", &chain.certificate)
-                .env("NEXQ_AWS_API__TLS__PRIVATE_KEY", &chain.private_key);
+                .env("NEXQ_AWS_API__TLS__PRIVATE_KEY", &chain.private_key)
+                .env("NEXQ_REST_API__TLS__CERTIFICATE", &chain.certificate)
+                .env("NEXQ_REST_API__TLS__PRIVATE_KEY", &chain.private_key);
         }
 
         let child = command
             .spawn()
             .map_err(|error| format!("could not start {}: {error}", binary.display()))?;
 
-        let mut server = Self { child, endpoint };
+        let mut server = Self {
+            child,
+            endpoint,
+            rest_endpoint,
+        };
         server.wait_until_listening(port)?;
+        server.wait_until_listening(rest_port)?;
 
         Ok(server)
     }
@@ -155,6 +173,192 @@ impl Server {
             ca_bundle: Some(authority.to_path_buf()),
             ..self.aws()
         }
+    }
+
+    /// A `curl` bound to this server's REST facade.
+    pub fn rest(&self) -> Rest {
+        Rest {
+            endpoint: self.rest_endpoint.clone(),
+            token: Some(format!("{KEY_ID}.{SECRET}")),
+            ca_bundle: None,
+        }
+    }
+
+    /// The same, told to trust a certificate authority.
+    pub fn rest_trusting(&self, authority: &Path) -> Rest {
+        Rest {
+            ca_bundle: Some(authority.to_path_buf()),
+            ..self.rest()
+        }
+    }
+}
+
+/// What one HTTP exchange produced.
+#[derive(Debug)]
+pub struct Answer {
+    pub status: u16,
+
+    /// The parsed body, or `Null` when there was none or it was not JSON.
+    ///
+    /// Lenient on purpose: most of this API answers in JSON, but the documentation page
+    /// is HTML and a check on it should be able to assert a status without this refusing
+    /// to hand back an answer it could not parse.
+    pub body: Value,
+
+    /// The body exactly as it arrived.
+    pub text: String,
+}
+
+impl Answer {
+    /// The error `code`, for a response that carries this facade's error envelope.
+    pub fn code(&self) -> Option<&str> {
+        self.body.get("error")?.get("code")?.as_str()
+    }
+}
+
+/// `curl`, pointed at a NexQ server's REST facade.
+///
+/// The real `curl` rather than an HTTP client written here, for the same reason the SQS
+/// suite drives the real `aws` CLI: a check should be evidence about the protocol, not
+/// about our own understanding of it. It is also what a person reaching for the API would
+/// type first, so a check that passes here is a documented example that works.
+///
+/// Cloneable so a check can hand one to a thread — long polling needs a second client
+/// sending while the first is blocked.
+#[derive(Clone)]
+pub struct Rest {
+    endpoint: String,
+
+    /// `None` sends no `Authorization` header at all, for the auth checks.
+    token: Option<String>,
+
+    ca_bundle: Option<PathBuf>,
+}
+
+impl Rest {
+    /// The same client presenting a different token, or none.
+    pub fn with_token(&self, token: Option<&str>) -> Self {
+        Self {
+            token: token.map(str::to_owned),
+            ..self.clone()
+        }
+    }
+
+    pub fn get(&self, path: &str) -> Result<Answer, String> {
+        self.request("GET", path, None)
+    }
+
+    pub fn delete(&self, path: &str) -> Result<Answer, String> {
+        self.request("DELETE", path, None)
+    }
+
+    pub fn put(&self, path: &str, body: &Value) -> Result<Answer, String> {
+        self.request("PUT", path, Some(body))
+    }
+
+    pub fn post(&self, path: &str, body: &Value) -> Result<Answer, String> {
+        self.request("POST", path, Some(body))
+    }
+
+    pub fn patch(&self, path: &str, body: &Value) -> Result<Answer, String> {
+        self.request("PATCH", path, Some(body))
+    }
+
+    /// Send a body under a content type of your choosing.
+    ///
+    /// For the one check that needs to be wrong on purpose: `curl -d` without an explicit
+    /// header sends `application/x-www-form-urlencoded`, and what that is answered with is
+    /// part of the contract.
+    pub fn request_raw(
+        &self,
+        method: &str,
+        path: &str,
+        content_type: &str,
+        body: &str,
+    ) -> Result<Answer, String> {
+        self.send(method, path, Some((content_type, body)))
+    }
+
+    /// Send one request and read back its status and body.
+    ///
+    /// The status is asked for separately with `-w`, rather than parsed out of the headers,
+    /// so a check can assert on it without this having to understand HTTP framing.
+    pub fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Answer, String> {
+        let rendered = body.map(Value::to_string);
+
+        self.send(
+            method,
+            path,
+            rendered.as_deref().map(|body| ("application/json", body)),
+        )
+    }
+
+    fn send(&self, method: &str, path: &str, body: Option<(&str, &str)>) -> Result<Answer, String> {
+        let url = format!("{}{path}", self.endpoint);
+        let mut command = Command::new("curl");
+
+        command
+            .arg("--silent")
+            .arg("--show-error")
+            .arg("--request")
+            .arg(method)
+            // The status, then a separator, then nothing: the body is already on stdout,
+            // so this appends a line `curl` can produce and JSON cannot contain.
+            .arg("--write-out")
+            .arg("\n<<<status:%{http_code}")
+            .arg(&url);
+
+        if let Some(token) = &self.token {
+            command
+                .arg("--header")
+                .arg(format!("Authorization: Bearer {token}"));
+        }
+
+        if let Some((content_type, body)) = body {
+            command
+                .arg("--header")
+                .arg(format!("Content-Type: {content_type}"))
+                .arg("--data")
+                .arg(body);
+        }
+
+        if let Some(ca_bundle) = &self.ca_bundle {
+            // Told to trust the generated authority rather than to skip verification, so
+            // the chain has to actually check out for a check to pass.
+            command.arg("--cacert").arg(ca_bundle);
+        }
+
+        let output = command
+            .output()
+            .map_err(|error| format!("could not run curl: {error}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "curl {method} {url} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        let printed = String::from_utf8_lossy(&output.stdout).into_owned();
+        let (body, status) = printed
+            .rsplit_once("\n<<<status:")
+            .ok_or_else(|| format!("curl {method} {url}: no status in output: {printed}"))?;
+
+        let status: u16 = status
+            .trim()
+            .parse()
+            .map_err(|error| format!("curl {method} {url}: unreadable status: {error}"))?;
+
+        Ok(Answer {
+            status,
+            body: serde_json::from_str(body).unwrap_or(Value::Null),
+            text: body.to_owned(),
+        })
     }
 }
 

@@ -58,6 +58,9 @@ acceptance-cli: ## Drive a real server with the real aws CLI (needs the aws CLI 
 acceptance-node: ## Same, with the AWS SDK for JavaScript (needs Node.js installed)
 	$(CARGO) xtask acceptance-node
 
+acceptance-rest: ## Drive the REST facade with real curl (needs curl installed)
+	$(CARGO) xtask acceptance-rest
+
 # What is in here, and what is deliberately not:
 #
 # `openapi-check` is in, before `test`, so a change to the published contract arrives as
@@ -66,8 +69,8 @@ acceptance-node: ## Same, with the AWS SDK for JavaScript (needs Node.js install
 # most people run and the check should not depend on remembering this target.
 #
 # The acceptance suites are out. Each starts a server and waits out real long-poll
-# timeouts, so they take about a minute of wall clock apiece. CI runs them as their own
-# jobs, and `make acceptance-cli` / `make acceptance-node` run them here.
+# timeouts, so they take real wall clock apiece. CI runs them as their own jobs, and
+# `make acceptance-cli` / `make acceptance-node` / `make acceptance-rest` run them here.
 pre-commit: fmt-check clippy build openapi-check test doc ## Run every check CI runs
 	@echo "pre-commit: all checks passed"
 

@@ -99,3 +99,21 @@ jobs:
           cache: npm
           cache-dependency-path: acceptance/node/package-lock.json
       - run: cargo xtask acceptance-node
+
+  # Drives the REST facade with real `curl`, for the same reason the job above drives a
+  # real SDK: a check should be evidence about the protocol rather than agreement with our
+  # own understanding of it. It is also the only place `nexq-server` itself is exercised —
+  # everything else builds a router in-process and never reads a config or binds a port.
+  #
+  # `curl` is on the runner image already, and it negotiates HTTP/2 over TLS where the
+  # `aws` CLI does not, which is how it caught us advertising `h2` without serving it.
+  acceptance-rest:
+    name: curl acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: curl --version
+      - run: cargo xtask acceptance-rest
