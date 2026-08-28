@@ -12,6 +12,11 @@
 //! `All` is the opposite: it means "whatever you have", so it returns what exists and
 //! says nothing about what does not — the same answer real SQS gives for a message with
 //! no value for an attribute.
+//!
+//! One name here is NexQ's own rather than SQS's — `NexQ.Priority`, which is the only way
+//! an SQS client can read the priority of a message it did not send. It answers when it is
+//! **named** and is deliberately left out of `All`, so the response a client gets without
+//! asking for anything NexQ-specific stays exactly the shape real SQS returns.
 
 use std::collections::BTreeSet;
 
@@ -19,6 +24,7 @@ use nexq_core::model::{Message, epoch_millis};
 use serde_json::{Map, Value};
 
 use crate::error::ApiError;
+use crate::message_attributes;
 
 /// The deprecated parameter naming system attributes.
 const ATTRIBUTE_NAMES: &str = "AttributeNames";
@@ -46,9 +52,27 @@ enum Attribute {
     SentTimestamp,
     ApproximateReceiveCount,
     ApproximateFirstReceiveTimestamp,
+
+    /// NexQ's own, declared last so it renders after the SQS names.
+    Priority,
 }
 
-/// Every attribute this facade can report, which is what `All` selects.
+/// Every attribute a client may name.
+const KNOWN: [Attribute; 4] = [
+    Attribute::SentTimestamp,
+    Attribute::ApproximateReceiveCount,
+    Attribute::ApproximateFirstReceiveTimestamp,
+    Attribute::Priority,
+];
+
+/// What `All` selects: everything SQS itself would return, and nothing NexQ invented.
+///
+/// `Priority` is the one [`KNOWN`] attribute missing from this list, and the omission is
+/// the point. Every message has a priority, so including it would put a NexQ-only name on
+/// every response to `AttributeNames: ["All"]` — turning the shape of the *default* answer
+/// into something real SQS never sends, for the benefit of clients that did not ask.
+/// Naming it explicitly is a client saying it wants NexQ's extension, and that request is
+/// always answered.
 const REPORTABLE: [Attribute; 3] = [
     Attribute::SentTimestamp,
     Attribute::ApproximateReceiveCount,
@@ -69,13 +93,14 @@ impl Attribute {
             Self::SentTimestamp => "SentTimestamp",
             Self::ApproximateReceiveCount => "ApproximateReceiveCount",
             Self::ApproximateFirstReceiveTimestamp => "ApproximateFirstReceiveTimestamp",
+            // The same spelling a producer uses to *set* it, so one concept has one name
+            // however it is reached.
+            Self::Priority => message_attributes::PRIORITY,
         }
     }
 
     fn parse(name: &str) -> Option<Self> {
-        REPORTABLE
-            .into_iter()
-            .find(|attribute| attribute.name() == name)
+        KNOWN.into_iter().find(|attribute| attribute.name() == name)
     }
 
     /// This attribute's value for a message, or `None` when the message has none.
@@ -92,6 +117,11 @@ impl Attribute {
             Self::ApproximateFirstReceiveTimestamp => message
                 .first_received_at
                 .map(|first| epoch_millis(first).to_string()),
+            // Always present: a message always has a priority, even if nothing chose it.
+            // Reported whichever facade sent the message, which is the reason to answer it
+            // here at all — a message sent through REST carries no priority *attribute*
+            // for an SQS consumer to read.
+            Self::Priority => Some(message.priority.to_string()),
         }
     }
 }
@@ -223,6 +253,42 @@ mod tests {
     }
 
     #[test]
+    fn all_leaves_out_the_attribute_nexq_invented() {
+        // Deliberate: every message has a priority, so reporting it under `All` would put
+        // a name real SQS never sends on every response to a request that asked for
+        // "whatever you have".
+        let rendered = requested(json!({ "AttributeNames": ["All"] }))
+            .expect("all")
+            .render(&message());
+
+        assert!(
+            !rendered.contains_key(message_attributes::PRIORITY),
+            "{rendered:?}"
+        );
+    }
+
+    #[test]
+    fn priority_is_reported_when_it_is_named() {
+        // The point of answering it here rather than only as a message attribute: this
+        // message carries no priority attribute — it is what a message sent through REST
+        // looks like — and its priority is still readable.
+        let named = json!({ "AttributeNames": [message_attributes::PRIORITY] });
+
+        let urgent = Message {
+            priority: Priority::new(7),
+            ..message()
+        };
+
+        let rendered = requested(named.clone()).expect("named").render(&urgent);
+        assert_eq!(rendered[message_attributes::PRIORITY], "7");
+        assert_eq!(rendered.len(), 1, "and nothing else: {rendered:?}");
+
+        // Including the default, which is a value like any other rather than an absence.
+        let rendered = requested(named).expect("named").render(&message());
+        assert_eq!(rendered[message_attributes::PRIORITY], "0");
+    }
+
+    #[test]
     fn a_query_protocol_client_spells_all_as_a_pattern() {
         assert_eq!(
             requested(json!({ "AttributeNames": [".*"] })).expect(".*"),
@@ -280,6 +346,9 @@ mod tests {
             "DeadLetterQueueSourceArn",
             "NotAnAttributeAtAll",
             "senttimestamp",
+            // NexQ's own name is answered, but only spelled the one way it is defined.
+            "nexq.priority",
+            "NexQ.Priorty",
         ] {
             let error = requested(json!({ "AttributeNames": [name] })).expect_err(name);
 

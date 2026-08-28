@@ -15,12 +15,17 @@
 //! this facade accepts is one real SQS would have accepted. They matter more than most
 //! validation does: these attributes are covered by a checksum an SDK recomputes, so
 //! quietly altering a name or a value would make a client reject its own message.
+//!
+//! One name means something extra to NexQ: [`PRIORITY`], which is how a client that can
+//! only speak SQS chooses a message's priority. It is read **and kept** — see that
+//! constant for why keeping it is not optional. Every other name under the same
+//! namespace is refused, so a misspelling of it cannot pass as ordinary metadata.
 
 use std::collections::BTreeSet;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use nexq_core::model::{AttributeValue, MessageAttribute, MessageAttributes};
+use nexq_core::model::{AttributeValue, MessageAttribute, MessageAttributes, Priority};
 use serde_json::{Map, Value};
 
 use crate::error::ApiError;
@@ -43,6 +48,33 @@ const PREFIX_SUFFIX: &str = ".*";
 
 /// Prefixes AWS reserves for itself, in any casing.
 const RESERVED_PREFIXES: [&str; 2] = ["aws.", "amazon."];
+
+/// The attribute a producer sets to choose a message's priority — NexQ's own extension,
+/// and the only way to express priority through a protocol that has no field for it.
+///
+/// **Read and then kept**, not consumed. An SDK checksums the attributes it sent and
+/// compares the digest against `MD5OfMessageAttributes` in the response, so an attribute
+/// the server quietly removed would make a client reject a message that was in fact
+/// stored correctly. Keeping it also means a consumer sees exactly what the producer
+/// wrote, and that it counts against SQS's ten-attribute and message-size limits like any
+/// other attribute — it is the producer's data that NexQ additionally reads, rather than a
+/// control channel pretending to be data.
+///
+/// Named as a NexQ-namespaced attribute the way AWS namespaces its own with `aws.`, which
+/// is what makes the whole `nexq.` namespace reservable: a client that types
+/// `nexq.priorty` is told the right spelling instead of having its message silently stored
+/// at the default.
+pub const PRIORITY: &str = "NexQ.Priority";
+
+/// The namespace NexQ reserves for itself, in any casing, mirroring AWS's own reservation.
+///
+/// Reserved rather than merely used: the alternative is that every misspelling of a
+/// well-known name is an ordinary attribute the server ignores, which is the one failure
+/// mode a producer cannot see from the response.
+const NEXQ_PREFIX: &str = "nexq.";
+
+/// Every name under [`NEXQ_PREFIX`] that means something, and so is allowed.
+const WELL_KNOWN: [&str; 1] = [PRIORITY];
 
 /// The three logical data types, which a data type must be or extend.
 const DATA_TYPES: [&str; 3] = ["String", "Number", "Binary"];
@@ -255,7 +287,58 @@ fn check_name(name: &str) -> Result<(), ApiError> {
         ));
     }
 
+    // NexQ's own namespace, checked case-insensitively so `nexq.priority` is refused
+    // rather than accepted as a different attribute from `NexQ.Priority`. Names are
+    // case-sensitive on the wire and the value is checksummed, so the facade honours one
+    // spelling and tells a client which.
+    if lowercased.starts_with(NEXQ_PREFIX) && !WELL_KNOWN.contains(&name) {
+        return invalid(format!(
+            "Message attribute name {name:?} is in the {NEXQ_PREFIX:?} namespace, which \
+             NexQ reserves. The names it defines are: {}.",
+            WELL_KNOWN.join(", ")
+        ));
+    }
+
     Ok(())
+}
+
+/// The priority a message's attributes ask for.
+///
+/// [`Priority::DEFAULT`] when [`PRIORITY`] is absent, so a message from a client that
+/// knows nothing about NexQ behaves exactly as it does today.
+///
+/// A value that is not a whole number is **refused rather than defaulted**: a producer
+/// that set a priority and got the default would have its urgency silently dropped, which
+/// is worse than a rejected send it can see and fix. Any textual attribute is accepted —
+/// `Number` is the type to use, but a client that sends the digits as a `String` has said
+/// the same thing unambiguously, so refusing it would be pedantry. `Binary` is not
+/// textual and is refused.
+pub fn priority(attributes: &MessageAttributes) -> Result<Priority, ApiError> {
+    let Some(attribute) = attributes.get(PRIORITY) else {
+        return Ok(Priority::DEFAULT);
+    };
+
+    let invalid = |detail: String| {
+        Err(ApiError::invalid_parameter_value(format!(
+            "Message attribute {PRIORITY:?} sets a message's priority, so {detail}"
+        )))
+    };
+
+    let AttributeValue::Text(text) = &attribute.value else {
+        return invalid("it must carry a StringValue and not a BinaryValue.".to_owned());
+    };
+
+    match text.parse::<i32>() {
+        Ok(priority) => Ok(Priority::new(priority)),
+        // The bounds are named because they are the ones a client will hit: SQS's
+        // `Number` type permits any finite decimal, so `1.5` and `3e9` both arrive here
+        // having passed every other check.
+        Err(_) => invalid(format!(
+            "{text:?} must be a whole number between {} and {}.",
+            Priority::MIN,
+            Priority::MAX
+        )),
+    }
 }
 
 /// Read one attribute's data type and value.
@@ -570,6 +653,125 @@ mod tests {
         let too_long = "n".repeat(MAX_NAME_LEN + 1);
         parsed(json!({ too_long: { "DataType": "String", "StringValue": "v" } }))
             .expect_err("too long");
+    }
+
+    #[test]
+    fn nexqs_own_namespace_is_reserved_the_way_awss_is() {
+        // The point of reserving it: a misspelled well-known name is the one mistake a
+        // producer cannot see in the response, since the message is stored and sent —
+        // just at the wrong priority.
+        for (name, why) in [
+            ("nexq.priority", "the wrong casing"),
+            ("NexQ.Priorty", "a typo"),
+            ("NEXQ.PRIORITY", "shouting"),
+            ("nexq.whatever", "a name NexQ does not define"),
+        ] {
+            let error = parsed(json!({ name: { "DataType": "Number", "StringValue": "1" } }))
+                .expect_err(why);
+
+            assert_eq!(error.code(), "InvalidParameterValue", "{name:?}: {why}");
+            assert!(
+                error.message().contains(PRIORITY),
+                "the error should name the spelling that works: {}",
+                error.message()
+            );
+        }
+
+        // And the names it does define are allowed, or the reservation would be a wall.
+        for name in WELL_KNOWN {
+            parsed(json!({ name: { "DataType": "Number", "StringValue": "1" } }))
+                .unwrap_or_else(|error| panic!("{name:?} must be allowed: {error:?}"));
+        }
+
+        // Only as a prefix, matching how `aws.` behaves: an attribute merely mentioning
+        // NexQ is the producer's own business.
+        for name in ["nexq", "nexqpriority", "NexQPriority", "my.nexq.thing"] {
+            parsed(json!({ name: { "DataType": "String", "StringValue": "v" } }))
+                .unwrap_or_else(|error| panic!("{name:?} should be allowed: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn priority_comes_from_the_well_known_attribute() {
+        let attributes = parsed(json!({
+            PRIORITY: { "DataType": "Number", "StringValue": "10" },
+        }))
+        .expect("valid");
+
+        assert_eq!(
+            priority(&attributes).expect("a priority"),
+            Priority::new(10)
+        );
+        assert!(
+            attributes.contains_key(PRIORITY),
+            "and it stays on the message: an SDK checksums what it sent"
+        );
+    }
+
+    #[test]
+    fn a_message_with_no_priority_attribute_takes_the_default() {
+        // The property the whole feature rests on: a client that knows nothing about
+        // NexQ behaves exactly as it did before.
+        assert_eq!(
+            priority(&MessageAttributes::new()).expect("default"),
+            Priority::DEFAULT
+        );
+
+        let attributes =
+            parsed(json!({ "City": { "DataType": "String", "StringValue": "x" } })).expect("valid");
+        assert_eq!(priority(&attributes).expect("default"), Priority::DEFAULT);
+    }
+
+    #[test]
+    fn a_priority_may_be_negative_or_at_the_extremes() {
+        for value in ["-1", "0", "-2147483648", "2147483647"] {
+            let attributes =
+                parsed(json!({ PRIORITY: { "DataType": "Number", "StringValue": value } }))
+                    .expect(value);
+
+            assert_eq!(
+                priority(&attributes).expect(value).get(),
+                value.parse::<i32>().expect("test value"),
+            );
+        }
+    }
+
+    #[test]
+    fn digits_sent_as_a_string_say_the_same_thing() {
+        // `Number` is the type to use, but a `String` of digits is unambiguous, and a
+        // client is not always in charge of how its framework types an attribute.
+        let attributes =
+            parsed(json!({ PRIORITY: { "DataType": "String", "StringValue": "7" } })).expect("v");
+
+        assert_eq!(priority(&attributes).expect("a priority"), Priority::new(7));
+    }
+
+    #[test]
+    fn a_priority_that_is_not_a_whole_number_is_refused_rather_than_defaulted() {
+        // Every one of these passes SQS's own attribute validation — `Number` permits any
+        // finite decimal — so this check is the only thing between a producer that asked
+        // for urgency and a message quietly stored at the default.
+        for value in ["1.5", "3e9", "9999999999", "-9999999999", " 1", "high"] {
+            let attributes =
+                parsed(json!({ PRIORITY: { "DataType": "String", "StringValue": value } }))
+                    .expect("a valid attribute");
+
+            let error = priority(&attributes).expect_err(value);
+            assert_eq!(error.code(), "InvalidParameterValue", "{value:?}");
+            assert!(error.message().contains(PRIORITY), "{}", error.message());
+        }
+    }
+
+    #[test]
+    fn a_binary_priority_is_refused() {
+        let attributes =
+            parsed(json!({ PRIORITY: { "DataType": "Binary", "BinaryValue": "MQ==" } }))
+                .expect("a valid attribute");
+
+        assert_eq!(
+            priority(&attributes).expect_err("binary").code(),
+            "InvalidParameterValue"
+        );
     }
 
     #[test]

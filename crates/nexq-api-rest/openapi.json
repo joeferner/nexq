@@ -450,7 +450,7 @@
     "/api/v1/queues/{queue}/messages": {
       "post": {
         "summary": "Send messages to a queue",
-        "description": "Takes a **list**, always. Sending one message is a list of one — there is no separate batch operation to choose between, which is one fewer thing to get wrong than the SQS pair it replaces.\n\nNot a transaction. Each message is accepted or refused on its own and the response reports both, so nine good messages are not lost to one bad one. The request itself is a `200` in that case, so **read the results** rather than relying on an error being raised. Entries are identified by their position in the request, so unlike SQS there are no ids to supply and no duplicate-id failure.\n\n`priority` is NexQ's own and one of the reasons this API exists: the SQS-compatible facade cannot express it, so messages sent through that one all arrive at the default. Higher is served first.\n\nA queue that does not exist is one raised `404` rather than the same failure repeated in every entry, because the queue belongs to the request and not to any message in it.",
+        "description": "Takes a **list**, always. Sending one message is a list of one — there is no separate batch operation to choose between, which is one fewer thing to get wrong than the SQS pair it replaces.\n\nNot a transaction. Each message is accepted or refused on its own and the response reports both, so nine good messages are not lost to one bad one. The request itself is a `200` in that case, so **read the results** rather than relying on an error being raised. Entries are identified by their position in the request, so unlike SQS there are no ids to supply and no duplicate-id failure.\n\n`priority` is NexQ's own and one of the reasons this API exists. Higher is served first, and omitting it means the middle of the road. SQS has no field for it, so a client on that facade has to carry it as a `NexQ.Priority` message attribute; here it is an ordinary field, and it is reported back on receive.\n\nA queue that does not exist is one raised `404` rather than the same failure repeated in every entry, because the queue belongs to the request and not to any message in it.",
         "operationId": "sendMessages",
         "parameters": [
           {
@@ -1594,7 +1594,7 @@
             "type": "string"
           },
           "priority": {
-            "description": "Higher is served first. Messages sent through the SQS facade all carry the\n default, since that protocol cannot express a priority.",
+            "description": "Higher is served first. Reported for every message, including one sent through the\n SQS facade, which has no field for priority and carries it as an attribute instead.",
             "type": "integer",
             "format": "int32"
           },
@@ -1641,7 +1641,7 @@
         "type": "object",
         "properties": {
           "attributes": {
-            "description": "Metadata to carry alongside the body, keyed by name.",
+            "description": "Metadata to carry alongside the body, keyed by name.\n\n Names beginning `nexq.` are reserved and refused: the SQS-compatible facade reads\n `NexQ.Priority` out of this map because its protocol has no field for a priority,\n and here there is one — so an attribute in that namespace could only contradict it.",
             "type": [
               "object",
               "null"
@@ -1667,7 +1667,7 @@
             "minimum": 0
           },
           "priority": {
-            "description": "Higher is served first; defaults to the middle of the road.\n\n NexQ's own concept, and one of the reasons this API exists: the SQS-compatible\n facade cannot express it, so messages sent through that one all arrive at the\n default.",
+            "description": "Higher is served first; defaults to the middle of the road.\n\n NexQ's own concept, and one of the reasons this API exists: SQS has no field for\n it, so a client on that facade has to smuggle it through a `NexQ.Priority` message\n attribute. Here it is what it is — a field.",
             "type": [
               "integer",
               "null"

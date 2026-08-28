@@ -46,6 +46,19 @@ use crate::server::FacadeState;
 /// through the other and client code moving between them does not have to change.
 pub const MAX_MESSAGES_PER_SEND: usize = 10;
 
+/// The attribute namespace NexQ reserves, in any casing.
+///
+/// Reserved here even though this facade has a real `priority` field, for two reasons.
+/// The SQS facade *reads* `NexQ.Priority` out of this map, since its protocol has nowhere
+/// else to carry a priority — so a message sent here with both a `priority` of 1 and an
+/// attribute saying 10 would tell two different stories to two consumers. And an
+/// attribute set here is meant to survive a round trip through that facade, which refuses
+/// these names; accepting one would produce metadata that cannot make the trip.
+///
+/// `the_two_facades_reserve_the_same_namespace` in `tests/cross_facade.rs` keeps this
+/// equal to the AWS facade's own reservation.
+const RESERVED_ATTRIBUTE_PREFIX: &str = "nexq.";
+
 /// What kind of value an attribute carries.
 ///
 /// Three kinds, matching what the SQS facade accepts, so an attribute set here survives a
@@ -94,9 +107,9 @@ pub struct SendMessageBody {
 
     /// Higher is served first; defaults to the middle of the road.
     ///
-    /// NexQ's own concept, and one of the reasons this API exists: the SQS-compatible
-    /// facade cannot express it, so messages sent through that one all arrive at the
-    /// default.
+    /// NexQ's own concept, and one of the reasons this API exists: SQS has no field for
+    /// it, so a client on that facade has to smuggle it through a `NexQ.Priority` message
+    /// attribute. Here it is what it is — a field.
     #[serde(default)]
     pub priority: Option<i32>,
 
@@ -108,6 +121,10 @@ pub struct SendMessageBody {
     pub delay_seconds: Option<u64>,
 
     /// Metadata to carry alongside the body, keyed by name.
+    ///
+    /// Names beginning `nexq.` are reserved and refused: the SQS-compatible facade reads
+    /// `NexQ.Priority` out of this map because its protocol has no field for a priority,
+    /// and here there is one — so an attribute in that namespace could only contradict it.
     #[serde(default)]
     pub attributes: Option<std::collections::BTreeMap<String, MessageAttributeBody>>,
 }
@@ -277,8 +294,8 @@ pub struct ReceivedMessage {
     /// The message body, exactly as it was sent.
     pub body: String,
 
-    /// Higher is served first. Messages sent through the SQS facade all carry the
-    /// default, since that protocol cannot express a priority.
+    /// Higher is served first. Reported for every message, including one sent through the
+    /// SQS facade, which has no field for priority and carries it as an attribute instead.
     pub priority: i32,
 
     /// How many times this message has been delivered, counting this delivery.
@@ -442,6 +459,19 @@ impl SendMessageBody {
                 return Err(ApiError::bad_request(
                     "invalid_message_attribute",
                     "an attribute name must not be empty",
+                ));
+            }
+
+            if name
+                .to_ascii_lowercase()
+                .starts_with(RESERVED_ATTRIBUTE_PREFIX)
+            {
+                return Err(ApiError::bad_request(
+                    "invalid_message_attribute",
+                    format!(
+                        "attribute {name:?} is in the {RESERVED_ATTRIBUTE_PREFIX:?} namespace, \
+                         which NexQ reserves; set the message's `priority` instead"
+                    ),
                 ));
             }
 
@@ -833,9 +863,11 @@ pub fn send_docs(operation: TransformOperation) -> TransformOperation {
              relying on an error being raised. Entries are identified by their position in \
              the request, so unlike SQS there are no ids to supply and no duplicate-id \
              failure.\n\n\
-             `priority` is NexQ's own and one of the reasons this API exists: the \
-             SQS-compatible facade cannot express it, so messages sent through that one all \
-             arrive at the default. Higher is served first.\n\n\
+             `priority` is NexQ's own and one of the reasons this API exists. Higher is \
+             served first, and omitting it means the middle of the road. SQS has no field \
+             for it, so a client on that facade has to carry it as a `NexQ.Priority` \
+             message attribute; here it is an ordinary field, and it is reported back on \
+             receive.\n\n\
              A queue that does not exist is one raised `404` rather than the same failure \
              repeated in every entry, because the queue belongs to the request and not to \
              any message in it.",
@@ -1158,6 +1190,40 @@ mod tests {
             }
             .to_attribute("Label")
             .expect_err(&format!("{label:?} must be refused"));
+        }
+    }
+
+    /// Sending, with an attribute map to validate.
+    fn send_body(json: &str) -> SendMessageBody {
+        serde_json::from_str(json).expect("parses")
+    }
+
+    #[test]
+    fn an_attribute_in_nexqs_own_namespace_is_refused() {
+        // The SQS facade reads `NexQ.Priority` out of this map because its protocol has
+        // nowhere else to put a priority. Accepting one here — where `priority` is a real
+        // field — would let a message carry two different answers.
+        for name in ["NexQ.Priority", "nexq.priority", "nexq.anything"] {
+            let error = send_body(&format!(
+                r#"{{"body":"x","attributes":{{"{name}":{{"type":"number","value":"10"}}}}}}"#
+            ))
+            .parts()
+            .expect_err(name);
+
+            assert_eq!(error.code(), "invalid_message_attribute", "{name}");
+            assert!(error.message().contains("priority"), "{}", error.message());
+        }
+    }
+
+    #[test]
+    fn the_reservation_is_a_prefix_and_not_a_word() {
+        // Only followed by a period, the way AWS's own `aws.` reservation works.
+        for name in ["nexq", "NexQPriority", "my.nexq.thing"] {
+            send_body(&format!(
+                r#"{{"body":"x","attributes":{{"{name}":{{"type":"string","value":"v"}}}}}}"#
+            ))
+            .parts()
+            .unwrap_or_else(|error| panic!("{name:?} should be allowed: {error:?}"));
         }
     }
 

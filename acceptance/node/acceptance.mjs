@@ -258,6 +258,55 @@ async function messageAttributes() {
   equal(message.Attributes?.ApproximateReceiveCount, "1", "ApproximateReceiveCount");
 }
 
+// Priority, set by an SDK that has never heard of NexQ.
+//
+// Here rather than only in the CLI suite because this is the client that would *notice*
+// the tempting shortcut: NexQ reads the `NexQ.Priority` attribute and leaves it on the
+// message, and had it consumed the attribute instead, this SDK's MD5 middleware would
+// throw `Invalid MD5 checksum on messages` — the digest would cover a different set of
+// attributes from the one it sent.
+async function priorityWithChecksumValidation() {
+  const url = await queue("node-priority");
+
+  // Least urgent first, so first-in-first-out would return them in this order.
+  for (const [body, priority] of [
+    ["later", "-5"],
+    ["urgent", "10"],
+  ]) {
+    await client.send(
+      new SendMessageCommand({
+        QueueUrl: url,
+        MessageBody: body,
+        MessageAttributes: {
+          "NexQ.Priority": { DataType: "Number", StringValue: priority },
+        },
+      }),
+    );
+  }
+
+  const received = await client.send(
+    new ReceiveMessageCommand({
+      QueueUrl: url,
+      MaxNumberOfMessages: 2,
+      MessageAttributeNames: ["All"],
+      MessageSystemAttributeNames: ["NexQ.Priority"],
+    }),
+  );
+
+  equal(received.Messages?.length, 2, "messages returned");
+  equal(received.Messages[0].Body, "urgent", "the urgent message is served first");
+  equal(
+    received.Messages[0].Attributes?.["NexQ.Priority"],
+    "10",
+    "priority read back as a system attribute",
+  );
+  equal(
+    received.Messages[0].MessageAttributes?.["NexQ.Priority"]?.StringValue,
+    "10",
+    "the producer's own attribute, kept rather than consumed",
+  );
+}
+
 async function queueAttributesAndVisibility() {
   const url = await queue("node-queue-attrs");
 
@@ -308,6 +357,7 @@ const checks = [
   ["long polling", longPolling],
   ["the SDK's paginator", pagination],
   ["message attributes", messageAttributes],
+  ["priority, with MD5 validation", priorityWithChecksumValidation],
   ["queue attributes and visibility", queueAttributesAndVisibility],
 ];
 

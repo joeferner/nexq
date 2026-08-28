@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
-use nexq_core::model::{MAX_BODY_BYTES, MessageCounts, Priority, Queue, QueueName, ReceiptHandle};
+use nexq_core::model::{MAX_BODY_BYTES, MessageCounts, Queue, QueueName, ReceiptHandle};
 use serde_json::{Map, Value, json};
 use tracing::info;
 
@@ -239,12 +239,15 @@ impl Operations {
             ],
         )?;
 
-        // Priority is NexQ's own idea and SQS has no way to express it, so anything
-        // arriving through this facade takes the default. The REST API is where a
-        // client chooses.
+        // Priority is NexQ's own idea and SQS has no field for it, so it travels as a
+        // well-known message attribute — read here and left on the message, since an SDK
+        // checksums the attributes it sent. Absent, it is the default, which is what
+        // keeps a client that knows nothing about NexQ behaving as it always has.
+        let priority = message_attributes::priority(&message_attributes)?;
+
         let message = self
             .engine
-            .enqueue(queue, body, Priority::DEFAULT, message_attributes, delay)
+            .enqueue(queue, body, priority, message_attributes, delay)
             .await?;
 
         let mut output = json!({
@@ -2596,6 +2599,253 @@ mod tests {
 
         // First receive, so this is the same delivery that is happening now.
         assert!(attributes.contains_key("ApproximateFirstReceiveTimestamp"));
+    }
+
+    /// One send, one message attribute: `NexQ.Priority` at the given value.
+    fn with_priority(url: &Value, body: &str, priority: &str) -> Value {
+        json!({
+            "QueueUrl": url,
+            "MessageBody": body,
+            "MessageAttributes": {
+                message_attributes::PRIORITY: { "DataType": "Number", "StringValue": priority },
+            },
+        })
+    }
+
+    /// The claim this feature exists for: an *unmodified* SQS client can choose a
+    /// message's priority, and the engine serves the urgent one first.
+    #[tokio::test]
+    async fn a_well_known_attribute_lets_an_sqs_client_set_priority() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        // Sent in the order that makes ordering the only explanation for the result: the
+        // low-priority message is enqueued first, so first-in-first-out would return it.
+        for (body, priority) in [("later", "-5"), ("urgent", "10"), ("normal", "0")] {
+            call(
+                &operations,
+                Operation::SendMessage,
+                with_priority(&url, body, priority),
+            )
+            .await
+            .expect(body);
+        }
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MaxNumberOfMessages": 3 }),
+        )
+        .await
+        .expect("receive");
+
+        let bodies: Vec<&str> = received["Messages"]
+            .as_array()
+            .expect("three messages")
+            .iter()
+            .map(|message| message["Body"].as_str().expect("a body"))
+            .collect();
+
+        assert_eq!(bodies, ["urgent", "normal", "later"]);
+    }
+
+    /// Kept, not consumed — and this is the test that says why: the digest an SDK computes
+    /// over what it sent must still match what the server reports.
+    #[tokio::test]
+    async fn the_priority_attribute_stays_on_the_message() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        let sent = call(
+            &operations,
+            Operation::SendMessage,
+            with_priority(&url, "hello", "10"),
+        )
+        .await
+        .expect("send");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url, "MessageAttributeNames": ["All"] }),
+        )
+        .await
+        .expect("receive");
+        let message = &received["Messages"][0];
+
+        assert_eq!(
+            message["MessageAttributes"][message_attributes::PRIORITY],
+            json!({ "DataType": "Number", "StringValue": "10" }),
+            "a consumer sees exactly what the producer wrote"
+        );
+        assert_eq!(
+            message["MD5OfMessageAttributes"], sent["MD5OfMessageAttributes"],
+            "and the digest matches the one the SDK computed over what it sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn priority_is_readable_as_a_system_attribute_but_not_under_all() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        call(
+            &operations,
+            Operation::SendMessage,
+            with_priority(&url, "hello", "10"),
+        )
+        .await
+        .expect("send");
+
+        let receive = |names: Value| {
+            call(
+                &operations,
+                Operation::ReceiveMessage,
+                json!({
+                    "QueueUrl": url,
+                    "VisibilityTimeout": 0,
+                    "MessageSystemAttributeNames": names,
+                }),
+            )
+        };
+
+        let named = receive(json!([message_attributes::PRIORITY]))
+            .await
+            .expect("named");
+        assert_eq!(
+            named["Messages"][0]["Attributes"][message_attributes::PRIORITY],
+            "10"
+        );
+
+        // `All` means "whatever SQS would give you", which is why NexQ's own name is not
+        // in it — a client gets the extension by asking for it.
+        let all = receive(json!(["All"])).await.expect("all");
+        let attributes = all["Messages"][0]["Attributes"]
+            .as_object()
+            .expect("attributes");
+        assert!(
+            !attributes.contains_key(message_attributes::PRIORITY),
+            "{attributes:?}"
+        );
+    }
+
+    /// The counterpart for a message that carries no priority attribute at all, which is
+    /// what everything sent through the REST facade looks like from here.
+    #[tokio::test]
+    async fn the_priority_of_a_message_sent_elsewhere_is_still_readable() {
+        let operations = operations();
+        let url = queue(&operations).await;
+        let name = QueueName::new("jobs").expect("valid");
+
+        operations
+            .engine
+            .enqueue(
+                &name,
+                "from rest".to_owned(),
+                nexq_core::model::Priority::new(3),
+                nexq_core::model::MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({
+                "QueueUrl": url,
+                "MessageSystemAttributeNames": [message_attributes::PRIORITY],
+                "MessageAttributeNames": ["All"],
+            }),
+        )
+        .await
+        .expect("receive");
+        let message = &received["Messages"][0];
+
+        assert_eq!(message["Attributes"][message_attributes::PRIORITY], "3");
+        assert!(
+            message["MessageAttributes"].is_null(),
+            "nothing is fabricated in the producer's own map: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_priority_that_is_not_a_whole_number_refuses_the_send() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        // `1.5` passes every SQS rule — `Number` permits any finite decimal — so this is
+        // NexQ's own refusal, and it must leave the queue empty rather than storing the
+        // message at a priority nobody asked for.
+        let error = call(
+            &operations,
+            Operation::SendMessage,
+            with_priority(&url, "hello", "1.5"),
+        )
+        .await
+        .expect_err("not a whole number");
+
+        assert_eq!(error.code(), "InvalidParameterValue");
+        assert!(
+            error.message().contains(message_attributes::PRIORITY),
+            "{}",
+            error.message()
+        );
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+        assert!(received["Messages"].is_null(), "nothing was stored");
+    }
+
+    /// Batches run the same send path, and this is what proves it rather than assuming it.
+    #[tokio::test]
+    async fn a_batch_entry_may_set_its_own_priority() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        call(
+            &operations,
+            Operation::SendMessageBatch,
+            json!({
+                "QueueUrl": url,
+                "Entries": [
+                    {
+                        "Id": "slow",
+                        "MessageBody": "later",
+                        "MessageAttributes": {
+                            message_attributes::PRIORITY: {
+                                "DataType": "Number", "StringValue": "-1",
+                            },
+                        },
+                    },
+                    {
+                        "Id": "fast",
+                        "MessageBody": "urgent",
+                        "MessageAttributes": {
+                            message_attributes::PRIORITY: {
+                                "DataType": "Number", "StringValue": "1",
+                            },
+                        },
+                    },
+                ],
+            }),
+        )
+        .await
+        .expect("send batch");
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({ "QueueUrl": url }),
+        )
+        .await
+        .expect("receive");
+
+        assert_eq!(received["Messages"][0]["Body"], "urgent");
     }
 
     #[tokio::test]

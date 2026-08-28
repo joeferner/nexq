@@ -77,10 +77,10 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 
 ## Message operations
 
-- :white_check_mark: `SendMessage` — body, `DelaySeconds`, and `MessageAttributes`.
-  `MessageGroupId`, `MessageDeduplicationId`, and `MessageSystemAttributes` are refused
-  rather than dropped, so a client is never told a message was stored with data that was
-  thrown away
+- :white_check_mark: `SendMessage` — body, `DelaySeconds`, and `MessageAttributes`,
+  including the `NexQ.Priority` attribute described below. `MessageGroupId`,
+  `MessageDeduplicationId`, and `MessageSystemAttributes` are refused rather than dropped,
+  so a client is never told a message was stored with data that was thrown away
 - :white_check_mark: `ReceiveMessage` — `MaxNumberOfMessages`, a per-request
   `VisibilityTimeout`, and `WaitTimeSeconds` up to 20 seconds. Omitting the wait falls
   back to the queue's `ReceiveMessageWaitTimeSeconds`
@@ -89,6 +89,17 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
   Query protocol's `.*` both understood: `SentTimestamp`, `ApproximateReceiveCount`, and
   `ApproximateFirstReceiveTimestamp`. `SenderId` needs a sending principal NexQ does not
   record yet, so naming it is refused rather than answered with a placeholder
+- :white_check_mark: **Per-message priority**, NexQ's own extension, as the well-known
+  `NexQ.Priority` message attribute — a whole number, higher served first, absent meaning
+  the middle of the road. It is **read and kept**, not consumed: an SDK checksums the
+  attributes it sent, so an attribute the server removed would make a client reject a
+  message that was stored correctly. A value that is not a whole number refuses the send
+  rather than quietly defaulting, and the `nexq.` namespace is reserved in any casing, so
+  `nexq.priorty` is an error naming the right spelling instead of an attribute nobody
+  reads. On receive the *effective* priority — including that of a message sent through
+  REST, which carries no such attribute — is answered as a system attribute of the same
+  name, and **only when it is named**: `All` returns what real SQS returns, so a client
+  that did not ask for the extension never sees it
 - :white_check_mark: `DeleteMessage`, with `ReceiptHandleIsInvalid` on a spent handle
 - :white_check_mark: `MD5OfMessageBody` on send and `MD5OfBody` on receive — SDKs
   verify these, so they are correctness, not decoration
@@ -117,8 +128,6 @@ queueing behavior; it translates AWS's wire format to and from the core engine.
 
 - FIFO queues. A `.fifo` name is rejected rather than accepted, so no client is left
   believing it has ordering guarantees that do not exist
-- Per-message priority through this facade — SQS has no way to express it, so messages
-  sent here take the default priority. The REST API is where priority lives
 - Access policies: `AddPermission`, `RemovePermission`, and the `Policy` attribute.
   Supporting them means evaluating IAM policy documents, which is a second
   authorization model beside NexQ's own credential registry — and two models deciding
@@ -358,6 +367,55 @@ that really is one; and no empty values. Names, types, and values all count towa
 
 `list-queues` printing nothing means there are no queues — the same as real SQS, which
 omits the field rather than returning an empty list.
+
+## Setting a priority
+
+Priority is NexQ's own idea, and SQS has no field for it. So it travels as one well-known
+message attribute — which means an unmodified `aws` CLI or SDK can set it, with no plugin
+and no second protocol:
+
+```sh
+aws sqs send-message --queue-url "$QUEUE" --message-body "urgent work" \
+  --message-attributes 'NexQ.Priority={DataType=Number,StringValue=10}'
+
+aws sqs send-message --queue-url "$QUEUE" --message-body "whenever" \
+  --message-attributes 'NexQ.Priority={DataType=Number,StringValue=-5}'
+
+# Higher is served first, so "urgent work" comes back first even though the two were
+# sent in the other order.
+aws sqs receive-message --queue-url "$QUEUE" --max-number-of-messages 10
+```
+
+Any whole number, positive or negative; omitting it means the middle of the road, which
+is why every message from a client that knows nothing about NexQ keeps behaving as it
+always has. `String` works as well as `Number` — the digits are unambiguous either way —
+but a value that is not a whole number **refuses the send** rather than quietly falling
+back to the default, because a producer that asked for urgency and silently did not get
+it has no way to find out.
+
+The attribute is read and then **kept**: it stays on the message, counts towards the ten
+attributes and the size limit like any other, and is returned to consumers that ask for
+it. That is not incidental — an SDK checksums the attributes it sent and compares them
+against `MD5OfMessageAttributes`, so an attribute the server had quietly removed would
+make the client reject a message that was in fact stored correctly.
+
+To read a message's *effective* priority — including one sent through the REST API, which
+has a real field for it and so carries no attribute — name it as a system attribute:
+
+```sh
+aws sqs receive-message --queue-url "$QUEUE" \
+  --message-system-attribute-names NexQ.Priority
+# "Attributes": { "NexQ.Priority": "10" }
+```
+
+It answers only when named. `--message-system-attribute-names All` deliberately does not
+include it: `All` returns what real SQS returns, so a client that did not ask for NexQ's
+extension never receives a name AWS has never heard of.
+
+The `nexq.` prefix is reserved in any casing, the way AWS reserves `AWS.` and `Amazon.`.
+That is what makes a typo visible: `nexq.priorty` is refused with an error naming the
+spelling that works, rather than being stored as an ordinary attribute nobody reads while
+the message goes out at the default priority.
 
 ## Inspecting and reconfiguring a queue
 

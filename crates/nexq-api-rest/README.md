@@ -14,8 +14,9 @@ and [`openapi.json`](openapi.json) is generated from them rather than written.
 > create, read, list, reconfigure and delete a queue; send, receive, delete, re-time and
 > purge messages — so a producer and a consumer can now run entirely against this API.
 > What is still missing is the *extended* feature set this facade exists for: position in
-> queue, dead-letter queues, and redrive. Per-message priority is here already, since the
-> SQS-compatible facade cannot express it at all. See [`todo.md`](../../todo.md) M9 and M10.
+> queue, dead-letter queues, and redrive. Per-message priority is here already, as a plain
+> field — the SQS-compatible facade has to carry it as a message attribute, because its
+> protocol has nowhere else to put it. See [`todo.md`](../../todo.md) M9 and M10.
 
 # Features
 
@@ -120,8 +121,9 @@ The collection is `/api/v1/queues/{queue}/messages`; one claim is
 - :white_check_mark: **Message attributes** on send and receive — `string`, `number`, and
   `binary`, with the producer's own label. Binary travels base64 and is stored as the bytes
   it decodes to, which is what makes the SQS facade's checksum of it come out right
-- :white_check_mark: **Per-message priority** on send, which the SQS facade cannot express —
-  messages sent through that one all arrive at the default
+- :white_check_mark: **Per-message priority** on send and on receive, as a field. SQS has no
+  field for it, so that facade reads a `NexQ.Priority` message attribute instead; the value
+  is the same one, since both facades are one engine
 - :white_check_mark: Long polling, on the **same** in-process waiter registry the SQS facade
   uses — one mechanism with two protocol faces, not two implementations. A send through
   either facade wakes a consumer waiting on the other
@@ -299,15 +301,20 @@ works through the other.
 
 ### Attributes and priority
 
-`priority` is NexQ's own — the SQS-compatible facade cannot express it, so messages sent
-through that one all arrive at the default. Higher is served first, which is why the receive
-below returns `urgent work` first despite it being sent first only by coincidence.
+`priority` is NexQ's own — a field here, and a `NexQ.Priority` message attribute on the
+SQS-compatible facade, which has nowhere else to put it. Omitted, it is the middle of the
+road. Higher is served first, which is why the receive below returns `urgent work` first
+despite it being sent first only by coincidence.
 
 Attributes are `string`, `number`, or `binary`, with an optional label of the producer's own
 (`{"type": "string", "label": "uuid", ...}` is stored the way SQS spells `String.uuid`, so
 that facade reports it correctly). A `binary` value travels base64 and is **stored as the
 bytes it decodes to** — text that happens to look like base64 and the bytes it decodes to
 stay different things, which is what makes the SQS facade's checksum of it come out right.
+
+Attribute names beginning `nexq.` are reserved and refused. That namespace is where the SQS
+facade carries what it has no field for — `NexQ.Priority` — and here those fields exist, so
+an attribute in it could only disagree with one.
 
 ## Receiving
 

@@ -140,8 +140,10 @@ pub struct ReceiptHandle(String);
 
 /// A message's priority. Higher is served first; the default is the middle of the road.
 ///
-/// NexQ's own concept, not SQS's — the SQS facade has no way to express it, so messages
-/// sent through that facade all arrive at [`Priority::DEFAULT`].
+/// NexQ's own concept, not SQS's. REST has a field for it; the SQS facade has none, so it
+/// reads a well-known message attribute instead — either way a message that says nothing
+/// arrives at [`Priority::DEFAULT`], which is what keeps priority invisible to clients
+/// that do not use it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Priority(i32);
 

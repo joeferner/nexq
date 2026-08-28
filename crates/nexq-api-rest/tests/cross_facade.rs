@@ -255,23 +255,30 @@ fn signed_sqs_request(address: SocketAddr, target: &str, body: &str) -> String {
 }
 
 fn rest_receive_request(address: SocketAddr, queue: &str, body: &str) -> String {
+    rest_request(address, queue, "receive", body)
+}
+
+fn rest_send_request(address: SocketAddr, queue: &str, body: &str) -> String {
+    rest_request(address, queue, "", body)
+}
+
+/// A signed-in REST request against one queue's message collection, or an action on it.
+fn rest_request(address: SocketAddr, queue: &str, action: &str, body: &str) -> String {
     format!(
-        "POST /api/v1/queues/{queue}/messages/receive HTTP/1.1\r\n\
+        "POST /api/v1/queues/{queue}/messages{}{action} HTTP/1.1\r\n\
          Host: {address}\r\n\
          Authorization: Bearer {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\r\n{body}",
+        if action.is_empty() { "" } else { "/" },
         bearer_token(),
         body.len()
     )
 }
 
-/// The item's claim, end to end: created and sent over SQS, received over REST.
-#[tokio::test]
-async fn a_message_sent_over_sqs_is_receivable_over_rest() {
-    let (aws, rest) = both_facades().await;
-
+/// Create `QUEUE` over SQS and return its URL.
+async fn create_queue_over_sqs(aws: SocketAddr) -> String {
     let created = round_trip(
         aws,
         &signed_sqs_request(
@@ -281,10 +288,18 @@ async fn a_message_sent_over_sqs_is_receivable_over_rest() {
         ),
     )
     .await;
-    let queue_url = body_of(&created, "200")["QueueUrl"]
+
+    body_of(&created, "200")["QueueUrl"]
         .as_str()
         .expect("a queue url")
-        .to_owned();
+        .to_owned()
+}
+
+/// The item's claim, end to end: created and sent over SQS, received over REST.
+#[tokio::test]
+async fn a_message_sent_over_sqs_is_receivable_over_rest() {
+    let (aws, rest) = both_facades().await;
+    let queue_url = create_queue_over_sqs(aws).await;
 
     let sent = round_trip(
         aws,
@@ -315,6 +330,138 @@ async fn a_message_sent_over_sqs_is_receivable_over_rest() {
             .as_u64()
             .is_some_and(|seconds| seconds > 0),
         "a claim was made, so it has time left: {messages}"
+    );
+}
+
+/// Priority is one concept, not one per facade: what an SQS client sets with the
+/// `NexQ.Priority` message attribute is what REST reports on the same message.
+///
+/// Over real sockets and a real signature for the same reason the rest of this file is:
+/// the unit tests in `nexq-api-aws` prove the attribute is read, and this proves the value
+/// they read is the one the *other* facade serves.
+#[tokio::test]
+async fn a_priority_set_by_an_sqs_client_is_the_priority_rest_reports() {
+    let (aws, rest) = both_facades().await;
+    let queue_url = create_queue_over_sqs(aws).await;
+
+    let sent = round_trip(
+        aws,
+        &signed_sqs_request(
+            aws,
+            "AmazonSQS.SendMessage",
+            &format!(
+                r#"{{"QueueUrl":"{queue_url}","MessageBody":"urgent","MessageAttributes":{{
+                     "NexQ.Priority":{{"DataType":"Number","StringValue":"10"}}}}}}"#
+            ),
+        ),
+    )
+    .await;
+    let sent = body_of(&sent, "200");
+
+    let received = round_trip(rest, &rest_receive_request(rest, QUEUE, "{}")).await;
+    let message = &body_of(&received, "200")["messages"][0];
+
+    assert_eq!(
+        message["id"], sent["MessageId"],
+        "the same message, not merely one with the same body"
+    );
+    assert_eq!(
+        message["priority"], 10,
+        "an SQS client chose it, and REST reports it: {message}"
+    );
+    assert_eq!(
+        message["attributes"]["NexQ.Priority"],
+        serde_json::json!({ "type": "number", "value": "10" }),
+        "and the attribute itself is still there, since an SDK checksums what it sent"
+    );
+}
+
+/// The two facades reserve the same attribute namespace, and this is what keeps the two
+/// spellings of it equal — the constants live in different crates, and neither can see the
+/// other's outside a test that depends on both.
+///
+/// The reservation matters in opposite directions. On the SQS facade `NexQ.Priority` is
+/// *the* way to set a priority, so a name near it must not pass as ordinary metadata; on
+/// REST, where priority is a field, the attribute must not exist at all or a message could
+/// carry two different answers.
+#[tokio::test]
+async fn the_two_facades_reserve_the_same_namespace() {
+    let (aws, rest) = both_facades().await;
+    create_queue_over_sqs(aws).await;
+
+    let attribute = nexq_api_aws::message_attributes::PRIORITY;
+    assert!(
+        attribute.to_ascii_lowercase().starts_with("nexq."),
+        "{attribute} should be in the namespace REST refuses"
+    );
+
+    let refused = round_trip(
+        rest,
+        &rest_send_request(
+            rest,
+            QUEUE,
+            &format!(
+                r#"{{"messages":[{{"body":"x","attributes":{{
+                     "{attribute}":{{"type":"number","value":"10"}}}}}}]}}"#
+            ),
+        ),
+    )
+    .await;
+
+    // A `200` carrying a refused entry, since a send is not a transaction and the
+    // attribute belongs to one message rather than to the request.
+    let entry = &body_of(&refused, "200")["results"][0];
+    assert_eq!(entry["status"], "refused");
+
+    let error = &entry["error"];
+    assert_eq!(error["code"], "invalid_message_attribute");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("priority")),
+        "the error should point at the field to use instead: {error}"
+    );
+}
+
+/// The converse: a priority set over REST is readable by an SQS consumer, which is the
+/// only reason the facade answers it as a system attribute at all — a message sent through
+/// REST carries no priority *attribute* for a consumer to read.
+#[tokio::test]
+async fn a_priority_set_over_rest_is_readable_by_an_sqs_consumer() {
+    let (aws, rest) = both_facades().await;
+    let queue_url = create_queue_over_sqs(aws).await;
+
+    let sent = round_trip(
+        rest,
+        &rest_send_request(
+            rest,
+            QUEUE,
+            r#"{"messages":[{"body":"from rest","priority":3}]}"#,
+        ),
+    )
+    .await;
+    assert_eq!(body_of(&sent, "200")["results"][0]["status"], "accepted");
+
+    let received = round_trip(
+        aws,
+        &signed_sqs_request(
+            aws,
+            "AmazonSQS.ReceiveMessage",
+            &format!(
+                r#"{{"QueueUrl":"{queue_url}",
+                     "MessageSystemAttributeNames":["NexQ.Priority"],
+                     "MessageAttributeNames":["All"]}}"#
+            ),
+        ),
+    )
+    .await;
+    let message = &body_of(&received, "200")["Messages"][0];
+
+    assert_eq!(message["Body"], "from rest");
+    assert_eq!(message["Attributes"]["NexQ.Priority"], "3");
+    assert!(
+        message.get("MessageAttributes").is_none(),
+        "nothing is invented in the producer's own attribute map: {message}"
     );
 }
 

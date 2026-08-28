@@ -38,6 +38,7 @@ pub fn run() -> Result<(), String> {
         ("send, receive, delete", produce_and_consume),
         ("message attributes", message_attributes),
         ("system attributes", system_attributes),
+        ("priority", priority),
         ("long polling", long_polling),
         ("visibility timeout", visibility_timeout),
         ("batch operations", batch_operations),
@@ -286,6 +287,130 @@ fn system_attributes(aws: &Aws) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Priority set by a client that has never heard of NexQ.
+///
+/// The whole claim of the well-known attribute, and only a real client can make it: the
+/// `aws` CLI takes `NexQ.Priority` for an ordinary message attribute, signs it, and
+/// verifies the attribute checksum it gets back — so a facade that consumed the attribute
+/// instead of keeping it would fail here rather than in a test of our own making.
+fn priority(aws: &Aws) -> Result<(), String> {
+    let url = queue(aws, "acc-priority")?;
+
+    // Sent least urgent first, so first-in-first-out would return them in this order and
+    // ordering is the only thing that can produce the order asserted below.
+    for (body, priority) in [("later", "-5"), ("urgent", "10"), ("normal", "0")] {
+        let attributes = json!({
+            "NexQ.Priority": { "DataType": "Number", "StringValue": priority },
+        })
+        .to_string();
+
+        aws.sqs(&[
+            "send-message",
+            "--queue-url",
+            &url,
+            "--message-body",
+            body,
+            "--message-attributes",
+            &attributes,
+        ])?;
+    }
+
+    let received = aws.sqs(&[
+        "receive-message",
+        "--queue-url",
+        &url,
+        "--max-number-of-messages",
+        "3",
+        "--message-system-attribute-names",
+        "NexQ.Priority",
+        "--message-attribute-names",
+        "All",
+    ])?;
+    let messages = array(&received, "Messages")?;
+    if messages.len() != 3 {
+        return Err(format!("expected three messages, got {}", messages.len()));
+    }
+
+    for (message, (body, priority)) in
+        messages
+            .iter()
+            .zip([("urgent", "10"), ("normal", "0"), ("later", "-5")])
+    {
+        expect(&as_str(&message["Body"])?, body)?;
+
+        // Readable as a system attribute, which is how a consumer learns the priority of
+        // a message it did not send.
+        expect(&as_str(&message["Attributes"]["NexQ.Priority"])?, priority)?;
+
+        // And still the producer's own attribute, untouched.
+        expect(
+            &as_str(&message["MessageAttributes"]["NexQ.Priority"]["StringValue"])?,
+            priority,
+        )?;
+    }
+
+    // `All` is deliberately unchanged: it returns what real SQS returns, so a client that
+    // did not ask for NexQ's extension does not receive it. A fresh message, because the
+    // three above are claimed for the queue's default timeout by the receive that read
+    // them — asking for a zero timeout instead would have them claimable again *within*
+    // that same receive, which is a different behaviour and not this check's business.
+    aws.sqs(&[
+        "send-message",
+        "--queue-url",
+        &url,
+        "--message-body",
+        "no priority at all",
+    ])?;
+
+    let all = aws.sqs(&[
+        "receive-message",
+        "--queue-url",
+        &url,
+        "--message-system-attribute-names",
+        "All",
+    ])?;
+    let attributes = &array(&all, "Messages")?[0]["Attributes"];
+    if attributes.get("NexQ.Priority").is_some() {
+        return Err(format!(
+            "All should not carry NexQ's own name: {attributes}"
+        ));
+    }
+
+    // A priority that is not a whole number is refused rather than quietly defaulted —
+    // note that `1.5` is a perfectly valid SQS `Number`, so this refusal is NexQ's own.
+    let refused = json!({
+        "NexQ.Priority": { "DataType": "Number", "StringValue": "1.5" },
+    })
+    .to_string();
+    let code = aws.sqs_err(&[
+        "send-message",
+        "--queue-url",
+        &url,
+        "--message-body",
+        "fractional",
+        "--message-attributes",
+        &refused,
+    ])?;
+    expect(&code, "InvalidParameterValue")?;
+
+    // And so is a name in NexQ's namespace that means nothing, which is what catches a
+    // misspelling of the one that does.
+    let misspelled = json!({
+        "NexQ.Priorty": { "DataType": "Number", "StringValue": "10" },
+    })
+    .to_string();
+    let code = aws.sqs_err(&[
+        "send-message",
+        "--queue-url",
+        &url,
+        "--message-body",
+        "typo",
+        "--message-attributes",
+        &misspelled,
+    ])?;
+    expect(&code, "InvalidParameterValue")
 }
 
 fn long_polling(aws: &Aws) -> Result<(), String> {

@@ -44,9 +44,6 @@ ahead of M14 is a one-line change to this file and it would remove both costs.
 The features REST exists to expose. All three are unreachable from any AWS facade, which
 is why they waited for one that can reach them.
 
-- [ ] **Priority.** `Priority` and the store's priority ordering have existed since M3
-      and no facade can set or read them — REST can. Default stays the middle of the
-      road, so an unset priority behaves as it does today
 - [ ] **Position in queue.** `Store::position_of`, per-backend by construction (Q7): an
       index into an ordered structure for memory, a count query for SQL and search. Two
       semantics to settle and then _document_, because both answers surprise someone:
