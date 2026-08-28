@@ -258,6 +258,11 @@ A received message is invisible to other consumers until its visibility timeout 
 out — 30 seconds by default, or whatever `--visibility-timeout` says. Delete it to
 finish; leave it and it comes back, which is what makes delivery at-least-once.
 
+`--visibility-timeout 0` reads messages without keeping them: each is claimable again the
+instant it is handed over. One response still holds **distinct** messages, so asking for
+ten with a zero timeout returns up to ten different ones rather than the first one ten
+times, which is what a queue that ranks its messages would otherwise do.
+
 If the work turns out to take longer than the claim, or cannot be done at all, change
 the claim rather than waiting for it to lapse:
 

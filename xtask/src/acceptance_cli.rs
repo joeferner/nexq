@@ -352,10 +352,10 @@ fn priority(aws: &Aws) -> Result<(), String> {
     }
 
     // `All` is deliberately unchanged: it returns what real SQS returns, so a client that
-    // did not ask for NexQ's extension does not receive it. A fresh message, because the
-    // three above are claimed for the queue's default timeout by the receive that read
-    // them — asking for a zero timeout instead would have them claimable again *within*
-    // that same receive, which is a different behaviour and not this check's business.
+    // did not ask for NexQ's extension does not receive it. Asked of a fresh message
+    // carrying no priority attribute at all — the three above are claimed by the receive
+    // that read them, and a message that never mentioned priority is the harder case for
+    // `All` to stay quiet about, since the server still knows the answer.
     aws.sqs(&[
         "send-message",
         "--queue-url",
@@ -519,7 +519,55 @@ fn visibility_timeout(aws: &Aws) -> Result<(), String> {
     ])?;
 
     let again = aws.sqs(&["receive-message", "--queue-url", &url])?;
-    expect(&as_str(&array(&again, "Messages")?[0]["Body"])?, "work")
+    expect(&as_str(&array(&again, "Messages")?[0]["Body"])?, "work")?;
+
+    // A batch with a zero timeout: how someone looks at a queue without keeping what they
+    // find. Every message comes back **once**, which is not free — a zero timeout expires
+    // each claim as it is made, so the message just handed out is claimable again and
+    // still ranks first. This is here because that is exactly what it used to do: three
+    // copies of one message, under three handles of which only the last still worked.
+    let peeked = queue(aws, "acc-visibility-peek")?;
+    for body in ["one", "two", "three"] {
+        aws.sqs(&[
+            "send-message",
+            "--queue-url",
+            &peeked,
+            "--message-body",
+            body,
+        ])?;
+    }
+
+    let batch = aws.sqs(&[
+        "receive-message",
+        "--queue-url",
+        &peeked,
+        "--max-number-of-messages",
+        "3",
+        "--visibility-timeout",
+        "0",
+        "--message-system-attribute-names",
+        "ApproximateReceiveCount",
+    ])?;
+    let messages = array(&batch, "Messages")?;
+    if messages.len() != 3 {
+        return Err(format!("expected three messages, got {}", messages.len()));
+    }
+
+    let mut bodies = Vec::new();
+    for message in &messages {
+        expect(
+            &as_str(&message["Attributes"]["ApproximateReceiveCount"])?,
+            "1",
+        )?;
+        bodies.push(as_str(&message["Body"])?);
+    }
+    bodies.sort();
+
+    if bodies != ["one", "three", "two"] {
+        return Err(format!("expected each message once, got {bodies:?}"));
+    }
+
+    Ok(())
 }
 
 fn batch_operations(aws: &Aws) -> Result<(), String> {

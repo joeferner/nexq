@@ -2232,6 +2232,65 @@ mod tests {
         );
     }
 
+    /// `VisibilityTimeout=0` with a batch is how someone looks at a queue without keeping
+    /// what they find, and it must still return *distinct* messages.
+    ///
+    /// Here as well as in `nexq-core`, because this is the layer it was found at and the
+    /// one a client sees: a zero timeout expires each claim as it is made, and before the
+    /// engine learned to skip what it already held this returned three copies of one
+    /// message under three handles, only the last of which still worked.
+    #[tokio::test]
+    async fn a_batch_with_a_zero_visibility_timeout_returns_distinct_messages() {
+        let operations = operations();
+        let url = queue(&operations).await;
+
+        for body in ["one", "two", "three"] {
+            call(
+                &operations,
+                Operation::SendMessage,
+                json!({ "QueueUrl": url, "MessageBody": body }),
+            )
+            .await
+            .expect(body);
+        }
+
+        let received = call(
+            &operations,
+            Operation::ReceiveMessage,
+            json!({
+                "QueueUrl": url,
+                "MaxNumberOfMessages": 3,
+                "VisibilityTimeout": 0,
+                "MessageSystemAttributeNames": ["ApproximateReceiveCount"],
+            }),
+        )
+        .await
+        .expect("receive");
+        let messages = received["Messages"].as_array().expect("three messages");
+
+        assert_eq!(messages.len(), 3);
+
+        let mut ids: Vec<&str> = messages
+            .iter()
+            .map(|message| message["MessageId"].as_str().expect("an id"))
+            .collect();
+        ids.sort_unstable();
+        let distinct = ids.len();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            distinct,
+            "three messages, not one message thrice"
+        );
+
+        for message in messages {
+            assert_eq!(
+                message["Attributes"]["ApproximateReceiveCount"], "1",
+                "each was delivered once: {message}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_received_message_is_not_handed_out_again_until_its_claim_lapses() {
         let operations = operations();

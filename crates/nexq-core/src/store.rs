@@ -24,7 +24,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::model::{
-    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+    ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
+    ReceiptHandle,
 };
 
 /// The result of a storage operation.
@@ -152,10 +153,40 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     ///
     /// Claiming also increments the message's receive count and, on first delivery,
     /// records when that happened.
+    ///
+    /// Provided, not implemented: it is [`Store::claim_next_skipping`] with nothing to
+    /// skip. A backend implements that one and gets this for free.
     async fn claim_next(
         &self,
         queue: &QueueName,
         visibility_timeout: Option<Duration>,
+    ) -> Result<Option<ClaimedMessage>> {
+        self.claim_next_skipping(queue, visibility_timeout, &[])
+            .await
+    }
+
+    /// The same, passing over messages the caller already holds.
+    ///
+    /// This is the form a backend implements, and `skip` is not a convenience — it is
+    /// what makes a batch of claims correct. A `visibility_timeout` of zero expires a
+    /// claim the instant it is made, so the message it claimed is immediately claimable
+    /// again *by the very loop assembling the batch*: without a way to say "not these",
+    /// a receive asking for ten messages with a zero timeout gets one message ten times,
+    /// each delivery incrementing its receive count and invalidating the handle handed
+    /// out a moment earlier. Ordering makes it certain rather than likely, since the
+    /// message that ranks first still ranks first the next time it is asked for.
+    ///
+    /// A skipped message is passed over, not treated as the end of the queue: the answer
+    /// is the first claimable message that is not named, and `None` only when there is no
+    /// such message. `skip` holds at most
+    /// [`MAX_MESSAGES_PER_RECEIVE`](crate::engine::MAX_MESSAGES_PER_RECEIVE) ids, so a
+    /// backend may push it down to storage as a literal list — `NOT IN` for SQL, a
+    /// `must_not` clause for a search backend — rather than needing an anti-join.
+    async fn claim_next_skipping(
+        &self,
+        queue: &QueueName,
+        visibility_timeout: Option<Duration>,
+        skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>>;
 
     /// Delete a claimed message, ending the claim for good.

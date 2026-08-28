@@ -788,6 +788,103 @@ pub async fn each_message_is_claimed_by_exactly_one_consumer(store: Arc<dyn Stor
     assert_eq!(claimed, expected, "no message claimed twice, none skipped");
 }
 
+/// A skipped message is passed over, and the next claimable one comes back instead.
+///
+/// The contract [`Store::claim_next_skipping`] exists for. It is what lets a caller
+/// assemble a batch: without it, a claim taken with a zero visibility timeout is visible
+/// again immediately and still ranks first, so the caller is handed its own first message
+/// over and over — each delivery counting again and invalidating the handle before it.
+///
+/// Skipping must *pass over* rather than stop: the second claim below has to reach the
+/// second-ranked message, not report that there is nothing left.
+pub async fn a_skipped_message_is_passed_over_rather_than_ending_the_queue(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+
+    // Distinct priorities, so which message ranks first is decided rather than a tie
+    // broken differently by each backend.
+    for (body, priority) in [("urgent", 10), ("normal", 5), ("later", 0)] {
+        store
+            .enqueue(&queue_name, message(body, priority), None)
+            .await
+            .expect("enqueue");
+    }
+
+    // Zero, which is the case that makes this necessary: every claim below is expired the
+    // moment it is made, so nothing but `skip` keeps the answers apart.
+    let zero = Some(Duration::ZERO);
+    let mut skip = Vec::new();
+    let mut bodies = Vec::new();
+
+    for expected in ["urgent", "normal", "later"] {
+        let claimed = store
+            .claim_next_skipping(&queue_name, zero, &skip)
+            .await
+            .expect("claim")
+            .unwrap_or_else(|| panic!("{expected} should still be claimable"));
+
+        assert_eq!(
+            claimed.message.receive_count, 1,
+            "{expected} was delivered once, so skipping did not re-deliver it"
+        );
+
+        skip.push(claimed.message.id.clone());
+        bodies.push(claimed.message.body.clone());
+    }
+
+    assert_eq!(bodies, ["urgent", "normal", "later"], "in priority order");
+
+    assert!(
+        store
+            .claim_next_skipping(&queue_name, zero, &skip)
+            .await
+            .expect("claim")
+            .is_none(),
+        "every message is skipped, so there is nothing left to claim"
+    );
+
+    // And skipping nothing is the plain claim, which is what makes `claim_next` the same
+    // operation rather than a second one that could drift from it.
+    assert!(
+        store
+            .claim_next_skipping(&queue_name, zero, &[])
+            .await
+            .expect("claim")
+            .is_some(),
+        "an empty skip list hides nothing"
+    );
+}
+
+/// A message named in `skip` is not claimed even when it is the only one there.
+pub async fn skipping_the_only_message_yields_nothing(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+
+    let claimed = store
+        .claim_next(&queue_name, Some(Duration::ZERO))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    assert!(
+        store
+            .claim_next_skipping(&queue_name, None, std::slice::from_ref(&claimed.message.id))
+            .await
+            .expect("claim")
+            .is_none(),
+        "the one message there is skipped, so the answer is nothing — not the same message"
+    );
+
+    // Still there, though: skipping is the caller's view of one call, not a state change.
+    assert_eq!(
+        claim_body(&store, &queue_name).await.as_deref(),
+        Some("hello"),
+        "a skipped message is not consumed, hidden, or otherwise altered"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Delay
 // ---------------------------------------------------------------------------

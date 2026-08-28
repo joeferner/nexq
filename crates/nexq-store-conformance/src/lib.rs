@@ -90,6 +90,11 @@ macro_rules! conformance_tests {
         $crate::conformance_case!($new_store, equal_priority_is_served_in_order_of_arrival);
         $crate::conformance_case!($new_store, priority_outranks_arrival_order);
         $crate::conformance_case!($new_store, each_message_is_claimed_by_exactly_one_consumer);
+        $crate::conformance_case!(
+            $new_store,
+            a_skipped_message_is_passed_over_rather_than_ending_the_queue
+        );
+        $crate::conformance_case!($new_store, skipping_the_only_message_yields_nothing);
 
         // Delay.
         $crate::conformance_case!($new_store, a_delayed_message_waits_before_it_can_be_claimed);

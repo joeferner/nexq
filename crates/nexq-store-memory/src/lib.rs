@@ -16,7 +16,8 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use nexq_core::model::{
-    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+    ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
+    ReceiptHandle,
 };
 use nexq_core::store::{Result, Store, StoreError};
 
@@ -237,10 +238,11 @@ impl Store for MemoryStore {
         Ok(())
     }
 
-    async fn claim_next(
+    async fn claim_next_skipping(
         &self,
         queue: &QueueName,
         visibility_timeout: Option<Duration>,
+        skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>> {
         let now = SystemTime::now();
         let mut queues = self.write()?;
@@ -252,11 +254,13 @@ impl Store for MemoryStore {
 
         // Anything whose visibility has come round is claimable, including a message
         // whose previous claim expired — that expiry is what makes delivery
-        // at-least-once.
+        // at-least-once. Except the ones the caller already holds: a claim taken with a
+        // zero timeout is visible again immediately, so without this a batch would keep
+        // being handed its own first message.
         let Some(next) = held
             .messages
             .iter_mut()
-            .filter(|stored| stored.visible_at <= now)
+            .filter(|stored| stored.visible_at <= now && !skip.contains(&stored.message.id))
             .min_by(|left, right| serve_first(left, right))
         else {
             return Ok(None);

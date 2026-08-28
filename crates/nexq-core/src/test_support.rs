@@ -12,7 +12,8 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use crate::model::{
-    ClaimedMessage, Message, MessageCounts, Queue, QueueAttributes, QueueName, ReceiptHandle,
+    ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
+    ReceiptHandle,
 };
 use crate::store::{Result, Store, StoreError};
 
@@ -168,10 +169,11 @@ impl Store for FakeStore {
         Ok(())
     }
 
-    async fn claim_next(
+    async fn claim_next_skipping(
         &self,
         queue: &QueueName,
         visibility_timeout: Option<Duration>,
+        skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>> {
         if !self.queues.lock().expect("lock").contains_key(queue) {
             return Err(StoreError::QueueNotFound(queue.clone()));
@@ -192,10 +194,9 @@ impl Store for FakeStore {
         // Visibility alone decides what is claimable — *not* whether a handle is
         // recorded. A message whose claim has lapsed, or whose holder handed it back,
         // still has its old handle on it and must be claimable all the same.
-        let Some(claimable) = messages
-            .iter_mut()
-            .find(|held| &held.queue == queue && held.visible_at <= now)
-        else {
+        let Some(claimable) = messages.iter_mut().find(|held| {
+            &held.queue == queue && held.visible_at <= now && !skip.contains(&held.message.id)
+        }) else {
             return Ok(None);
         };
 
@@ -310,10 +311,11 @@ impl Store for BrokenStore {
         Err(Self::failure())
     }
 
-    async fn claim_next(
+    async fn claim_next_skipping(
         &self,
         _queue: &QueueName,
         _visibility_timeout: Option<Duration>,
+        _skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>> {
         Err(Self::failure())
     }

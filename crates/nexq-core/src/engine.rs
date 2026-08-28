@@ -29,8 +29,8 @@ use thiserror::Error;
 use tokio::time::{Instant, timeout};
 
 use crate::model::{
-    ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, MessageCounts, Priority, Queue,
-    QueueAttributes, QueueName, ReceiptHandle,
+    ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, MessageCounts, MessageId, Priority,
+    Queue, QueueAttributes, QueueName, ReceiptHandle,
 };
 use crate::store::{Store, StoreError};
 use crate::waiters::Waiters;
@@ -430,11 +430,26 @@ impl Engine {
         };
 
         let mut claimed = Vec::with_capacity(wanted);
+        // What has already been handed to this consumer, so the store passes over it. A
+        // `visibility_timeout` of zero expires each claim as it is made, which would
+        // otherwise leave the highest-ranked message ranked first again on the next
+        // iteration — a batch of ten copies of one message, nine of them under receipt
+        // handles the tenth claim had already invalidated.
+        let mut held: Vec<MessageId> = Vec::with_capacity(wanted);
+
+        held.push(first.message.id.clone());
         claimed.push(first);
 
         while claimed.len() < wanted {
-            match self.claim_next(queue, request.visibility_timeout).await? {
-                Some(message) => claimed.push(message),
+            match self
+                .store
+                .claim_next_skipping(queue, request.visibility_timeout, &held)
+                .await?
+            {
+                Some(message) => {
+                    held.push(message.message.id.clone());
+                    claimed.push(message);
+                }
                 // Nothing more right now, which is a normal short batch.
                 None => break,
             }
@@ -1471,6 +1486,69 @@ mod tests {
         );
     }
 
+    /// A batch never contains the same message twice, **including with a zero visibility
+    /// timeout** — the case that makes it hard.
+    ///
+    /// Zero expires each claim the instant it is made, so the message just handed out is
+    /// claimable again straight away, and it is the one that ranks first. Before
+    /// `claim_next_skipping` existed this returned three copies of one message, two of
+    /// them under receipt handles the next claim had already invalidated. Found through
+    /// the SQS facade, where `--visibility-timeout 0` with `--max-number-of-messages 3`
+    /// is how someone looks at a queue without keeping it.
+    #[tokio::test]
+    async fn a_batch_never_holds_the_same_message_twice() {
+        let (engine, queue) = engine_with_queue().await;
+        for body in ["one", "two", "three"] {
+            engine
+                .enqueue(
+                    &queue,
+                    body.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+
+        let claimed = engine
+            .receive(
+                &queue,
+                &ReceiveRequest {
+                    max_messages: 3,
+                    visibility_timeout: Some(Duration::ZERO),
+                    ..ReceiveRequest::default()
+                },
+            )
+            .await
+            .expect("receive");
+
+        assert_eq!(claimed.len(), 3, "three messages exist, so three come back");
+
+        let mut ids: Vec<&str> = claimed
+            .iter()
+            .map(|claimed| claimed.message.id.as_str())
+            .collect();
+        ids.sort_unstable();
+        let distinct = ids.len();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            distinct,
+            "three messages, not one message thrice"
+        );
+
+        // The handle handed out with each is the one that is current, which is the second
+        // half of the same bug: a re-delivery replaces the claim, so a duplicate in the
+        // batch would have left the earlier copies holding dead handles.
+        for message in &claimed {
+            assert_eq!(
+                message.message.receive_count, 1,
+                "each message was delivered once, not once per iteration"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn the_queues_own_wait_applies_when_a_request_does_not_ask() {
         // `ReceiveMessageWaitTimeSeconds` as a queue attribute, which is how a queue
@@ -1981,12 +2059,15 @@ mod tests {
             self.inner.enqueue(queue, message, delay).await
         }
 
-        async fn claim_next(
+        async fn claim_next_skipping(
             &self,
             queue: &QueueName,
             visibility_timeout: Option<Duration>,
+            skip: &[MessageId],
         ) -> StoreResult<Option<ClaimedMessage>> {
-            self.inner.claim_next(queue, visibility_timeout).await
+            self.inner
+                .claim_next_skipping(queue, visibility_timeout, skip)
+                .await
         }
 
         async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> StoreResult<()> {
