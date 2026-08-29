@@ -137,6 +137,35 @@ macro_rules! conformance_tests {
         $crate::conformance_case!($new_store, acking_removes_the_message_for_good);
         $crate::conformance_case!($new_store, acking_the_same_claim_twice_is_refused);
         $crate::conformance_case!($new_store, acking_an_unissued_handle_is_refused);
+
+        // Dead-letter queues: giving up on a message, and moving one out again.
+        $crate::conformance_case!($new_store, an_exhausted_message_is_not_claimed_again);
+        $crate::conformance_case!(
+            $new_store,
+            a_message_within_its_redrive_policy_is_still_claimed
+        );
+        $crate::conformance_case!($new_store, a_queue_with_no_redrive_policy_exhausts_nothing);
+        $crate::conformance_case!($new_store, an_exhausted_message_is_offered_for_moving);
+        $crate::conformance_case!(
+            $new_store,
+            taking_a_message_to_move_does_not_count_a_delivery
+        );
+        $crate::conformance_case!($new_store, a_message_being_moved_is_hidden_from_everyone);
+        $crate::conformance_case!(
+            $new_store,
+            a_message_left_behind_by_a_mover_is_offered_again
+        );
+        $crate::conformance_case!(
+            $new_store,
+            a_message_a_consumer_holds_is_not_offered_for_moving
+        );
+        $crate::conformance_case!($new_store, taking_messages_to_move_respects_its_limit);
+        $crate::conformance_case!(
+            $new_store,
+            moving_everything_takes_what_a_redrive_policy_would_have_skipped
+        );
+        $crate::conformance_case!($new_store, moving_everything_needs_no_redrive_policy);
+        $crate::conformance_case!($new_store, a_delayed_message_is_not_offered_for_moving);
     };
 }
 

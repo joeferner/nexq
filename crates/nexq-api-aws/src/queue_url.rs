@@ -55,6 +55,34 @@ impl QueueUrls {
         format!("arn:aws:sqs:{}:{}:{}", self.region, self.account_id, name)
     }
 
+    /// Read the queue name out of an ARN a client sent.
+    ///
+    /// The other direction of [`QueueUrls::arn_for_queue`], and it is needed because the
+    /// operations that reach for a queue *by ARN* rather than by URL are exactly the
+    /// dead-letter ones: a `RedrivePolicy` names its target as `DeadLetterTargetArn`, and
+    /// `StartMessageMoveTask` takes a `SourceArn` and a `DestinationArn`.
+    ///
+    /// Read the same way a queue URL is: the last two colon-separated fields are the
+    /// account id and the name, and everything before them is ignored. The partition and
+    /// region are not checked for the same reason the host in a queue URL is not — this
+    /// deployment is not AWS, and a client that carries a plausible-looking ARN from its
+    /// own configuration should not be refused over a field NexQ does not act on. The
+    /// account id *is* checked, since an ARN carrying a different one belongs to some other
+    /// deployment.
+    pub fn queue_name_from_arn(&self, arn: &str) -> Result<QueueName, ApiError> {
+        let fields: Vec<&str> = arn.split(':').collect();
+
+        let [.., account_id, name] = fields.as_slice() else {
+            return Err(ApiError::invalid_address(arn));
+        };
+
+        if *account_id != self.account_id {
+            return Err(ApiError::invalid_address(arn));
+        }
+
+        QueueName::new(*name).map_err(|_| ApiError::invalid_address(arn))
+    }
+
     /// Read the queue name out of a URL a client sent.
     ///
     /// Only the tail of the path is interpreted: the last two segments must be the

@@ -15,7 +15,7 @@ use crate::model::{
     ClaimedMessage, Message, MessageCounts, MessageId, MessageState, Queue, QueueAttributes,
     QueueName, QueuePosition, ReceiptHandle,
 };
-use crate::store::{Result, Store, StoreError};
+use crate::store::{Movable, Result, Store, StoreError};
 
 /// A store that works, backed by a map.
 ///
@@ -233,13 +233,16 @@ impl Store for FakeStore {
             return Err(StoreError::QueueNotFound(queue.clone()));
         }
 
-        let timeout = {
+        let (timeout, redrive) = {
             let queues = self.queues.lock().expect("lock");
             let Some(held) = queues.get(queue) else {
                 return Err(StoreError::QueueNotFound(queue.clone()));
             };
 
-            visibility_timeout.unwrap_or(held.attributes.visibility_timeout)
+            (
+                visibility_timeout.unwrap_or(held.attributes.visibility_timeout),
+                held.attributes.redrive.clone(),
+            )
         };
 
         let now = SystemTime::now();
@@ -247,9 +250,16 @@ impl Store for FakeStore {
 
         // Visibility alone decides what is claimable — *not* whether a handle is
         // recorded. A message whose claim has lapsed, or whose holder handed it back,
-        // still has its old handle on it and must be claimable all the same.
+        // still has its old handle on it and must be claimable all the same. Except one
+        // the redrive policy has exhausted, which is out of deliveries and waiting to be
+        // dead-lettered rather than tried again.
         let Some(claimable) = messages.iter_mut().find(|held| {
-            &held.queue == queue && held.visible_at <= now && !skip.contains(&held.message.id)
+            &held.queue == queue
+                && held.visible_at <= now
+                && !skip.contains(&held.message.id)
+                && !redrive
+                    .as_ref()
+                    .is_some_and(|policy| policy.is_exhausted(held.message.receive_count))
         }) else {
             return Ok(None);
         };
@@ -268,6 +278,64 @@ impl Store for FakeStore {
             receipt,
             claim_expires_at,
         }))
+    }
+
+    async fn claim_for_move(
+        &self,
+        queue: &QueueName,
+        movable: Movable,
+        hold: Duration,
+        limit: usize,
+    ) -> Result<Vec<ClaimedMessage>> {
+        let redrive = {
+            let queues = self.queues.lock().expect("lock");
+            let Some(held) = queues.get(queue) else {
+                return Err(StoreError::QueueNotFound(queue.clone()));
+            };
+
+            held.attributes.redrive.clone()
+        };
+
+        if movable == Movable::Exhausted && redrive.is_none() {
+            return Ok(Vec::new());
+        }
+
+        let now = SystemTime::now();
+        let claim_expires_at = now + hold;
+        let mut messages = self.messages.lock().expect("lock");
+        let mut taken = Vec::new();
+
+        for held in messages.iter_mut() {
+            if taken.len() >= limit {
+                break;
+            }
+
+            let qualifies = &held.queue == queue
+                && held.visible_at <= now
+                && match movable {
+                    Movable::Exhausted => redrive
+                        .as_ref()
+                        .is_some_and(|policy| policy.is_exhausted(held.message.receive_count)),
+                    Movable::Everything => true,
+                };
+            if !qualifies {
+                continue;
+            }
+
+            let receipt = ReceiptHandle::new();
+            // Held like a delivery but not counted as one: the message is leaving, not
+            // being tried again.
+            held.claim = Some(receipt.clone());
+            held.visible_at = claim_expires_at;
+
+            taken.push(ClaimedMessage {
+                message: held.message.clone(),
+                receipt,
+                claim_expires_at,
+            });
+        }
+
+        Ok(taken)
     }
 
     async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()> {
@@ -379,6 +447,16 @@ impl Store for BrokenStore {
         _visibility_timeout: Option<Duration>,
         _skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>> {
+        Err(Self::failure())
+    }
+
+    async fn claim_for_move(
+        &self,
+        _queue: &QueueName,
+        _movable: Movable,
+        _hold: Duration,
+        _limit: usize,
+    ) -> Result<Vec<ClaimedMessage>> {
         Err(Self::failure())
     }
 

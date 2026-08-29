@@ -9,7 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexq_core::engine::{Engine, MAX_QUEUES_PER_PAGE, QueueQuery, ReceiveRequest};
-use nexq_core::model::{MAX_BODY_BYTES, MessageCounts, Queue, QueueName, ReceiptHandle};
+use nexq_core::model::{
+    MAX_BODY_BYTES, MessageCounts, Queue, QueueName, ReceiptHandle, epoch_millis,
+};
+use nexq_core::move_task::{MoveTask, MoveTaskId};
 use serde_json::{Map, Value, json};
 use tracing::info;
 
@@ -57,6 +60,12 @@ impl Operations {
             }
             Operation::GetQueueAttributes => self.get_queue_attributes(&input).await,
             Operation::SetQueueAttributes => self.set_queue_attributes(&input).await,
+            Operation::ListDeadLetterSourceQueues => {
+                self.list_dead_letter_source_queues(&input).await
+            }
+            Operation::StartMessageMoveTask => self.start_message_move_task(&input).await,
+            Operation::CancelMessageMoveTask => self.cancel_message_move_task(&input),
+            Operation::ListMessageMoveTasks => self.list_message_move_tasks(&input),
             not_built_yet => Err(ApiError::not_implemented(not_built_yet)),
         }
     }
@@ -64,7 +73,7 @@ impl Operations {
     /// `CreateQueue` — idempotent when the attributes match, per the engine.
     async fn create_queue(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
         let name = queue_name(input, "QueueName")?;
-        let attributes = attributes::from_input(input.get("Attributes"))?;
+        let attributes = attributes::from_input(input.get("Attributes"), &self.queue_urls)?;
 
         let queue = self.engine.create_queue(name, attributes).await?;
 
@@ -199,7 +208,7 @@ impl Operations {
         // as an `ApiError` and nothing is written.
         self.engine
             .set_queue_attributes(&name, |existing| {
-                attributes::apply(existing, Some(requested))
+                attributes::apply(existing, Some(requested), &self.queue_urls)
             })
             .await?;
 
@@ -499,6 +508,143 @@ impl Operations {
         let name = self.queue_from_url(input)?;
 
         Ok(self.engine.get_queue(&name).await?)
+    }
+
+    /// `ListDeadLetterSourceQueues` — which queues dead-letter into this one.
+    ///
+    /// Paged like `ListQueues` and for the same reason, with the same cursor token. SQS
+    /// caps a page at 1000 here as well.
+    async fn list_dead_letter_source_queues(
+        &self,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
+        let name = self.queue_from_url(input)?;
+        let limit = optional_count(input, "MaxResults", MAX_QUEUES_PER_PAGE as u64)?
+            .map_or(MAX_QUEUES_PER_PAGE, |limit| limit as usize);
+        let after = match optional_string(input, "NextToken")? {
+            Some(token) => Some(decode_next_token(&token)?),
+            None => None,
+        };
+
+        // The engine answers in name order, which is what makes resuming after a name a
+        // stable cursor rather than an offset that churn can shift.
+        let mut sources = self.engine.dead_letter_sources(&name).await?;
+        if let Some(after) = after {
+            sources.retain(|source| source > &after);
+        }
+
+        let has_more = sources.len() > limit;
+        sources.truncate(limit);
+
+        // Unlike `ListQueues`, the field is present even when empty: SQS documents
+        // `queueUrls` as required on this response, and an SDK will read it.
+        let mut output = json!({
+            "queueUrls": sources
+                .iter()
+                .map(|source| self.queue_urls.for_queue(source))
+                .collect::<Vec<_>>(),
+        });
+
+        if let Some(last) = has_more.then(|| sources.last()).flatten() {
+            output["NextToken"] = Value::String(encode_next_token(last));
+        }
+
+        Ok(output)
+    }
+
+    /// `StartMessageMoveTask` — redrive a dead-letter queue back to a live one.
+    ///
+    /// `DestinationArn` is optional in SQS, meaning "back to the queues they came from".
+    /// NexQ does not record which queue each individual message arrived from — that would
+    /// be a field on every message to serve one operation — so it infers the destination
+    /// from the redrive policies pointing at the source, which gives the same answer in the
+    /// case that matters and refuses rather than guesses when it cannot.
+    async fn start_message_move_task(
+        &self,
+        input: &Map<String, Value>,
+    ) -> Result<Value, ApiError> {
+        let source = self
+            .queue_urls
+            .queue_name_from_arn(required_string(input, "SourceArn")?)?;
+
+        let destination = match optional_string(input, "DestinationArn")? {
+            Some(arn) => Some(self.queue_urls.queue_name_from_arn(&arn)?),
+            None => None,
+        };
+
+        // SQS bounds this at 1..=500. Bounded here rather than in the engine because it is
+        // a wire-protocol limit: the engine will honour any rate it is given.
+        let max_messages_per_second = optional_count(input, "MaxNumberOfMessagesPerSecond", 500)?
+            .map(|rate| rate as u32);
+
+        let task = self
+            .engine
+            .start_redrive(source, destination, max_messages_per_second)
+            .await?;
+
+        Ok(json!({ "TaskHandle": task.id.as_str() }))
+    }
+
+    /// `CancelMessageMoveTask`.
+    ///
+    /// Answers with how many messages had moved by the time the cancel was accepted, which
+    /// is what SQS reports. The task itself stops at its next message boundary, so the real
+    /// figure may be a message or two higher — `ApproximateNumberOfMessagesMoved` is
+    /// approximate here for the same reason every other count is.
+    fn cancel_message_move_task(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let handle = MoveTaskId::from_client(required_string(input, "TaskHandle")?);
+
+        let task = self.engine.cancel_redrive(&handle)?;
+
+        Ok(json!({ "ApproximateNumberOfMessagesMoved": task.messages_moved }))
+    }
+
+    /// `ListMessageMoveTasks` — the redrives of one source queue, newest first.
+    fn list_message_move_tasks(&self, input: &Map<String, Value>) -> Result<Value, ApiError> {
+        let source = self
+            .queue_urls
+            .queue_name_from_arn(required_string(input, "SourceArn")?)?;
+
+        // SQS's cap, and its default when a client does not ask.
+        let limit = optional_count(input, "MaxResults", 10)?.unwrap_or(1) as usize;
+
+        let results: Vec<Value> = self
+            .engine
+            .redrive_tasks(Some(&source))
+            .into_iter()
+            .take(limit)
+            .map(|task| self.render_move_task(&task))
+            .collect();
+
+        Ok(json!({ "Results": results }))
+    }
+
+    /// One redrive task in SQS's shape.
+    ///
+    /// The optional members are omitted rather than sent as null, which is how SQS renders
+    /// them and what stops an SDK reporting a failure reason of `"null"` on a task that
+    /// succeeded.
+    fn render_move_task(&self, task: &MoveTask) -> Value {
+        let mut rendered = json!({
+            "TaskHandle": task.id.as_str(),
+            "Status": task.status.as_str(),
+            "SourceArn": self.queue_urls.arn_for_queue(&task.source),
+            "DestinationArn": self.queue_urls.arn_for_queue(&task.destination),
+            "ApproximateNumberOfMessagesMoved": task.messages_moved,
+            "ApproximateNumberOfMessagesToMove": task.messages_to_move,
+            // Seconds since the epoch, as SQS reports a queue's timestamps — not the
+            // milliseconds it uses for a message's.
+            "StartedTimestamp": epoch_millis(task.started_at) / 1000,
+        });
+
+        if let Some(rate) = task.max_messages_per_second {
+            rendered["MaxNumberOfMessagesPerSecond"] = json!(rate);
+        }
+        if let Some(failure) = &task.failure {
+            rendered["FailureReason"] = Value::String(failure.clone());
+        }
+
+        rendered
     }
 
     /// The queue a request is about, from the `QueueUrl` it carries.

@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use nexq_core::model::{
-    AttributeValue, Message, MessageAttribute, MessageAttributes, MessageId, MessageState,
-    Priority, Queue, QueueAttributes, QueueName, QueuePosition,
+    AttributeValue, ClaimedMessage, Message, MessageAttribute, MessageAttributes, MessageId,
+    MessageState, Priority, Queue, QueueAttributes, QueueName, QueuePosition, RedrivePolicy,
 };
-use nexq_core::store::{Store, StoreError};
+use nexq_core::store::{Movable, Store, StoreError};
 
 /// Visibility timeout used where a case needs a claim to lapse during the test.
 ///
@@ -111,8 +111,7 @@ pub async fn queue_attributes_survive_a_round_trip(store: Arc<dyn Store>) {
         visibility_timeout: Duration::from_secs(120),
         delay: Duration::from_secs(5),
         receive_wait_time: Duration::from_secs(20),
-        max_receive_count: Some(3),
-        dead_letter_queue: Some(name("jobs_dlq")),
+        redrive: Some(RedrivePolicy::new(3, name("jobs_dlq")).expect("a valid policy")),
     };
     store.create_queue(expected.clone()).await.expect("create");
 
@@ -547,6 +546,13 @@ pub async fn operations_on_a_missing_queue_report_it(store: Arc<dyn Store>) {
             store.position_of(&missing, &MessageId::new()).await.err(),
         ),
         ("purge_queue", store.purge_queue(&missing).await.err()),
+        (
+            "claim_for_move",
+            store
+                .claim_for_move(&missing, Movable::Exhausted, Duration::from_secs(30), 10)
+                .await
+                .err(),
+        ),
     ];
 
     for (operation, error) in errors {
@@ -1452,4 +1458,359 @@ pub async fn acking_an_unissued_handle_is_refused(store: Arc<dyn Store>) {
         claim_body(&store, &queue_name).await.is_some(),
         "the message must still be there"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Dead-letter queues
+// ---------------------------------------------------------------------------
+//
+// A backend owes two halves here, and they are easy to get separately right and jointly
+// wrong. A message its redrive policy has exhausted must **stop being delivered** the
+// moment it runs out, and it must **be offered for moving** — but only once its last claim
+// has lapsed, because until then a consumer may still acknowledge it. A backend that
+// implemented one half and not the other would either keep redelivering a message forever
+// or dead-letter work that succeeded.
+//
+// How long a message being moved is held.
+const MOVE_HOLD: Duration = Duration::from_secs(30);
+
+/// Create `jobs` with a redrive policy allowing `max_receive_count` deliveries, and return
+/// its name.
+///
+/// The dead-letter queue it names is not created: no [`Store`] operation touches it, since
+/// the move itself is the engine's job and may cross backends. Whether the target exists is
+/// checked where a policy is *set*, not where a message is taken.
+async fn jobs_with_redrive(store: &Arc<dyn Store>, max_receive_count: u32) -> QueueName {
+    let mut queue = queue("jobs");
+    queue.attributes.redrive =
+        Some(RedrivePolicy::new(max_receive_count, name("jobs_dlq")).expect("a valid policy"));
+    store.create_queue(queue).await.expect("create");
+
+    name("jobs")
+}
+
+/// Claim and let the claim lapse at once, `times` over.
+///
+/// A zero visibility timeout is what makes this quick: the claim expires the instant it is
+/// made, so the message is claimable again without waiting for anything.
+async fn burn_deliveries(store: &Arc<dyn Store>, queue: &QueueName, times: u32) {
+    for delivery in 1..=times {
+        store
+            .claim_next(queue, Some(Duration::ZERO))
+            .await
+            .expect("claim")
+            .unwrap_or_else(|| panic!("delivery {delivery} should still have been allowed"));
+    }
+}
+
+/// Take whatever is exhausted, with a generous hold and no meaningful limit.
+async fn take_exhausted(store: &Arc<dyn Store>, queue: &QueueName) -> Vec<ClaimedMessage> {
+    store
+        .claim_for_move(queue, Movable::Exhausted, MOVE_HOLD, 100)
+        .await
+        .expect("claim for move")
+}
+
+/// A message that has had every delivery its policy allowed stops being claimable, without
+/// waiting for anything to move it. Otherwise a queue whose sweeper is behind would keep
+/// handing out deliveries the policy exists to prevent.
+pub async fn an_exhausted_message_is_not_claimed_again(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 2).await;
+    store
+        .enqueue(&queue_name, message("poison", 0), None)
+        .await
+        .expect("enqueue");
+
+    burn_deliveries(&store, &queue_name, 2).await;
+
+    assert!(
+        claim_body(&store, &queue_name).await.is_none(),
+        "its two allowed deliveries are spent"
+    );
+}
+
+/// The boundary from the other side: one delivery short of the limit is still a delivery
+/// the message is entitled to.
+pub async fn a_message_within_its_redrive_policy_is_still_claimed(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 3).await;
+    store
+        .enqueue(&queue_name, message("retry me", 0), None)
+        .await
+        .expect("enqueue");
+
+    burn_deliveries(&store, &queue_name, 2).await;
+
+    assert_eq!(
+        claim_body(&store, &queue_name).await.as_deref(),
+        Some("retry me"),
+        "the third delivery was allowed"
+    );
+    assert!(
+        take_exhausted(&store, &queue_name).await.is_empty(),
+        "and it was not exhausted before it was taken"
+    );
+}
+
+/// A queue with no redrive policy never exhausts anything, however many times a message
+/// comes back.
+pub async fn a_queue_with_no_redrive_policy_exhausts_nothing(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("forever", 0), None)
+        .await
+        .expect("enqueue");
+
+    burn_deliveries(&store, &queue_name, 5).await;
+
+    assert!(
+        take_exhausted(&store, &queue_name).await.is_empty(),
+        "nothing runs out when there is no limit"
+    );
+    assert!(
+        claim_body(&store, &queue_name).await.is_some(),
+        "and it stays deliverable"
+    );
+}
+
+/// The other half: an exhausted message is handed to a caller that asks for it, under a
+/// handle that finishes the move.
+pub async fn an_exhausted_message_is_offered_for_moving(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    let id = send(&store, &queue_name, "poison", 0, None).await;
+
+    burn_deliveries(&store, &queue_name, 1).await;
+    let taken = take_exhausted(&store, &queue_name).await;
+
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].message.id, id);
+    assert_eq!(taken[0].message.body, "poison");
+
+    store
+        .ack(&queue_name, &taken[0].receipt)
+        .await
+        .expect("the handle must finish the move");
+    assert_eq!(
+        store
+            .message_counts(&queue_name)
+            .await
+            .expect("counts")
+            .total(),
+        0,
+        "and the message is gone"
+    );
+}
+
+/// Being taken for a move is not a delivery. A message arriving in its dead-letter queue
+/// reporting one more delivery than the policy allowed would be reporting one that never
+/// happened.
+pub async fn taking_a_message_to_move_does_not_count_a_delivery(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 2).await;
+    store
+        .enqueue(&queue_name, message("poison", 0), None)
+        .await
+        .expect("enqueue");
+    burn_deliveries(&store, &queue_name, 2).await;
+
+    let taken = take_exhausted(&store, &queue_name).await;
+
+    assert_eq!(taken.len(), 1);
+    assert_eq!(
+        taken[0].message.receive_count, 2,
+        "two deliveries happened, not three"
+    );
+}
+
+/// A message on its way out is hidden exactly as a claimed one is: a concurrent consumer
+/// must not be handed it, and a second mover must not take it as well.
+pub async fn a_message_being_moved_is_hidden_from_everyone(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    store
+        .enqueue(&queue_name, message("poison", 0), None)
+        .await
+        .expect("enqueue");
+    burn_deliveries(&store, &queue_name, 1).await;
+
+    assert_eq!(take_exhausted(&store, &queue_name).await.len(), 1);
+
+    assert!(
+        take_exhausted(&store, &queue_name).await.is_empty(),
+        "a second mover must not be handed the same message"
+    );
+    assert!(
+        claim_body(&store, &queue_name).await.is_none(),
+        "and neither must a consumer"
+    );
+    assert_eq!(
+        store
+            .message_counts(&queue_name)
+            .await
+            .expect("counts")
+            .not_visible,
+        1,
+        "it is in flight, the same as any other held message"
+    );
+}
+
+/// A mover that dies mid-move must not strand the message. The hold lapses like any other
+/// claim, and the message is found again by the next pass.
+pub async fn a_message_left_behind_by_a_mover_is_offered_again(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    store
+        .enqueue(&queue_name, message("poison", 0), None)
+        .await
+        .expect("enqueue");
+    burn_deliveries(&store, &queue_name, 1).await;
+
+    let abandoned = store
+        .claim_for_move(&queue_name, Movable::Exhausted, SHORT_CLAIM, 10)
+        .await
+        .expect("claim for move");
+    assert_eq!(abandoned.len(), 1);
+
+    tokio::time::sleep(AFTER_SHORT_CLAIM).await;
+
+    let found_again = take_exhausted(&store, &queue_name).await;
+    assert_eq!(found_again.len(), 1, "the hold lapsed, so it is offered again");
+    assert_ne!(
+        found_again[0].receipt, abandoned[0].receipt,
+        "under a new handle, which spends the abandoned one"
+    );
+    assert_eq!(
+        found_again[0].message.receive_count, abandoned[0].message.receive_count,
+        "and still without counting either as a delivery"
+    );
+}
+
+/// A consumer part-way through its last allowed delivery may still acknowledge the
+/// message, so it is not exhausted until that claim lapses.
+pub async fn a_message_a_consumer_holds_is_not_offered_for_moving(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    store
+        .enqueue(&queue_name, message("in progress", 0), None)
+        .await
+        .expect("enqueue");
+
+    let claimed = store
+        .claim_next(&queue_name, Some(Duration::from_secs(3600)))
+        .await
+        .expect("claim")
+        .expect("a message");
+
+    assert!(
+        take_exhausted(&store, &queue_name).await.is_empty(),
+        "its count is spent but its consumer has not finished"
+    );
+    store
+        .ack(&queue_name, &claimed.receipt)
+        .await
+        .expect("the consumer must still be able to finish");
+}
+
+/// A limited take is a prefix, not a sample: it takes at most what it was asked for and
+/// leaves the rest to be found.
+pub async fn taking_messages_to_move_respects_its_limit(store: Arc<dyn Store>) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    for index in 0..5 {
+        store
+            .enqueue(&queue_name, message(&format!("m{index}"), 0), None)
+            .await
+            .expect("enqueue");
+    }
+    burn_deliveries(&store, &queue_name, 5).await;
+
+    let first = store
+        .claim_for_move(&queue_name, Movable::Exhausted, MOVE_HOLD, 2)
+        .await
+        .expect("claim for move");
+    assert_eq!(first.len(), 2);
+
+    let rest = take_exhausted(&store, &queue_name).await;
+    assert_eq!(rest.len(), 3, "the others are still there");
+
+    let mut moved: Vec<&str> = first
+        .iter()
+        .chain(rest.iter())
+        .map(|claimed| claimed.message.body.as_str())
+        .collect();
+    moved.sort_unstable();
+    assert_eq!(
+        moved,
+        ["m0", "m1", "m2", "m3", "m4"],
+        "every message exactly once between the two takes"
+    );
+}
+
+/// Moving *everything* is what a redrive out of a dead-letter queue does, and it must be
+/// blind to the redrive policy — otherwise a redrive would skip the very messages the
+/// dead-letter queue had itself given up on, which are the ones an operator is most likely
+/// trying to rescue.
+pub async fn moving_everything_takes_what_a_redrive_policy_would_have_skipped(
+    store: Arc<dyn Store>,
+) {
+    let queue_name = jobs_with_redrive(&store, 1).await;
+    for body in ["exhausted", "untouched"] {
+        store
+            .enqueue(&queue_name, message(body, 0), None)
+            .await
+            .expect("enqueue");
+    }
+    burn_deliveries(&store, &queue_name, 1).await;
+
+    let taken = store
+        .claim_for_move(&queue_name, Movable::Everything, MOVE_HOLD, 10)
+        .await
+        .expect("claim for move");
+
+    let mut bodies: Vec<&str> = taken
+        .iter()
+        .map(|claimed| claimed.message.body.as_str())
+        .collect();
+    bodies.sort_unstable();
+    assert_eq!(
+        bodies,
+        ["exhausted", "untouched"],
+        "both, whatever the policy says about either"
+    );
+}
+
+/// `Movable::Everything` on a queue with no redrive policy still takes everything — the
+/// early exit for "no policy" belongs to the exhausted case alone.
+pub async fn moving_everything_needs_no_redrive_policy(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(&queue_name, message("hello", 0), None)
+        .await
+        .expect("enqueue");
+
+    let taken = store
+        .claim_for_move(&queue_name, Movable::Everything, MOVE_HOLD, 10)
+        .await
+        .expect("claim for move");
+
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].message.body, "hello");
+    assert_eq!(
+        taken[0].message.receive_count, 0,
+        "and still not a delivery"
+    );
+}
+
+/// Neither kind of move takes a message that is not claimable yet.
+pub async fn a_delayed_message_is_not_offered_for_moving(store: Arc<dyn Store>) {
+    let queue_name = jobs(&store).await;
+    store
+        .enqueue(
+            &queue_name,
+            message("later", 0),
+            Some(Duration::from_secs(3600)),
+        )
+        .await
+        .expect("enqueue");
+
+    let taken = store
+        .claim_for_move(&queue_name, Movable::Everything, MOVE_HOLD, 10)
+        .await
+        .expect("claim for move");
+
+    assert!(taken.is_empty(), "it is not claimable, so it is not movable");
 }

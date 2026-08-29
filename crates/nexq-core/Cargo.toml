@@ -14,8 +14,14 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-# `sync` for the long-poll waiter registry, `time` for its deadline.
-tokio = { workspace = true, features = ["sync", "time"] }
+# `sync` for the long-poll waiter registry, `time` for its deadline and the dead-letter
+# sweep's, `rt` to spawn a redrive — which outlives the request that started it, so it
+# cannot be the caller's future.
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+# The engine logs where a message went. A message leaving the queue it was sent to is the
+# one thing here somebody comes looking for afterwards, and "where did my message go" is
+# not a question a log should be silent about.
+tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

@@ -338,6 +338,32 @@ impl From<EngineError> for ApiError {
                  than 262144 bytes, got {bytes}."
             )),
             EngineError::InvalidReceipt => Self::receipt_handle_is_invalid(),
+
+            // The redrive family. SQS reports a `RedrivePolicy` naming a queue it cannot
+            // use as `InvalidParameterValue`, which is what an SDK expects, and there is
+            // no closer code for the rest of these than "you asked for something that
+            // cannot be done".
+            EngineError::DeadLetterQueueNotFound(_)
+            | EngineError::DeadLetterQueueIsItself(_)
+            | EngineError::MoveDestinationUnknown { .. }
+            | EngineError::MoveToSameQueue(_) => Self::invalid_parameter_value(error.to_string()),
+
+            // SQS allows one message move task per queue and refuses the second with
+            // `UnsupportedOperation`, which is the code an SDK has a retry policy for.
+            EngineError::MoveAlreadyRunning(_) => Self::new(
+                StatusCode::BAD_REQUEST,
+                "AWS.SimpleQueueService.UnsupportedOperation",
+                error.to_string(),
+            ),
+
+            // A task handle that names nothing — the same answer whether it was never
+            // issued or has since been forgotten.
+            EngineError::MoveTaskNotFound(_) => Self::new(
+                StatusCode::BAD_REQUEST,
+                "ResourceNotFoundException",
+                error.to_string(),
+            ),
+
             EngineError::Backend(source) => {
                 error!(cause = %source, "storage backend failed");
                 Self::internal_error()

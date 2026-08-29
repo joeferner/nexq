@@ -17,9 +17,9 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use nexq_core::model::{
     ClaimedMessage, Message, MessageCounts, MessageId, MessageState, Queue, QueueAttributes,
-    QueueName, QueuePosition, ReceiptHandle,
+    QueueName, QueuePosition, ReceiptHandle, RedrivePolicy,
 };
-use nexq_core::store::{Result, Store, StoreError};
+use nexq_core::store::{Movable, Result, Store, StoreError};
 
 /// This backend's name in config.
 pub const BACKEND_NAME: &str = "memory";
@@ -121,6 +121,15 @@ fn state_of(stored: &StoredMessage, now: SystemTime) -> MessageState {
     } else {
         MessageState::Delayed
     }
+}
+
+/// Whether a redrive policy has run out of patience with a message.
+///
+/// A queue with no policy exhausts nothing, which is why this takes the option rather
+/// than making every caller unwrap it: "no limit" and "under the limit" lead to the same
+/// answer everywhere, and writing that branch twice is how they come apart.
+fn is_exhausted(redrive: Option<&RedrivePolicy>, message: &Message) -> bool {
+    redrive.is_some_and(|policy| policy.is_exhausted(message.receive_count))
 }
 
 /// `now + duration`, or `now` if that would overflow the clock.
@@ -310,16 +319,29 @@ impl Store for MemoryStore {
             .ok_or_else(|| StoreError::QueueNotFound(queue.clone()))?;
 
         let timeout = visibility_timeout.unwrap_or(held.queue.attributes.visibility_timeout);
+        // Destructured so the attributes can be read while the messages are borrowed
+        // mutably: they are separate fields, and the borrow checker can see that here
+        // where it cannot through `held.`.
+        let StoredQueue { queue: stored_queue, messages } = held;
+        let redrive = stored_queue.attributes.redrive.as_ref();
 
         // Anything whose visibility has come round is claimable, including a message
         // whose previous claim expired — that expiry is what makes delivery
-        // at-least-once. Except the ones the caller already holds: a claim taken with a
-        // zero timeout is visible again immediately, so without this a batch would keep
-        // being handed its own first message.
-        let Some(next) = held
-            .messages
+        // at-least-once. Two exceptions:
+        //
+        // - the ones the caller already holds, since a claim taken with a zero timeout is
+        //   visible again immediately and without this a batch would keep being handed its
+        //   own first message;
+        // - the ones the redrive policy has exhausted, whose deliveries are spent. Handing
+        //   one out would be the delivery the policy exists to prevent, and it stays put
+        //   until `claim_exhausted` moves it out.
+        let Some(next) = messages
             .iter_mut()
-            .filter(|stored| stored.visible_at <= now && !skip.contains(&stored.message.id))
+            .filter(|stored| {
+                stored.visible_at <= now
+                    && !skip.contains(&stored.message.id)
+                    && !is_exhausted(redrive, &stored.message)
+            })
             .min_by(|left, right| serve_first(left, right))
         else {
             return Ok(None);
@@ -339,6 +361,74 @@ impl Store for MemoryStore {
             receipt,
             claim_expires_at,
         }))
+    }
+
+    async fn claim_for_move(
+        &self,
+        queue: &QueueName,
+        movable: Movable,
+        hold: Duration,
+        limit: usize,
+    ) -> Result<Vec<ClaimedMessage>> {
+        let now = SystemTime::now();
+        let mut queues = self.write()?;
+        let held = queues
+            .get_mut(queue)
+            .ok_or_else(|| StoreError::QueueNotFound(queue.clone()))?;
+
+        let redrive = held.queue.attributes.redrive.clone();
+
+        // No policy, nothing exhausted. Checked before anything is scanned, since this is
+        // the case for most queues and the dead-letter sweep asks every one of them.
+        if movable == Movable::Exhausted && redrive.is_none() {
+            return Ok(Vec::new());
+        }
+
+        // Indices rather than `iter_mut`, because the order has to be decided across the
+        // whole set before any of it is mutated.
+        let mut movable_indices: Vec<usize> = held
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, stored)| {
+                // Claimable, always. Without this a move would take a message away from a
+                // consumer that is still working on it and may yet acknowledge it.
+                stored.visible_at <= now
+                    && match movable {
+                        Movable::Exhausted => is_exhausted(redrive.as_ref(), &stored.message),
+                        Movable::Everything => true,
+                    }
+            })
+            .map(|(index, _)| index)
+            .collect();
+
+        // In the order they would have been served, so which messages a limited move takes
+        // is the same rule as everywhere else rather than an accident of storage.
+        movable_indices
+            .sort_by(|&left, &right| serve_first(&held.messages[left], &held.messages[right]));
+        movable_indices.truncate(limit);
+
+        let claim_expires_at = visible_after(now, hold);
+        let mut taken = Vec::with_capacity(movable_indices.len());
+
+        for index in movable_indices {
+            let stored = &mut held.messages[index];
+            let receipt = ReceiptHandle::new();
+
+            // Held exactly as a delivery holds it — a fresh handle, invisible until the
+            // hold lapses — but *not* counted as one: the message is leaving, not being
+            // tried again.
+            stored.claim = Some(receipt.clone());
+            stored.visible_at = claim_expires_at;
+
+            taken.push(ClaimedMessage {
+                message: stored.message.clone(),
+                receipt,
+                claim_expires_at,
+            });
+        }
+
+        Ok(taken)
     }
 
     async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> Result<()> {

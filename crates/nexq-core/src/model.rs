@@ -27,6 +27,16 @@ pub const MAX_BODY_BYTES: usize = 256 * 1024;
 /// Default time a claimed message stays invisible to other consumers. SQS's default.
 pub const DEFAULT_VISIBILITY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Fewest deliveries a redrive policy may allow before dead-lettering. From SQS.
+///
+/// One rather than zero because zero would dead-letter a message that has never been
+/// tried, which is not a retry policy at all — a queue whose every message goes straight
+/// to another queue is expressed by pointing producers at that queue.
+pub const MIN_RECEIVE_COUNT: u32 = 1;
+
+/// Most deliveries a redrive policy may allow. Also from SQS.
+pub const MAX_RECEIVE_COUNT: u32 = 1000;
+
 /// A queue's name.
 ///
 /// Validated on construction, so an invalid name cannot reach a backend. The rules are
@@ -169,13 +179,45 @@ pub struct QueueAttributes {
     /// when a request does not ask for its own.
     pub receive_wait_time: Duration,
 
-    /// Deliveries after which a message goes to the dead-letter queue. `None` means
-    /// redeliver forever.
-    pub max_receive_count: Option<u32>,
+    /// When to give up redelivering a message, and where to put it instead. `None`
+    /// means redeliver forever.
+    pub redrive: Option<RedrivePolicy>,
+}
 
-    /// Where exhausted messages go. A dead-letter queue is an ordinary queue, so this
-    /// is just another name.
-    pub dead_letter_queue: Option<QueueName>,
+/// When to stop redelivering a message, and where it goes instead.
+///
+/// The two halves are one value rather than two independent attributes because neither
+/// means anything alone: a limit with nowhere to send the message would have to either
+/// drop it or ignore the limit, and a target with no limit is never reached. SQS agrees —
+/// its `RedrivePolicy` is a single attribute holding both — and making it a single field
+/// here is what stops "half a policy" from being representable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedrivePolicy {
+    /// Deliveries after which a message is dead-lettered instead of redelivered.
+    ///
+    /// Counted in *deliveries*, not failures: a consumer that takes a message and never
+    /// acknowledges it has used one up, whether it crashed, timed out, or simply chose
+    /// not to. That is the only thing a queue can observe.
+    ///
+    /// Between [`MIN_RECEIVE_COUNT`] and [`MAX_RECEIVE_COUNT`], which
+    /// [`RedrivePolicy::new`] enforces.
+    max_receive_count: u32,
+
+    /// Where exhausted messages go.
+    ///
+    /// An ordinary queue — a dead-letter queue is not a special kind of thing, which is
+    /// why this is a name and not a flag on some other structure. It follows that a DLQ
+    /// can have consumers, attributes, and a redrive policy of its own.
+    pub dead_letter_queue: QueueName,
+}
+
+/// Why a redrive policy was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidRedrivePolicy {
+    #[error(
+        "maxReceiveCount must be between {MIN_RECEIVE_COUNT} and {MAX_RECEIVE_COUNT}, got {got}"
+    )]
+    ReceiveCountOutOfRange { got: u32 },
 }
 
 /// A message's server-assigned identifier.
@@ -331,9 +373,47 @@ impl Default for QueueAttributes {
             visibility_timeout: DEFAULT_VISIBILITY_TIMEOUT,
             delay: Duration::ZERO,
             receive_wait_time: Duration::ZERO,
-            max_receive_count: None,
-            dead_letter_queue: None,
+            redrive: None,
         }
+    }
+}
+
+impl RedrivePolicy {
+    /// Validate and wrap a redrive policy.
+    pub fn new(
+        max_receive_count: u32,
+        dead_letter_queue: QueueName,
+    ) -> std::result::Result<Self, InvalidRedrivePolicy> {
+        if !(MIN_RECEIVE_COUNT..=MAX_RECEIVE_COUNT).contains(&max_receive_count) {
+            return Err(InvalidRedrivePolicy::ReceiveCountOutOfRange {
+                got: max_receive_count,
+            });
+        }
+
+        Ok(Self {
+            max_receive_count,
+            dead_letter_queue,
+        })
+    }
+
+    /// Deliveries after which a message is dead-lettered.
+    pub fn max_receive_count(&self) -> u32 {
+        self.max_receive_count
+    }
+
+    /// Whether this policy has run out of patience with a message.
+    ///
+    /// The rule every backend has to agree on, written once so they cannot disagree about
+    /// whether the boundary case is `>` or `>=`: a message that has been *delivered*
+    /// `max_receive_count` times is exhausted. With a limit of one, that is the message
+    /// whose first delivery lapsed — one attempt was allowed and one attempt was had.
+    ///
+    /// Says nothing about whether the message is claimable. A message in the middle of
+    /// its last delivery satisfies this and must not be moved: the consumer holding it
+    /// may still acknowledge it. Deciding *when* to ask is the caller's, and
+    /// [`crate::store::Store::claim_exhausted`] is where the two are put together.
+    pub fn is_exhausted(&self, receive_count: u32) -> bool {
+        receive_count >= self.max_receive_count
     }
 }
 
@@ -471,6 +551,28 @@ impl Message {
     pub fn within_size_limit(&self) -> bool {
         self.size_bytes() <= MAX_BODY_BYTES
     }
+
+    /// The same message, as it arrives in a different queue.
+    ///
+    /// What moving a message between queues means, and there are two decisions in it that
+    /// a caller should not be making one at a time:
+    ///
+    /// - **The identity and the enqueue time carry over.** It is the same piece of work,
+    ///   so the id a producer holds still finds it — asking where a message got to and
+    ///   being told it is in the dead-letter queue is the answer that was wanted — and how
+    ///   long it has been waiting is a fact about the work rather than about which queue
+    ///   is holding it.
+    /// - **The delivery counters reset.** They count deliveries *from a queue*, and this
+    ///   is a different queue. It is also what stops a dead-letter queue with a redrive
+    ///   policy of its own from dead-lettering everything the instant it arrives: a
+    ///   message carrying its old count would already be over any limit that put it there.
+    pub fn moved(&self) -> Self {
+        Self {
+            receive_count: 0,
+            first_received_at: None,
+            ..self.clone()
+        }
+    }
 }
 
 impl AttributeValue {
@@ -569,8 +671,76 @@ mod tests {
         assert_eq!(attributes.visibility_timeout, Duration::from_secs(30));
         assert_eq!(attributes.delay, Duration::ZERO);
         assert_eq!(attributes.receive_wait_time, Duration::ZERO);
-        assert_eq!(attributes.max_receive_count, None);
-        assert_eq!(attributes.dead_letter_queue, None);
+        assert_eq!(
+            attributes.redrive, None,
+            "redeliver forever unless told otherwise"
+        );
+    }
+
+    #[test]
+    fn a_redrive_policy_holds_both_halves_or_neither() {
+        let policy = RedrivePolicy::new(3, QueueName::new("jobs_dlq").expect("valid"))
+            .expect("in range");
+
+        assert_eq!(policy.max_receive_count(), 3);
+        assert_eq!(policy.dead_letter_queue.as_str(), "jobs_dlq");
+    }
+
+    #[test]
+    fn a_receive_count_outside_the_range_is_refused() {
+        let dlq = QueueName::new("jobs_dlq").expect("valid");
+
+        for count in [0, MAX_RECEIVE_COUNT + 1, u32::MAX] {
+            assert_eq!(
+                RedrivePolicy::new(count, dlq.clone()),
+                Err(InvalidRedrivePolicy::ReceiveCountOutOfRange { got: count }),
+                "{count}"
+            );
+        }
+
+        for count in [MIN_RECEIVE_COUNT, 2, MAX_RECEIVE_COUNT] {
+            RedrivePolicy::new(count, dlq.clone()).unwrap_or_else(|error| panic!("{count}: {error}"));
+        }
+    }
+
+    /// The boundary, written down once so no backend has to guess whether it is `>` or
+    /// `>=`. A limit of one means the message whose *first* delivery lapsed.
+    #[test]
+    fn a_message_is_exhausted_once_it_has_had_every_delivery_it_was_allowed() {
+        let dlq = QueueName::new("jobs_dlq").expect("valid");
+        let once = RedrivePolicy::new(1, dlq.clone()).expect("valid");
+
+        assert!(!once.is_exhausted(0), "never delivered");
+        assert!(once.is_exhausted(1), "its one allowed delivery is spent");
+
+        let thrice = RedrivePolicy::new(3, dlq).expect("valid");
+        assert!(!thrice.is_exhausted(2));
+        assert!(thrice.is_exhausted(3));
+        assert!(thrice.is_exhausted(4), "and beyond, however it got there");
+    }
+
+    #[test]
+    fn a_moved_message_keeps_its_identity_and_loses_its_delivery_count() {
+        let original = Message {
+            receive_count: 3,
+            first_received_at: Some(SystemTime::now()),
+            ..Message::new("hello", Priority::new(7))
+        };
+
+        let moved = original.moved();
+
+        assert_eq!(moved.id, original.id, "the same piece of work");
+        assert_eq!(moved.body, original.body);
+        assert_eq!(moved.priority, original.priority);
+        assert_eq!(
+            moved.enqueued_at, original.enqueued_at,
+            "how long it has been waiting is a fact about the work"
+        );
+        assert_eq!(
+            moved.receive_count, 0,
+            "the counts belong to the queue it left"
+        );
+        assert_eq!(moved.first_received_at, None);
     }
 
     #[test]

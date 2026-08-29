@@ -27,12 +27,15 @@ use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
 use tokio::time::{Instant, timeout};
+use tracing::{info, warn};
 
+use crate::dead_letter::Sweep;
 use crate::model::{
     ClaimedMessage, MAX_BODY_BYTES, Message, MessageAttributes, MessageCounts, MessageId, Priority,
     Queue, QueueAttributes, QueueName, QueuePosition, ReceiptHandle,
 };
-use crate::store::{Store, StoreError};
+use crate::move_task::{MOVE_BATCH, MOVE_HOLD, MoveTask, MoveTaskId, MoveTasks, TaskState};
+use crate::store::{Movable, Store, StoreError};
 use crate::waiters::Waiters;
 
 /// The result of an engine operation.
@@ -125,6 +128,49 @@ pub enum EngineError {
     #[error("the receipt handle does not identify a current claim")]
     InvalidReceipt,
 
+    /// A redrive policy names a dead-letter queue that does not exist.
+    ///
+    /// Refused when the policy is set rather than discovered when the first message is
+    /// dead-lettered: the alternative is a queue that reports a redrive policy and quietly
+    /// cannot honour it, which is the failure mode dead-lettering exists to prevent.
+    #[error("the dead-letter queue {0} does not exist")]
+    DeadLetterQueueNotFound(QueueName),
+
+    /// A redrive policy names the queue it is on.
+    ///
+    /// Dead-lettering a message into the queue it came from is a loop, and with the
+    /// delivery counters reset by the move it is an *endless* one.
+    #[error("a queue cannot be its own dead-letter queue: {0}")]
+    DeadLetterQueueIsItself(QueueName),
+
+    /// A redrive was asked for with no destination, and there is no single obvious one.
+    ///
+    /// The count is how many queues name this one as their dead-letter queue: zero means
+    /// there is nothing to infer from, and more than one means the answer is ambiguous.
+    /// Either way the caller has to say where the messages should go.
+    // The field is `queue` rather than `source` because `thiserror` reads a field of that
+    // name as the error's *cause* and requires it to be an error type.
+    #[error(
+        "{queue} has {candidates} source queues, so a redrive destination cannot be \
+         inferred; name one"
+    )]
+    MoveDestinationUnknown { queue: QueueName, candidates: usize },
+
+    /// A redrive was asked for from a queue to itself.
+    #[error("a redrive must move messages somewhere else: {0}")]
+    MoveToSameQueue(QueueName),
+
+    /// A redrive of this queue is already running.
+    ///
+    /// Two would race for every message and each report half the progress, so the second
+    /// is refused. Cancel the first, or wait for it.
+    #[error("a redrive of {0} is already running")]
+    MoveAlreadyRunning(QueueName),
+
+    /// No redrive task by that handle — it was never issued, or it has been pruned.
+    #[error("no redrive task with handle {0}")]
+    MoveTaskNotFound(MoveTaskId),
+
     /// The storage backend failed.
     #[error("backend failure: {0}")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -150,6 +196,10 @@ pub struct Engine {
     /// it to poll. In process, which is why a queue's traffic belongs on one node.
     waiters: Waiters,
 
+    /// Redrives in flight and recently finished, so one can be reported on and called
+    /// off while it runs. In process for the same reason the waiters are.
+    move_tasks: MoveTasks,
+
     /// Set once the process is going away, after which nothing waits. See
     /// [`Engine::begin_draining`].
     draining: AtomicBool,
@@ -160,6 +210,7 @@ impl Engine {
         Self {
             store,
             waiters: Waiters::new(),
+            move_tasks: MoveTasks::new(),
             draining: AtomicBool::new(false),
         }
     }
@@ -204,6 +255,8 @@ impl Engine {
         name: QueueName,
         attributes: QueueAttributes,
     ) -> Result<Queue> {
+        self.check_redrive_policy(&name, &attributes).await?;
+
         for _ in 0..CREATE_ATTEMPTS {
             let created_at = SystemTime::now();
             let queue = Queue {
@@ -277,6 +330,13 @@ impl Engine {
     {
         let existing = self.get_queue(name).await.map_err(E::from)?;
         let attributes = change(existing.attributes)?;
+
+        // Checked here rather than in the caller's `change`, so a queue cannot be given an
+        // unhonourable redrive policy through whichever facade forgot to look.
+        self.check_redrive_policy(name, &attributes)
+            .await
+            .map_err(E::from)?;
+
         let modified_at = SystemTime::now();
 
         self.store
@@ -606,6 +666,399 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------------
+    // Dead-letter queues
+    // -----------------------------------------------------------------------------
+
+    /// Refuse a redrive policy this server could not honour.
+    ///
+    /// Two things are checked, and both are checked *here* rather than in a facade so that
+    /// a queue configured through one door cannot be configured in a way the other door
+    /// would have refused.
+    ///
+    /// Not checked: whether the dead-letter queue has a redrive policy of its own that
+    /// leads back here. A chain is a legitimate arrangement — a DLQ that itself gives up
+    /// eventually — and a cycle is only reachable by an operator who wrote one deliberately,
+    /// so refusing it would cost more in surprise than it saves.
+    async fn check_redrive_policy(
+        &self,
+        queue: &QueueName,
+        attributes: &QueueAttributes,
+    ) -> Result<()> {
+        let Some(policy) = &attributes.redrive else {
+            return Ok(());
+        };
+
+        if policy.dead_letter_queue == *queue {
+            return Err(EngineError::DeadLetterQueueIsItself(queue.clone()));
+        }
+
+        match self.store.get_queue(&policy.dead_letter_queue).await {
+            Ok(_) => Ok(()),
+            Err(StoreError::QueueNotFound(name)) => Err(EngineError::DeadLetterQueueNotFound(name)),
+            Err(other) => Err(other.into()),
+        }
+    }
+
+    /// Move one message from one queue to another.
+    ///
+    /// The single primitive under both directions of dead-lettering, so the durability
+    /// argument is made once. The message is **enqueued into the destination before it is
+    /// acknowledged in the source**, and that order is the whole story: a failure between
+    /// the two leaves the message in both queues, which is a duplicate — something every
+    /// consumer of an at-least-once queue already has to handle — where the other order
+    /// would lose it outright.
+    ///
+    /// The message is enqueued with an explicit zero delay rather than the destination's
+    /// configured one. A delay is for messages a producer has just sent; this one was sent
+    /// a while ago, and holding a dead-lettered message back from the operator who went
+    /// looking for it would be the wrong reading of the same setting.
+    async fn move_message(
+        &self,
+        from: &QueueName,
+        to: &QueueName,
+        claimed: ClaimedMessage,
+    ) -> Result<()> {
+        self.store
+            .enqueue(to, claimed.message.moved(), Some(Duration::ZERO))
+            .await?;
+
+        // Available now, so anyone long-polling the destination should find out. Matters
+        // for a redrive, whose destination is a live queue with real consumers on it.
+        self.waiters.notify_one(to);
+
+        match self.store.ack(from, &claimed.receipt).await {
+            Ok(()) => Ok(()),
+
+            // The hold lapsed and something else took the message before this got here.
+            // The move itself succeeded — the message is in the destination — so this is a
+            // duplicate rather than a failure, and stopping a sweep or a redrive over it
+            // would leave the rest of the queue unmoved for no gain.
+            Err(StoreError::InvalidReceipt) => {
+                warn!(
+                    from = %from,
+                    to = %to,
+                    message = %claimed.message.id,
+                    "moved a message but could not remove it from its source, so it is now \
+                     in both queues"
+                );
+
+                Ok(())
+            }
+
+            Err(other) => Err(other.into()),
+        }
+    }
+
+    /// Move every message this queue's redrive policy has given up on to its dead-letter
+    /// queue, returning how many moved.
+    ///
+    /// Zero for a queue with no redrive policy, and zero for the ordinary case of a queue
+    /// whose consumers are keeping up — which is why the sweep that calls this is quiet
+    /// almost all of the time.
+    ///
+    /// **Not driven by receives.** A message becomes eligible when its last claim lapses,
+    /// which is a deadline passing rather than anything a client did, so nothing would
+    /// notice it on a queue whose consumers have stopped calling — and a queue whose
+    /// consumers have stopped calling is exactly the one whose messages need
+    /// dead-lettering. [`crate::dead_letter`] is what makes it happen anyway.
+    pub async fn dead_letter_exhausted(&self, queue: &QueueName) -> Result<u64> {
+        let Some(policy) = self.store.get_queue(queue).await?.attributes.redrive else {
+            return Ok(0);
+        };
+
+        let mut moved = 0;
+
+        loop {
+            let batch = self
+                .store
+                .claim_for_move(queue, Movable::Exhausted, MOVE_HOLD, MOVE_BATCH)
+                .await?;
+            let taken = batch.len();
+
+            for claimed in batch {
+                let message = claimed.message.id.clone();
+                let receive_count = claimed.message.receive_count;
+
+                self.move_message(queue, &policy.dead_letter_queue, claimed)
+                    .await?;
+                moved += 1;
+
+                // At `info`, not `debug`: a message leaving the queue it was sent to is
+                // the kind of thing someone comes looking for afterwards, and "where did
+                // my message go" is not a question a log should be silent about.
+                info!(
+                    queue = %queue,
+                    dead_letter_queue = %policy.dead_letter_queue,
+                    message = %message,
+                    receive_count,
+                    max_receive_count = policy.max_receive_count(),
+                    "dead-lettered a message that ran out of deliveries"
+                );
+            }
+
+            // A short batch means the queue had nothing more, so there is no reason to ask
+            // again. Anything that became eligible since will be found by the next sweep.
+            if taken < MOVE_BATCH {
+                return Ok(moved);
+            }
+        }
+    }
+
+    /// Dead-letter every exhausted message in every queue.
+    ///
+    /// One pass, which is what [`crate::dead_letter::Sweeper`] runs on a timer. A queue
+    /// that fails is recorded and the rest are still swept: one unreachable dead-letter
+    /// queue must not stop every other queue's messages from moving.
+    pub async fn sweep_dead_letters(&self) -> Result<Sweep> {
+        let queues = self.store.list_queues().await?;
+        let mut sweep = Sweep {
+            queues: queues.len(),
+            ..Sweep::default()
+        };
+
+        for queue in queues {
+            // Filtered here as well as inside `dead_letter_exhausted`, which re-reads the
+            // queue: this is the whole reason the sweep is cheap on a deployment where few
+            // queues have a policy.
+            if queue.attributes.redrive.is_none() {
+                continue;
+            }
+
+            match self.dead_letter_exhausted(&queue.name).await {
+                Ok(moved) => sweep.moved += moved,
+                Err(error) => sweep.failures.push((queue.name, error)),
+            }
+        }
+
+        Ok(sweep)
+    }
+
+    /// Which queues name this one as their dead-letter queue.
+    ///
+    /// In name order, so the answer is stable. Answered by scanning the queues rather than
+    /// by an index the other way round: a redrive policy lives on the source, so this is
+    /// the derived direction, and keeping a reverse index in every backend would be a
+    /// second copy of the same fact to get out of step.
+    ///
+    /// A queue that is nobody's dead-letter queue gets an empty list, which is a normal
+    /// answer. The queue itself must exist, since a caller asking about a name that was
+    /// never a queue has made a mistake worth reporting.
+    pub async fn dead_letter_sources(&self, dead_letter_queue: &QueueName) -> Result<Vec<QueueName>> {
+        self.store.get_queue(dead_letter_queue).await?;
+
+        let mut sources: Vec<QueueName> = self
+            .store
+            .list_queues()
+            .await?
+            .into_iter()
+            .filter(|queue| {
+                queue
+                    .attributes
+                    .redrive
+                    .as_ref()
+                    .is_some_and(|policy| &policy.dead_letter_queue == dead_letter_queue)
+            })
+            .map(|queue| queue.name)
+            .collect();
+
+        sources.sort();
+
+        Ok(sources)
+    }
+
+    /// Start moving a queue's messages to another queue, in the background.
+    ///
+    /// The way out of a dead-letter queue: the messages that failed go back to the queue
+    /// they came from, once whatever was wrong has been fixed. Nothing here is specific to
+    /// dead-letter queues, though — it moves messages between any two queues, because a DLQ
+    /// is an ordinary queue and giving this a narrower type would be pretending otherwise.
+    ///
+    /// `destination` of `None` means "back where they came from", inferred from the redrive
+    /// policies pointing at `source`: exactly one source queue and that is the answer,
+    /// otherwise [`EngineError::MoveDestinationUnknown`] and the caller has to say. NexQ
+    /// does not record which queue each individual message arrived from — that would be a
+    /// field on every message to serve one operation — so a dead-letter queue shared by
+    /// several sources needs the destination named.
+    ///
+    /// `max_messages_per_second` throttles it. The reason to is that the destination has
+    /// live consumers: dropping a dead-letter queue's worth of messages onto them at once
+    /// is how a redrive becomes a second outage.
+    ///
+    /// Returns as soon as the task is registered, not when it finishes. The task it returns
+    /// is a snapshot from before any message has moved; [`Engine::redrive_task`] is how to
+    /// see where it got to and [`Engine::cancel_redrive`] is how to stop it.
+    pub async fn start_redrive(
+        self: &Arc<Self>,
+        source: QueueName,
+        destination: Option<QueueName>,
+        max_messages_per_second: Option<u32>,
+    ) -> Result<MoveTask> {
+        // Proves the source exists before anything else is decided, so a typo is reported
+        // as a missing queue rather than as an undeducible destination.
+        self.store.get_queue(&source).await?;
+
+        let destination = match destination {
+            Some(named) => {
+                self.store.get_queue(&named).await?;
+                named
+            }
+            None => {
+                let candidates = self.dead_letter_sources(&source).await?;
+                match candidates.as_slice() {
+                    [only] => only.clone(),
+                    other => {
+                        return Err(EngineError::MoveDestinationUnknown {
+                            queue: source,
+                            candidates: other.len(),
+                        });
+                    }
+                }
+            }
+        };
+
+        if destination == source {
+            return Err(EngineError::MoveToSameQueue(source));
+        }
+
+        // Checked before the task is registered, so a refused second redrive leaves no
+        // trace. Two would race for every message and each report half the progress.
+        if self.move_tasks.is_moving(&source) {
+            return Err(EngineError::MoveAlreadyRunning(source));
+        }
+
+        // A snapshot of what the task set out to do. Taken before it starts, and wrong in
+        // both directions by the time it ends — producers may add more, and messages a
+        // consumer holds are not moved at all — which is why it is reported next to the
+        // count of what actually moved rather than instead of it.
+        let messages_to_move = self.store.message_counts(&source).await?.total();
+
+        let state = self.move_tasks.start(
+            source,
+            destination,
+            max_messages_per_second,
+            messages_to_move,
+        );
+
+        info!(
+            task = %state.id(),
+            source = %state.source(),
+            destination = %state.destination(),
+            messages_to_move,
+            max_messages_per_second,
+            "starting a redrive"
+        );
+
+        tokio::spawn(Arc::clone(self).run_redrive(Arc::clone(&state)));
+
+        Ok(state.snapshot())
+    }
+
+    /// The loop that actually moves a redrive's messages.
+    ///
+    /// Owns an `Arc<Engine>` because it outlives the request that started it: a redrive of
+    /// a large queue keeps running long after its `POST` returned, which is the reason it
+    /// is a task with a handle rather than a request that blocks.
+    async fn run_redrive(self: Arc<Self>, state: Arc<TaskState>) {
+        let pace = state.pace();
+        let batch_size = state.batch_size();
+
+        loop {
+            if state.stop_if_cancelled() {
+                info!(task = %state.id(), moved = state.snapshot().messages_moved, "redrive cancelled");
+                return;
+            }
+
+            let batch = match self
+                .store
+                .claim_for_move(state.source(), Movable::Everything, MOVE_HOLD, batch_size)
+                .await
+            {
+                Ok(batch) => batch,
+                Err(error) => return self.abandon_redrive(&state, EngineError::from(error)),
+            };
+
+            if batch.is_empty() {
+                state.complete();
+                info!(
+                    task = %state.id(),
+                    moved = state.snapshot().messages_moved,
+                    "redrive finished"
+                );
+                return;
+            }
+
+            for claimed in batch {
+                // Per message rather than per batch, so a batch of a hundred does not make
+                // a cancel a hundred moves slow to take effect. Whatever is left of the
+                // batch stays held until its hold lapses and then becomes claimable again,
+                // which is the same thing that happens if this node dies.
+                if state.stop_if_cancelled() {
+                    info!(task = %state.id(), moved = state.snapshot().messages_moved, "redrive cancelled");
+                    return;
+                }
+
+                if let Err(error) = self
+                    .move_message(state.source(), state.destination(), claimed)
+                    .await
+                {
+                    return self.abandon_redrive(&state, error);
+                }
+                state.record_moved();
+
+                if let Some(pace) = pace {
+                    tokio::time::sleep(pace).await;
+                }
+            }
+        }
+    }
+
+    /// Record that a redrive stopped because something went wrong.
+    ///
+    /// Separate so that the reason is logged and recorded in one place: a task that failed
+    /// silently would look to an operator exactly like one that finished.
+    fn abandon_redrive(&self, state: &TaskState, error: EngineError) {
+        warn!(
+            task = %state.id(),
+            source = %state.source(),
+            destination = %state.destination(),
+            moved = state.snapshot().messages_moved,
+            "redrive failed: {error}"
+        );
+        state.fail(error);
+    }
+
+    /// One redrive task, or `None` if this node never had it or has since forgotten it.
+    ///
+    /// Tasks are in-process and bounded in number, so a handle from a restarted server —
+    /// or one from long enough ago — names nothing. A caller cannot tell those apart and
+    /// does not need to.
+    pub fn redrive_task(&self, id: &MoveTaskId) -> Option<MoveTask> {
+        self.move_tasks.get(id)
+    }
+
+    /// Every redrive task, newest first, optionally only those draining one queue.
+    pub fn redrive_tasks(&self, source: Option<&QueueName>) -> Vec<MoveTask> {
+        self.move_tasks.list(source)
+    }
+
+    /// Ask a redrive to stop, returning it as it now is.
+    ///
+    /// Cooperative, and the returned status says so: the task is left
+    /// [`crate::move_task::MoveTaskStatus::Cancelling`] until it reaches its next message
+    /// boundary, because a message abandoned between its enqueue and its acknowledgement
+    /// would be a duplicate for no reason. Whatever has already moved stays moved — this
+    /// stops a redrive, it does not undo one.
+    ///
+    /// Cancelling a task that has already stopped is reported by the status rather than
+    /// refused. An operator who cancels a redrive that finished a moment ago wanted it
+    /// stopped, and it is.
+    pub fn cancel_redrive(&self, id: &MoveTaskId) -> Result<MoveTask> {
+        self.move_tasks
+            .cancel(id)
+            .ok_or_else(|| EngineError::MoveTaskNotFound(id.clone()))
     }
 }
 
@@ -2132,6 +2585,16 @@ mod tests {
                 .await
         }
 
+        async fn claim_for_move(
+            &self,
+            queue: &QueueName,
+            movable: Movable,
+            hold: Duration,
+            limit: usize,
+        ) -> StoreResult<Vec<ClaimedMessage>> {
+            self.inner.claim_for_move(queue, movable, hold, limit).await
+        }
+
         async fn ack(&self, queue: &QueueName, receipt: &ReceiptHandle) -> StoreResult<()> {
             self.inner.ack(queue, receipt).await
         }
@@ -2173,5 +2636,917 @@ mod tests {
             matches!(&error, EngineError::Conflict(n) if n == &name("jobs")),
             "a caller must be able to tell this from a genuine conflict: {error:?}"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Dead-letter queues
+    // ---------------------------------------------------------------------------
+
+    use crate::model::RedrivePolicy;
+    use crate::move_task::MoveTaskStatus;
+
+    fn redrive(max_receive_count: u32, dead_letter_queue: &str) -> QueueAttributes {
+        QueueAttributes {
+            redrive: Some(
+                RedrivePolicy::new(max_receive_count, name(dead_letter_queue))
+                    .expect("a valid policy"),
+            ),
+            ..QueueAttributes::default()
+        }
+    }
+
+    /// An engine with `jobs_dlq`, and `jobs` configured to dead-letter into it.
+    async fn engine_with_dlq(max_receive_count: u32) -> (Arc<Engine>, QueueName, QueueName) {
+        let engine = Arc::new(engine());
+        let dead_letter_queue = name("jobs_dlq");
+        engine
+            .create_queue(dead_letter_queue.clone(), QueueAttributes::default())
+            .await
+            .expect("create the dead-letter queue");
+
+        let queue = name("jobs");
+        engine
+            .create_queue(queue.clone(), redrive(max_receive_count, "jobs_dlq"))
+            .await
+            .expect("create the queue");
+
+        (engine, queue, dead_letter_queue)
+    }
+
+    /// Deliver whatever is claimable and let each claim lapse at once, `times` over.
+    ///
+    /// A zero visibility timeout is what makes this quick: the claim expires the instant it
+    /// is made, so the message is claimable again without the test waiting for anything.
+    async fn burn_deliveries(engine: &Engine, queue: &QueueName, times: u32) {
+        for _ in 0..times {
+            engine
+                .claim_next(queue, Some(Duration::ZERO))
+                .await
+                .expect("claim")
+                .expect("the message should still be deliverable");
+        }
+    }
+
+    /// Every body a queue holds, taking each message with a claim that never lapses.
+    async fn drain_bodies(engine: &Engine, queue: &QueueName) -> Vec<String> {
+        let mut bodies = Vec::new();
+        while let Some(claimed) = engine
+            .claim_next(queue, Some(Duration::from_secs(3600)))
+            .await
+            .expect("claim")
+        {
+            bodies.push(claimed.message.body);
+        }
+        bodies.sort();
+
+        bodies
+    }
+
+    #[tokio::test]
+    async fn a_message_that_runs_out_of_deliveries_is_dead_lettered() {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(3).await;
+        engine
+            .enqueue(
+                &queue,
+                "poison".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        burn_deliveries(&engine, &queue, 3).await;
+        let moved = engine
+            .dead_letter_exhausted(&queue)
+            .await
+            .expect("dead-letter");
+
+        assert_eq!(moved, 1);
+        assert_eq!(
+            engine
+                .message_counts(&queue)
+                .await
+                .expect("counts")
+                .total(),
+            0,
+            "it has left the queue it was sent to"
+        );
+        assert_eq!(
+            drain_bodies(&engine, &dead_letter_queue).await,
+            ["poison"],
+            "and is claimable in the dead-letter queue"
+        );
+    }
+
+    /// The message an operator finds in the dead-letter queue has to be recognisable as
+    /// the one that was sent, and has to be startable again from zero.
+    #[tokio::test]
+    async fn a_dead_lettered_message_is_the_same_message_with_its_deliveries_reset() {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(1).await;
+        let sent = engine
+            .enqueue(
+                &queue,
+                "poison".to_owned(),
+                Priority::new(4),
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        burn_deliveries(&engine, &queue, 1).await;
+        engine
+            .dead_letter_exhausted(&queue)
+            .await
+            .expect("dead-letter");
+
+        let dead = engine
+            .claim_next(&dead_letter_queue, None)
+            .await
+            .expect("claim")
+            .expect("the dead-letter queue holds it");
+
+        assert_eq!(dead.message.id, sent.id, "the id a producer holds still finds it");
+        assert_eq!(dead.message.priority, sent.priority);
+        assert_eq!(dead.message.enqueued_at, sent.enqueued_at);
+        assert_eq!(
+            dead.message.receive_count, 1,
+            "this delivery is the first one out of the dead-letter queue, not the fourth \
+             out of the last one"
+        );
+    }
+
+    /// The half that has to hold *between* sweeps: an exhausted message is out of
+    /// deliveries the moment it runs out, not when something gets round to moving it.
+    #[tokio::test]
+    async fn an_exhausted_message_is_not_delivered_again_before_it_is_moved() {
+        let (engine, queue, _) = engine_with_dlq(2).await;
+        engine
+            .enqueue(
+                &queue,
+                "poison".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        burn_deliveries(&engine, &queue, 2).await;
+
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_none(),
+            "its two allowed deliveries are spent, and nothing has swept yet"
+        );
+        assert_eq!(
+            engine
+                .message_counts(&queue)
+                .await
+                .expect("counts")
+                .total(),
+            1,
+            "but it is still there, waiting to be moved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_message_still_within_its_policy_is_left_alone() {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(3).await;
+        engine
+            .enqueue(
+                &queue,
+                "retry me".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        burn_deliveries(&engine, &queue, 2).await;
+
+        assert_eq!(
+            engine
+                .dead_letter_exhausted(&queue)
+                .await
+                .expect("dead-letter"),
+            0
+        );
+        assert_eq!(drain_bodies(&engine, &dead_letter_queue).await, [] as [String; 0]);
+    }
+
+    /// A consumer that is still working on its last allowed delivery may yet succeed, and
+    /// moving the message out from under it would dead-letter work that was about to be
+    /// acknowledged.
+    #[tokio::test]
+    async fn a_message_a_consumer_is_still_holding_is_not_dead_lettered() {
+        let (engine, queue, _) = engine_with_dlq(1).await;
+        engine
+            .enqueue(
+                &queue,
+                "in progress".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+
+        let claimed = engine
+            .claim_next(&queue, Some(Duration::from_secs(3600)))
+            .await
+            .expect("claim")
+            .expect("a message");
+
+        assert_eq!(
+            engine
+                .dead_letter_exhausted(&queue)
+                .await
+                .expect("dead-letter"),
+            0,
+            "its count is exhausted but its consumer has not finished"
+        );
+
+        engine
+            .ack(&queue, &claimed.receipt)
+            .await
+            .expect("the consumer must still be able to finish");
+    }
+
+    #[tokio::test]
+    async fn a_queue_with_no_redrive_policy_dead_letters_nothing() {
+        let engine = engine();
+        let queue = queue_with_message(&engine, "forever").await;
+
+        burn_deliveries(&engine, &queue, 5).await;
+
+        assert_eq!(
+            engine
+                .dead_letter_exhausted(&queue)
+                .await
+                .expect("dead-letter"),
+            0,
+            "nothing runs out when there is no limit"
+        );
+        assert!(
+            engine
+                .claim_next(&queue, None)
+                .await
+                .expect("claim")
+                .is_some(),
+            "and it stays deliverable"
+        );
+    }
+
+    #[tokio::test]
+    async fn dead_lettering_moves_every_exhausted_message_and_leaves_the_rest() {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(1).await;
+        for body in ["one", "two", "three"] {
+            engine
+                .enqueue(
+                    &queue,
+                    body.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+
+        // Two of the three burn their one allowed delivery; the third is never touched.
+        burn_deliveries(&engine, &queue, 2).await;
+
+        assert_eq!(
+            engine
+                .dead_letter_exhausted(&queue)
+                .await
+                .expect("dead-letter"),
+            2
+        );
+        assert_eq!(drain_bodies(&engine, &queue).await.len(), 1, "one survivor");
+        assert_eq!(drain_bodies(&engine, &dead_letter_queue).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_sweep_covers_every_queue_that_has_a_policy() {
+        let engine = Arc::new(engine());
+        engine
+            .create_queue(name("shared_dlq"), QueueAttributes::default())
+            .await
+            .expect("create the dead-letter queue");
+        engine
+            .create_queue(name("no_policy"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        for queue_name in ["first", "second"] {
+            let queue = name(queue_name);
+            engine
+                .create_queue(queue.clone(), redrive(1, "shared_dlq"))
+                .await
+                .expect("create");
+            engine
+                .enqueue(
+                    &queue,
+                    queue_name.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+            burn_deliveries(&engine, &queue, 1).await;
+        }
+
+        let sweep = engine.sweep_dead_letters().await.expect("sweep");
+
+        assert_eq!(sweep.moved, 2, "both queues, one message each");
+        assert_eq!(sweep.queues, 4, "every queue is looked at");
+        assert!(sweep.failures.is_empty(), "{:?}", sweep.failures);
+        assert_eq!(
+            drain_bodies(&engine, &name("shared_dlq")).await,
+            ["first", "second"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sweep_is_quiet_when_nothing_has_failed() {
+        let (engine, _, _) = engine_with_dlq(3).await;
+
+        let sweep = engine.sweep_dead_letters().await.expect("sweep");
+
+        assert!(sweep.is_quiet());
+        assert_eq!(sweep.moved, 0);
+    }
+
+    /// One unreachable dead-letter queue must not stop every other queue's messages from
+    /// moving, and the messages it could not move have to stay put rather than vanish.
+    #[tokio::test]
+    async fn one_queue_failing_does_not_stop_the_sweep() {
+        let engine = Arc::new(engine());
+        for dlq in ["good_dlq", "doomed_dlq"] {
+            engine
+                .create_queue(name(dlq), QueueAttributes::default())
+                .await
+                .expect("create");
+        }
+
+        for (queue_name, dlq) in [("good", "good_dlq"), ("broken", "doomed_dlq")] {
+            let queue = name(queue_name);
+            engine
+                .create_queue(queue.clone(), redrive(1, dlq))
+                .await
+                .expect("create");
+            engine
+                .enqueue(
+                    &queue,
+                    queue_name.to_owned(),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+            burn_deliveries(&engine, &queue, 1).await;
+        }
+
+        // The policy was honourable when it was set and is not any more, which is the only
+        // way a queue reaches this state.
+        engine
+            .delete_queue(&name("doomed_dlq"))
+            .await
+            .expect("delete");
+
+        let sweep = engine.sweep_dead_letters().await.expect("sweep");
+
+        assert_eq!(sweep.moved, 1, "the healthy queue still moved its message");
+        assert_eq!(sweep.failures.len(), 1, "{:?}", sweep.failures);
+        assert_eq!(sweep.failures[0].0, name("broken"));
+        assert_eq!(
+            engine
+                .message_counts(&name("broken"))
+                .await
+                .expect("counts")
+                .total(),
+            1,
+            "a message that could not be moved is still there to try again"
+        );
+    }
+
+    #[tokio::test]
+    async fn dead_lettering_wakes_a_consumer_waiting_on_the_dead_letter_queue() {
+        // The dead-letter queue is an ordinary queue, so somebody may be long-polling it —
+        // an alerting consumer, most likely. A message arriving there should wake them for
+        // the same reason any other arrival does.
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(1).await;
+        engine
+            .enqueue(
+                &queue,
+                "poison".to_owned(),
+                Priority::DEFAULT,
+                MessageAttributes::new(),
+                None,
+            )
+            .await
+            .expect("enqueue");
+        burn_deliveries(&engine, &queue, 1).await;
+
+        let watcher = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            let dead_letter_queue = dead_letter_queue.clone();
+            async move {
+                engine
+                    .receive(&dead_letter_queue, &waiting(LONGER_THAN_NEEDED))
+                    .await
+            }
+        });
+
+        tokio::time::sleep(A_SHORT_WAIT).await;
+        let started = Instant::now();
+        engine
+            .dead_letter_exhausted(&queue)
+            .await
+            .expect("dead-letter");
+
+        let claimed = watcher.await.expect("watcher task").expect("receive");
+
+        assert_eq!(claimed.len(), 1);
+        assert!(
+            started.elapsed() < PROMPTLY,
+            "the wake should be prompt: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Redrive policy validation
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_redrive_policy_naming_a_queue_that_does_not_exist_is_refused() {
+        let engine = engine();
+
+        let error = engine
+            .create_queue(name("jobs"), redrive(3, "nowhere"))
+            .await
+            .expect_err("the dead-letter queue does not exist");
+
+        assert!(
+            matches!(&error, EngineError::DeadLetterQueueNotFound(n) if n == &name("nowhere")),
+            "{error:?}"
+        );
+        engine
+            .get_queue(&name("jobs"))
+            .await
+            .expect_err("and the queue was not created");
+    }
+
+    #[tokio::test]
+    async fn a_queue_cannot_be_its_own_dead_letter_queue() {
+        let engine = engine();
+
+        let error = engine
+            .create_queue(name("jobs"), redrive(3, "jobs"))
+            .await
+            .expect_err("that is a loop");
+
+        assert!(
+            matches!(&error, EngineError::DeadLetterQueueIsItself(n) if n == &name("jobs")),
+            "{error:?}"
+        );
+    }
+
+    /// The same checks apply to a change, not only to a create — otherwise the way round
+    /// the rule is to create the queue first and reconfigure it afterwards.
+    #[tokio::test]
+    async fn changing_to_an_unhonourable_redrive_policy_is_refused() {
+        let engine = engine();
+        engine
+            .create_queue(name("jobs"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        let error = engine
+            .set_queue_attributes::<_, EngineError>(&name("jobs"), |_| Ok(redrive(3, "nowhere")))
+            .await
+            .expect_err("the dead-letter queue does not exist");
+
+        assert!(
+            matches!(&error, EngineError::DeadLetterQueueNotFound(n) if n == &name("nowhere")),
+            "{error:?}"
+        );
+        assert_eq!(
+            engine
+                .get_queue(&name("jobs"))
+                .await
+                .expect("get")
+                .attributes,
+            QueueAttributes::default(),
+            "and nothing was changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redrive_policy_can_be_taken_off_again() {
+        let (engine, queue, _) = engine_with_dlq(3).await;
+
+        let updated = engine
+            .set_queue_attributes::<_, EngineError>(&queue, |current| {
+                Ok(QueueAttributes {
+                    redrive: None,
+                    ..current
+                })
+            })
+            .await
+            .expect("remove the policy");
+
+        assert_eq!(updated.attributes.redrive, None);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Which queues point at a dead-letter queue
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn dead_letter_sources_reports_the_queues_that_point_here() {
+        let engine = Arc::new(engine());
+        engine
+            .create_queue(name("shared_dlq"), QueueAttributes::default())
+            .await
+            .expect("create");
+        engine
+            .create_queue(name("other_dlq"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        // Created out of order, so the name ordering is this call's doing.
+        for queue_name in ["zebra", "alpha"] {
+            engine
+                .create_queue(name(queue_name), redrive(3, "shared_dlq"))
+                .await
+                .expect("create");
+        }
+        engine
+            .create_queue(name("elsewhere"), redrive(3, "other_dlq"))
+            .await
+            .expect("create");
+        engine
+            .create_queue(name("plain"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        assert_eq!(
+            engine
+                .dead_letter_sources(&name("shared_dlq"))
+                .await
+                .expect("sources"),
+            [name("alpha"), name("zebra")],
+            "in name order"
+        );
+        assert!(
+            engine
+                .dead_letter_sources(&name("plain"))
+                .await
+                .expect("sources")
+                .is_empty(),
+            "being nobody's dead-letter queue is a normal answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn asking_about_a_queue_that_does_not_exist_reports_it() {
+        let error = engine()
+            .dead_letter_sources(&name("nope"))
+            .await
+            .expect_err("no such queue");
+
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Redrive: back out of a dead-letter queue
+    // ---------------------------------------------------------------------------
+
+    /// Wait for a spawned redrive to stop, and return it as it ended.
+    async fn finished_redrive(engine: &Engine, id: &MoveTaskId) -> MoveTask {
+        for _ in 0..500 {
+            let task = engine.redrive_task(id).expect("the task is registered");
+            if !task.status.is_active() {
+                return task;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("the redrive should have finished long before now");
+    }
+
+    /// `jobs_dlq` holding `count` messages, with `jobs` as its only source queue.
+    async fn dead_letter_queue_holding(count: usize) -> (Arc<Engine>, QueueName, QueueName) {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(1).await;
+
+        for index in 0..count {
+            engine
+                .enqueue(
+                    &queue,
+                    format!("failed-{index}"),
+                    Priority::DEFAULT,
+                    MessageAttributes::new(),
+                    None,
+                )
+                .await
+                .expect("enqueue");
+        }
+        burn_deliveries(&engine, &queue, count as u32).await;
+        assert_eq!(
+            engine
+                .dead_letter_exhausted(&queue)
+                .await
+                .expect("dead-letter"),
+            count as u64
+        );
+
+        (engine, queue, dead_letter_queue)
+    }
+
+    #[tokio::test]
+    async fn a_redrive_moves_messages_back_to_the_queue_they_came_from() {
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(3).await;
+
+        let started = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue.clone()), None)
+            .await
+            .expect("start");
+        assert_eq!(started.status, MoveTaskStatus::Running);
+        assert_eq!(started.messages_to_move, 3);
+        assert_eq!(started.messages_moved, 0, "a snapshot from before it ran");
+
+        let finished = finished_redrive(&engine, &started.id).await;
+
+        assert_eq!(finished.status, MoveTaskStatus::Completed);
+        assert_eq!(finished.messages_moved, 3);
+        assert!(finished.finished_at.is_some());
+        assert_eq!(
+            drain_bodies(&engine, &dead_letter_queue).await,
+            [] as [String; 0],
+            "the dead-letter queue is empty"
+        );
+        assert_eq!(
+            drain_bodies(&engine, &queue).await,
+            ["failed-0", "failed-1", "failed-2"],
+            "and they are all deliverable again"
+        );
+    }
+
+    /// The common case, and the reason a destination is optional: there is exactly one
+    /// queue that dead-letters here, so "back where they came from" has one answer.
+    #[tokio::test]
+    async fn a_redrive_with_no_destination_goes_back_to_the_only_source() {
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(1).await;
+
+        let started = engine
+            .start_redrive(dead_letter_queue, None, None)
+            .await
+            .expect("start");
+
+        assert_eq!(started.destination, queue);
+        assert_eq!(
+            finished_redrive(&engine, &started.id).await.messages_moved,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redrive_with_no_inferable_destination_is_refused() {
+        let engine = Arc::new(engine());
+        engine
+            .create_queue(name("shared_dlq"), QueueAttributes::default())
+            .await
+            .expect("create");
+
+        // Nothing points at it yet.
+        let error = engine
+            .start_redrive(name("shared_dlq"), None, None)
+            .await
+            .expect_err("nothing to infer from");
+        assert!(
+            matches!(
+                &error,
+                EngineError::MoveDestinationUnknown { candidates: 0, .. }
+            ),
+            "{error:?}"
+        );
+
+        for queue_name in ["first", "second"] {
+            engine
+                .create_queue(name(queue_name), redrive(3, "shared_dlq"))
+                .await
+                .expect("create");
+        }
+
+        let error = engine
+            .start_redrive(name("shared_dlq"), None, None)
+            .await
+            .expect_err("ambiguous");
+        assert!(
+            matches!(
+                &error,
+                EngineError::MoveDestinationUnknown { candidates: 2, .. }
+            ),
+            "a dead-letter queue with two sources cannot guess: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redrive_needs_both_queues_to_exist_and_to_differ() {
+        let (engine, _, dead_letter_queue) = engine_with_dlq(3).await;
+
+        let error = engine
+            .start_redrive(name("nope"), Some(dead_letter_queue.clone()), None)
+            .await
+            .expect_err("no such source");
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+
+        let error = engine
+            .start_redrive(dead_letter_queue.clone(), Some(name("nope")), None)
+            .await
+            .expect_err("no such destination");
+        assert!(matches!(error, EngineError::QueueNotFound(_)), "{error:?}");
+
+        let error = engine
+            .start_redrive(
+                dead_letter_queue.clone(),
+                Some(dead_letter_queue.clone()),
+                None,
+            )
+            .await
+            .expect_err("nowhere to go");
+        assert!(
+            matches!(&error, EngineError::MoveToSameQueue(n) if n == &dead_letter_queue),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_redrive_of_one_queue_is_refused_while_the_first_runs() {
+        // Throttled hard, so the first task is certainly still running when the second is
+        // asked for.
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(3).await;
+        let first = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue.clone()), Some(1))
+            .await
+            .expect("start");
+
+        let error = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue), None)
+            .await
+            .expect_err("one at a time");
+
+        assert!(
+            matches!(&error, EngineError::MoveAlreadyRunning(n) if n == &dead_letter_queue),
+            "{error:?}"
+        );
+        assert_eq!(
+            engine.redrive_tasks(None).len(),
+            1,
+            "a refused redrive leaves no trace"
+        );
+
+        engine.cancel_redrive(&first.id).expect("cancel");
+    }
+
+    #[tokio::test]
+    async fn a_redrive_can_be_called_off_and_keeps_what_it_already_moved() {
+        // One message per second, so the task is certainly mid-run when it is cancelled and
+        // certainly has not moved all ten.
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(10).await;
+        let started = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue.clone()), Some(1))
+            .await
+            .expect("start");
+
+        let asked = engine.cancel_redrive(&started.id).expect("cancel");
+        assert_eq!(
+            asked.status,
+            MoveTaskStatus::Cancelling,
+            "cooperative: asked to stop, not stopped"
+        );
+
+        let finished = finished_redrive(&engine, &started.id).await;
+
+        assert_eq!(finished.status, MoveTaskStatus::Cancelled);
+        assert!(
+            finished.messages_moved < 10,
+            "it should not have finished, moved {}",
+            finished.messages_moved
+        );
+        assert_eq!(
+            engine
+                .message_counts(&queue)
+                .await
+                .expect("counts")
+                .total(),
+            finished.messages_moved,
+            "whatever it moved stays moved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redrive_of_an_empty_queue_completes_having_moved_nothing() {
+        let (engine, queue, dead_letter_queue) = engine_with_dlq(3).await;
+
+        let started = engine
+            .start_redrive(dead_letter_queue, Some(queue), None)
+            .await
+            .expect("start");
+        let finished = finished_redrive(&engine, &started.id).await;
+
+        assert_eq!(finished.status, MoveTaskStatus::Completed);
+        assert_eq!(finished.messages_moved, 0);
+        assert_eq!(finished.messages_to_move, 0);
+    }
+
+    /// A redrive leaves in-flight messages alone rather than pulling them out from under
+    /// their consumers — so it moves what the queue was holding, which is approximate in
+    /// the same way every other count here is.
+    #[tokio::test]
+    async fn a_redrive_leaves_messages_a_consumer_is_holding() {
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(2).await;
+        let held = engine
+            .claim_next(&dead_letter_queue, Some(Duration::from_secs(3600)))
+            .await
+            .expect("claim")
+            .expect("the dead-letter queue holds two");
+
+        let started = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue.clone()), None)
+            .await
+            .expect("start");
+        let finished = finished_redrive(&engine, &started.id).await;
+
+        assert_eq!(finished.messages_moved, 1, "the claimable one");
+        assert_eq!(
+            finished.messages_to_move, 2,
+            "what it set out to do, which is a snapshot and not a promise"
+        );
+        engine
+            .ack(&dead_letter_queue, &held.receipt)
+            .await
+            .expect("the consumer's claim survived the redrive");
+    }
+
+    #[tokio::test]
+    async fn redrive_tasks_can_be_listed_and_filtered_by_source() {
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(1).await;
+        let started = engine
+            .start_redrive(dead_letter_queue.clone(), Some(queue), None)
+            .await
+            .expect("start");
+        finished_redrive(&engine, &started.id).await;
+
+        assert_eq!(engine.redrive_tasks(None).len(), 1);
+        assert_eq!(engine.redrive_tasks(Some(&dead_letter_queue)).len(), 1);
+        assert!(engine.redrive_tasks(Some(&name("elsewhere"))).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_handle_this_server_never_issued_names_no_redrive() {
+        let engine = engine();
+        let unknown = MoveTaskId::from_client("not-a-handle");
+
+        assert!(engine.redrive_task(&unknown).is_none());
+        let error = engine.cancel_redrive(&unknown).expect_err("no such task");
+        assert!(
+            matches!(&error, EngineError::MoveTaskNotFound(id) if id == &unknown),
+            "{error:?}"
+        );
+    }
+
+    /// A redrive is blind to the destination's redrive policy on the way in — the messages
+    /// arrive with their counters reset, so they get the full allowance again. Otherwise
+    /// rescuing a message would fail on the grounds that it had already failed.
+    #[tokio::test]
+    async fn redriven_messages_get_their_deliveries_back() {
+        let (engine, queue, dead_letter_queue) = dead_letter_queue_holding(1).await;
+
+        let started = engine
+            .start_redrive(dead_letter_queue, Some(queue.clone()), None)
+            .await
+            .expect("start");
+        finished_redrive(&engine, &started.id).await;
+
+        // The source allows one delivery, and the redriven message must have that one
+        // delivery available rather than being immediately exhausted again.
+        let claimed = engine
+            .claim_next(&queue, None)
+            .await
+            .expect("claim")
+            .expect("deliverable again");
+        assert_eq!(claimed.message.receive_count, 1);
     }
 }

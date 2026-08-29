@@ -10,10 +10,11 @@
 
 use std::time::Duration;
 
-use nexq_core::model::QueueAttributes;
-use serde_json::{Map, Value};
+use nexq_core::model::{QueueAttributes, RedrivePolicy};
+use serde_json::{Map, Value, json};
 
 use crate::error::ApiError;
+use crate::queue_url::QueueUrls;
 
 /// How long a claimed message stays invisible.
 const VISIBILITY_TIMEOUT: &str = "VisibilityTimeout";
@@ -23,6 +24,17 @@ const DELAY_SECONDS: &str = "DelaySeconds";
 
 /// Default long-poll duration for a receive.
 const RECEIVE_WAIT_TIME: &str = "ReceiveMessageWaitTimeSeconds";
+
+/// When to give up on a message, and where to send it.
+const REDRIVE_POLICY: &str = "RedrivePolicy";
+
+/// The redrive policy's two members, as SQS spells them inside the JSON document.
+///
+/// Note that these are camel-case where every attribute *name* is pascal-case — SQS's own
+/// inconsistency, faithfully reproduced, because a client that sends what SQS accepts has
+/// to be understood here.
+const DEAD_LETTER_TARGET_ARN: &str = "deadLetterTargetArn";
+const MAX_RECEIVE_COUNT: &str = "maxReceiveCount";
 
 /// Longest visibility timeout SQS accepts: 12 hours.
 ///
@@ -41,8 +53,11 @@ pub const RECEIVE_WAIT_TIME_MAX: u64 = 20;
 ///
 /// A missing map means "all defaults", which is what `aws sqs create-queue` with no
 /// `--attributes` sends.
-pub fn from_input(input: Option<&Value>) -> Result<QueueAttributes, ApiError> {
-    apply(QueueAttributes::default(), input)
+pub fn from_input(
+    input: Option<&Value>,
+    queue_urls: &QueueUrls,
+) -> Result<QueueAttributes, ApiError> {
+    apply(QueueAttributes::default(), input, queue_urls)
 }
 
 /// Apply an attribute map onto attributes a queue already has.
@@ -53,6 +68,7 @@ pub fn from_input(input: Option<&Value>) -> Result<QueueAttributes, ApiError> {
 pub fn apply(
     mut attributes: QueueAttributes,
     input: Option<&Value>,
+    queue_urls: &QueueUrls,
 ) -> Result<QueueAttributes, ApiError> {
     let Some(value) = input else {
         return Ok(attributes);
@@ -75,6 +91,13 @@ pub fn apply(
             RECEIVE_WAIT_TIME => {
                 attributes.receive_wait_time = seconds(name, value, RECEIVE_WAIT_TIME_MAX)?;
             }
+            // An empty string takes the policy off, which is how SQS spells "no redrive
+            // policy" on the way in — there is no other way to say it, since the attribute
+            // map has no null.
+            REDRIVE_POLICY if is_blank(value) => attributes.redrive = None,
+            REDRIVE_POLICY => {
+                attributes.redrive = Some(redrive_policy(value, queue_urls)?);
+            }
             unknown => return Err(ApiError::invalid_attribute_name(unknown)),
         }
     }
@@ -87,11 +110,18 @@ pub fn apply(
 /// The read side needs to ask, so it can tell a settable attribute from one it derives
 /// itself — see [`crate::queue_attributes`].
 pub fn is_settable(name: &str) -> bool {
-    matches!(name, VISIBILITY_TIMEOUT | DELAY_SECONDS | RECEIVE_WAIT_TIME)
+    matches!(
+        name,
+        VISIBILITY_TIMEOUT | DELAY_SECONDS | RECEIVE_WAIT_TIME | REDRIVE_POLICY
+    )
 }
 
 /// Render the settable attributes in SQS's string-to-string form.
-pub fn to_output(attributes: &QueueAttributes) -> Map<String, Value> {
+///
+/// `RedrivePolicy` is present only when the queue has one. SQS reports it that way, and an
+/// empty policy would be a third spelling of "none" next to the attribute being absent and
+/// its value being an empty string.
+pub fn to_output(attributes: &QueueAttributes, queue_urls: &QueueUrls) -> Map<String, Value> {
     let mut map = Map::new();
 
     for (name, duration) in [
@@ -105,7 +135,98 @@ pub fn to_output(attributes: &QueueAttributes) -> Map<String, Value> {
         );
     }
 
+    if let Some(policy) = &attributes.redrive {
+        // A JSON *document inside a string*, which is how SQS carries it: the attribute
+        // map is string-to-string, so a nested object has to be serialised into one of
+        // those strings rather than sent as an object. `maxReceiveCount` is a string in
+        // there too, for the same reason every other number here is.
+        map.insert(
+            REDRIVE_POLICY.to_owned(),
+            Value::String(
+                json!({
+                    DEAD_LETTER_TARGET_ARN: queue_urls.arn_for_queue(&policy.dead_letter_queue),
+                    MAX_RECEIVE_COUNT: policy.max_receive_count().to_string(),
+                })
+                .to_string(),
+            ),
+        );
+    }
+
     map
+}
+
+/// Whether a value is the empty string a client sends to remove an attribute.
+fn is_blank(value: &Value) -> bool {
+    matches!(value, Value::String(text) if text.trim().is_empty())
+}
+
+/// Read a `RedrivePolicy`.
+///
+/// Accepts the document either as a JSON string — which is the wire form, since the
+/// attribute map is string-to-string — or as an object, on the same reasoning that lets a
+/// number through where a string is expected: a hand-written client sending what it means
+/// gains nothing from being refused.
+fn redrive_policy(value: &Value, queue_urls: &QueueUrls) -> Result<RedrivePolicy, ApiError> {
+    let parsed;
+    let document = match value {
+        Value::String(text) => {
+            parsed = serde_json::from_str(text).map_err(|error| {
+                ApiError::invalid_attribute_value(format!(
+                    "Attribute {REDRIVE_POLICY} must be a JSON document: {error}."
+                ))
+            })?;
+            &parsed
+        }
+        object @ Value::Object(_) => object,
+        other => {
+            return Err(ApiError::invalid_attribute_value(format!(
+                "Attribute {REDRIVE_POLICY} must be a JSON document, got {other}."
+            )));
+        }
+    };
+
+    let Value::Object(document) = document else {
+        return Err(ApiError::invalid_attribute_value(format!(
+            "Attribute {REDRIVE_POLICY} must be a JSON object with {DEAD_LETTER_TARGET_ARN} \
+             and {MAX_RECEIVE_COUNT}."
+        )));
+    };
+
+    for member in document.keys() {
+        if member != DEAD_LETTER_TARGET_ARN && member != MAX_RECEIVE_COUNT {
+            return Err(ApiError::invalid_attribute_value(format!(
+                "Attribute {REDRIVE_POLICY} has no member {member}."
+            )));
+        }
+    }
+
+    // Both halves are required. Neither means anything alone — a limit with nowhere to
+    // send the message would have to drop it or ignore the limit — which is why the domain
+    // model holds them as one value and why half a policy is refused here.
+    let arn = document
+        .get(DEAD_LETTER_TARGET_ARN)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ApiError::invalid_attribute_value(format!(
+                "Attribute {REDRIVE_POLICY} must name a {DEAD_LETTER_TARGET_ARN}."
+            ))
+        })?;
+    let dead_letter_queue = queue_urls.queue_name_from_arn(arn)?;
+
+    let max_receive_count = match document.get(MAX_RECEIVE_COUNT) {
+        Some(Value::String(text)) => text.trim().parse::<u32>().ok(),
+        Some(Value::Number(number)) => number.as_u64().and_then(|count| u32::try_from(count).ok()),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        ApiError::invalid_attribute_value(format!(
+            "Attribute {REDRIVE_POLICY} must give a whole-number {MAX_RECEIVE_COUNT}."
+        ))
+    })?;
+
+    RedrivePolicy::new(max_receive_count, dead_letter_queue).map_err(|error| {
+        ApiError::invalid_attribute_value(format!("Attribute {REDRIVE_POLICY} is invalid: {error}."))
+    })
 }
 
 /// Parse a duration in seconds, bounded as SQS bounds it.
@@ -146,6 +267,24 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::test_support::test_queue_urls;
+
+    /// The two-argument forms against this deployment's queue URLs, which only a
+    /// `RedrivePolicy`'s ARN needs — so every other case reads as it did before.
+    fn from_input(input: Option<&Value>) -> Result<QueueAttributes, ApiError> {
+        super::from_input(input, &test_queue_urls())
+    }
+
+    fn to_output(attributes: &QueueAttributes) -> Map<String, Value> {
+        super::to_output(attributes, &test_queue_urls())
+    }
+
+    /// Read one `RedrivePolicy` value, whichever shape it arrives in.
+    fn policy(value: Value) -> Result<RedrivePolicy, ApiError> {
+        from_input(Some(&json!({ "RedrivePolicy": value })))?
+            .redrive
+            .ok_or_else(|| ApiError::invalid_attribute_value("no policy was read"))
+    }
 
     #[test]
     fn no_attributes_means_defaults() {
@@ -251,6 +390,151 @@ mod tests {
         let error = from_input(Some(&json!("VisibilityTimeout=30"))).expect_err("not a map");
 
         assert_eq!(error.code(), "InvalidParameterValue");
+    }
+
+    /// The wire form: a JSON document inside a string, with a number that is also a
+    /// string, because the attribute map is string-to-string all the way down.
+    #[test]
+    fn a_redrive_policy_arrives_as_a_json_document_in_a_string() {
+        let policy = policy(json!(
+            r#"{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+                "maxReceiveCount":"3"}"#
+        ))
+        .expect("a valid policy");
+
+        assert_eq!(policy.max_receive_count(), 3);
+        assert_eq!(policy.dead_letter_queue.as_str(), "jobs_dlq");
+    }
+
+    /// On the same reasoning that accepts a number where a string is expected elsewhere: a
+    /// hand-written client sending what it means gains nothing from being refused.
+    #[test]
+    fn an_object_and_a_numeric_count_are_accepted_too() {
+        let policy = policy(json!({
+            "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+            "maxReceiveCount": 3,
+        }))
+        .expect("a valid policy");
+
+        assert_eq!(policy.max_receive_count(), 3);
+    }
+
+    /// Half a policy means nothing: a limit with nowhere to send the message would have to
+    /// drop it or ignore the limit, and a target with no limit is never reached.
+    #[test]
+    fn half_a_redrive_policy_is_refused() {
+        for value in [
+            json!({ "maxReceiveCount": "3" }),
+            json!({ "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:jobs_dlq" }),
+            json!({}),
+        ] {
+            let error = policy(value.clone()).expect_err(&value.to_string());
+
+            assert_eq!(error.code(), "InvalidAttributeValue", "{value}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_redrive_policy_is_refused() {
+        for value in [
+            json!("not json at all"),
+            json!(3),
+            json!([]),
+            // A member that is not part of the policy, refused rather than ignored for the
+            // same reason an unknown attribute name is.
+            json!({
+                "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+                "maxReceiveCount": "3",
+                "nope": "1",
+            }),
+            // Outside the range SQS allows, so a policy accepted here is one SQS would
+            // have accepted too.
+            json!({
+                "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+                "maxReceiveCount": "0",
+            }),
+            json!({
+                "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+                "maxReceiveCount": "1001",
+            }),
+        ] {
+            let error = policy(value.clone()).expect_err(&value.to_string());
+
+            assert_eq!(error.code(), "InvalidAttributeValue", "{value}");
+        }
+    }
+
+    /// An ARN from some other deployment names a queue this one does not have, and acting
+    /// on the name alone would silently point the policy at a local queue that happens to
+    /// share it.
+    #[test]
+    fn an_arn_from_another_account_is_refused() {
+        let error = policy(json!({
+            "deadLetterTargetArn": "arn:aws:sqs:us-east-1:999999999999:jobs_dlq",
+            "maxReceiveCount": "3",
+        }))
+        .expect_err("a different account");
+
+        assert_eq!(error.code(), "InvalidAddress");
+    }
+
+    /// There is no null in an attribute map, so an empty string is how SQS says "take
+    /// this off". Accepting it is what makes a redrive policy removable at all.
+    #[test]
+    fn an_empty_redrive_policy_removes_it() {
+        let mut attributes = QueueAttributes::default();
+        attributes.redrive =
+            Some(RedrivePolicy::new(3, nexq_core::model::QueueName::new("jobs_dlq").expect("valid"))
+                .expect("valid"));
+
+        let cleared = apply(
+            attributes,
+            Some(&json!({ "RedrivePolicy": "" })),
+            &test_queue_urls(),
+        )
+        .expect("valid");
+
+        assert_eq!(cleared.redrive, None);
+    }
+
+    /// SQS omits `RedrivePolicy` from a queue that has none, and so does this: an empty
+    /// policy would be a third spelling of "none".
+    #[test]
+    fn a_queue_with_no_redrive_policy_reports_none() {
+        assert!(!to_output(&QueueAttributes::default()).contains_key("RedrivePolicy"));
+    }
+
+    #[test]
+    fn a_redrive_policy_round_trips_through_the_wire_form() {
+        let attributes = from_input(Some(&json!({
+            "RedrivePolicy":
+                r#"{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:jobs_dlq",
+                    "maxReceiveCount":"3"}"#,
+        })))
+        .expect("valid");
+
+        let rendered = to_output(&attributes);
+        let document: Value = serde_json::from_str(
+            rendered["RedrivePolicy"]
+                .as_str()
+                .expect("a JSON document in a string"),
+        )
+        .expect("valid JSON");
+
+        assert_eq!(
+            document["deadLetterTargetArn"],
+            "arn:aws:sqs:us-east-1:000000000000:jobs_dlq"
+        );
+        assert_eq!(
+            document["maxReceiveCount"], "3",
+            "a string, as every number in an attribute map is"
+        );
+        assert_eq!(
+            from_input(Some(&Value::Object(rendered)))
+                .expect("re-read")
+                .redrive,
+            attributes.redrive
+        );
     }
 
     #[test]

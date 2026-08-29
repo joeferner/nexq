@@ -57,16 +57,16 @@ const DERIVED: [Derived; 7] = [
 /// Kept as a list so the error can say *why* rather than "unknown attribute", since a
 /// client asking for one of these has not made a spelling mistake — the attribute is
 /// real, and this deployment does not implement what it describes.
-const UNIMPLEMENTED: [(&str, &str); 11] = [
+const UNIMPLEMENTED: [(&str, &str); 10] = [
     (
         "MessageRetentionPeriod",
         "NexQ does not expire messages, so there is no retention period to report",
     ),
     ("Policy", "access policies are not implemented"),
-    ("RedrivePolicy", "dead-letter queues are not implemented"),
     (
         "RedriveAllowPolicy",
-        "dead-letter queues are not implemented",
+        "NexQ does not restrict which queues may use a queue as their dead-letter queue, \
+         so there is no allow policy to report",
     ),
     ("FifoQueue", "FIFO queues are not implemented"),
     (
@@ -189,7 +189,7 @@ impl Requested {
     ) -> Map<String, Value> {
         let mut rendered = Map::new();
 
-        let settable = attributes::to_output(&queue.attributes);
+        let settable = attributes::to_output(&queue.attributes, queue_urls);
         match &self.settable {
             Selection::None => {}
             Selection::All => rendered.extend(settable),

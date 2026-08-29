@@ -23,6 +23,8 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use thiserror::Error;
 
+#[allow(unused_imports)] // Referenced from doc comments.
+use crate::model::RedrivePolicy;
 use crate::model::{
     ClaimedMessage, Message, MessageCounts, MessageId, Queue, QueueAttributes, QueueName,
     QueuePosition, ReceiptHandle,
@@ -62,6 +64,27 @@ impl StoreError {
     pub fn backend(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
         Self::Backend(error.into())
     }
+}
+
+/// Which of a queue's messages a move should pick up.
+///
+/// The two directions dead-lettering runs in, named rather than expressed as a boolean so
+/// a call site says which one it means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Movable {
+    /// Only the messages the queue's [`RedrivePolicy`] has given up on — what a sweep
+    /// moves into a dead-letter queue.
+    ///
+    /// Nothing at all for a queue with no redrive policy: nothing runs out when there is
+    /// no limit. Empty is also the ordinary answer for a healthy queue, so it is not news.
+    Exhausted,
+
+    /// Every claimable message — what a redrive moves back out of a dead-letter queue.
+    ///
+    /// Deliberately blind to the redrive policy, including one on the dead-letter queue
+    /// itself: a redrive that skipped the messages a DLQ had itself given up on would
+    /// leave behind exactly the ones an operator was most likely trying to rescue.
+    Everything,
 }
 
 /// Somewhere queues live.
@@ -210,12 +233,61 @@ pub trait Store: fmt::Debug + Send + Sync + 'static {
     /// [`MAX_MESSAGES_PER_RECEIVE`](crate::engine::MAX_MESSAGES_PER_RECEIVE) ids, so a
     /// backend may push it down to storage as a literal list — `NOT IN` for SQL, a
     /// `must_not` clause for a search backend — rather than needing an anti-join.
+    ///
+    /// **A message the queue's [`RedrivePolicy`] has exhausted is never claimed here**,
+    /// even though its claim has lapsed and it is otherwise the next in line. Its
+    /// deliveries are spent, so handing it out would be the delivery the policy exists to
+    /// prevent — and a consumer that received it would either fail again or succeed on an
+    /// attempt it was not entitled to. [`Store::claim_exhausted`] is how such a message
+    /// leaves the queue.
     async fn claim_next_skipping(
         &self,
         queue: &QueueName,
         visibility_timeout: Option<Duration>,
         skip: &[MessageId],
     ) -> Result<Option<ClaimedMessage>>;
+
+    /// Take messages out of circulation so a caller can move them to another queue.
+    ///
+    /// The storage half of both directions of dead-lettering: `Movable::Exhausted` is what
+    /// a sweep moves *into* a dead-letter queue, and `Movable::Everything` is what a
+    /// redrive moves back *out* of one. One method rather than two because they differ
+    /// only in which messages qualify — everything else about them, and everything that is
+    /// easy to get wrong, is shared.
+    ///
+    /// Only messages that are **claimable right now** are ever taken. For
+    /// `Movable::Exhausted` that is what makes it correct rather than merely eager: a
+    /// message in the middle of its last delivery has an exhausted count and a consumer
+    /// that may still acknowledge it, and taking it would dead-letter work that succeeded.
+    /// For `Movable::Everything` it means a redrive leaves in-flight messages where they
+    /// are rather than pulling them out from under their consumers — so a redrive moves
+    /// what the queue was holding, which is approximate in exactly the way SQS's own
+    /// counts are.
+    ///
+    /// Returns at most `limit` messages, **hidden for `hold` under a fresh receipt handle
+    /// exactly as [`Store::claim_next_skipping`] hides one** — so a concurrent receive
+    /// cannot be handed a message that is on its way out, two movers cannot move the same
+    /// message twice, and a caller that dies mid-move leaves the message to be found again
+    /// rather than stranded. The mover finishes with [`Store::ack`], which is why these
+    /// come back as [`ClaimedMessage`]s.
+    ///
+    /// **This is not a delivery**, so it does not increment the receive count or set the
+    /// first-delivery time. A message that reaches its dead-letter queue reporting one
+    /// more delivery than the policy allowed would be reporting a delivery that never
+    /// happened, and a message redriven out of one would come back having burned an
+    /// attempt on being rescued.
+    ///
+    /// Why the move itself is not a [`Store`] operation: a dead-letter queue may live on a
+    /// different backend from its source — a queue on `memory` with its DLQ on something
+    /// durable is the configuration this exists for — so no single store can see both ends.
+    /// The engine does the move, and this is the half only one end can do.
+    async fn claim_for_move(
+        &self,
+        queue: &QueueName,
+        movable: Movable,
+        hold: Duration,
+        limit: usize,
+    ) -> Result<Vec<ClaimedMessage>>;
 
     /// Delete a claimed message, ending the claim for good.
     ///
